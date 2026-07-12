@@ -166,6 +166,43 @@ SEXP C_fold_in(SEXP key, SEXP identity) {
 
 typedef enum { DRAW_BITS, DRAW_UNIF, DRAW_NORM } draw_kind;
 
+/*
+ * Gather loop for arbitrary index/domain vectors, stamped once per draw
+ * kind (like fill_seq_*) so no per-value dispatch survives. The block
+ * cache makes contiguous stretches cost ~1 Philox call per 4 values;
+ * correctness never depends on it -- value(index) is a pure function of
+ * (index & 3) and the block at (index >> 2, domain) -- it only skips
+ * recomputation.
+ */
+#define RNGAT_DEFINE_FILL_AT(SUFFIX, EMIT)                                   \
+static void fill_at_##SUFFIX(double *out, R_xlen_t n, philox4x64_key_t k,   \
+                             num_vec iv, num_vec dv,                         \
+                             uint64_t idx0, uint64_t dom0) {                 \
+    int idx_scalar = (iv.n == 1), dom_scalar = (dv.n == 1);                  \
+    philox4x64_ctr_t block = {{0, 0, 0, 0}};                                 \
+    uint64_t cur_bidx = 0, cur_dom = 0;                                      \
+    int have = 0;                                                            \
+    for (R_xlen_t i = 0; i < n; i++) {                                       \
+        uint64_t idx = idx_scalar ? idx0 : num_vec_get(iv, i, "index");      \
+        uint64_t dom = dom_scalar ? dom0 : num_vec_get(dv, i, "domain");     \
+        uint64_t bidx = idx >> 2;                                            \
+        unsigned w = (unsigned)(idx & 3u);                                   \
+        if (!have || bidx != cur_bidx || dom != cur_dom) {                   \
+            block = rngat_block(k, bidx, dom, RNGAT_PURPOSE_DRAW);           \
+            cur_bidx = bidx; cur_dom = dom; have = 1;                        \
+        }                                                                    \
+        out[i] = EMIT(block.v[w]);                                           \
+    }                                                                        \
+}
+
+#define RNGAT_EMIT_BITS(bits) ((double)(uint32_t)(bits))
+#define RNGAT_EMIT_UNIF(bits) u01_open(bits)
+#define RNGAT_EMIT_NORM(bits) qnorm(u01_open(bits), 0.0, 1.0, TRUE, FALSE)
+
+RNGAT_DEFINE_FILL_AT(bits, RNGAT_EMIT_BITS)
+RNGAT_DEFINE_FILL_AT(unif, RNGAT_EMIT_UNIF)
+RNGAT_DEFINE_FILL_AT(norm, RNGAT_EMIT_NORM)
+
 static SEXP draw_at(SEXP key, SEXP index, SEXP domain, draw_kind kind) {
     philox4x64_key_t k = key_from_sexp(key);
     num_vec iv = num_vec_open(index, "index");
@@ -182,37 +219,15 @@ static SEXP draw_at(SEXP key, SEXP index, SEXP domain, draw_kind kind) {
     double *out = REAL(ans);
 
     /* Scalar operands are read and validated once, outside the loop. */
-    int idx_scalar = (ni == 1), dom_scalar = (nd == 1);
-    uint64_t idx0 = idx_scalar && n ? num_vec_get(iv, 0, "index") : 0;
-    uint64_t dom0 = dom_scalar && n ? num_vec_get(dv, 0, "domain") : 0;
+    uint64_t idx0 = (ni == 1) && n ? num_vec_get(iv, 0, "index") : 0;
+    uint64_t dom0 = (nd == 1) && n ? num_vec_get(dv, 0, "domain") : 0;
 
-    /*
-     * Cache the most recent Philox block: consecutive logical positions
-     * that fall in the same (block, domain) reuse it, so a contiguous run
-     * costs ~1 Philox evaluation per 4 values. Correctness never depends
-     * on the cache -- value(index) is a pure function of (index & 3) and
-     * the block at (index >> 2, domain) -- it only skips recomputation.
-     */
-    philox4x64_ctr_t block = {{0, 0, 0, 0}};
-    uint64_t cur_bidx = 0, cur_dom = 0;
-    int have = 0;
-
-    for (R_xlen_t i = 0; i < n; i++) {
-        uint64_t idx = idx_scalar ? idx0 : num_vec_get(iv, i, "index");
-        uint64_t dom = dom_scalar ? dom0 : num_vec_get(dv, i, "domain");
-        uint64_t bidx = idx >> 2;
-        unsigned w = (unsigned)(idx & 3u);
-        if (!have || bidx != cur_bidx || dom != cur_dom) {
-            block = rngat_block(k, bidx, dom, RNGAT_PURPOSE_DRAW);
-            cur_bidx = bidx; cur_dom = dom; have = 1;
-        }
-        uint64_t bits = block.v[w];
-        switch (kind) {
-        case DRAW_BITS: out[i] = (double)(uint32_t)bits; break;
-        case DRAW_UNIF: out[i] = u01_open(bits); break;
-        case DRAW_NORM: out[i] = qnorm(u01_open(bits), 0.0, 1.0, TRUE, FALSE); break;
-        }
+    switch (kind) {
+    case DRAW_BITS: fill_at_bits(out, n, k, iv, dv, idx0, dom0); break;
+    case DRAW_UNIF: fill_at_unif(out, n, k, iv, dv, idx0, dom0); break;
+    case DRAW_NORM: fill_at_norm(out, n, k, iv, dv, idx0, dom0); break;
     }
+
     UNPROTECT(1);
     return ans;
 }
@@ -250,10 +265,6 @@ static void fill_seq_##SUFFIX(double *out, R_xlen_t n, philox4x64_key_t k,  \
         for (unsigned w = 0; i < n; w++, i++) out[i] = EMIT(b.v[w]);         \
     }                                                                        \
 }
-
-#define RNGAT_EMIT_BITS(bits) ((double)(uint32_t)(bits))
-#define RNGAT_EMIT_UNIF(bits) u01_open(bits)
-#define RNGAT_EMIT_NORM(bits) qnorm(u01_open(bits), 0.0, 1.0, TRUE, FALSE)
 
 RNGAT_DEFINE_FILL_SEQ(bits, RNGAT_EMIT_BITS)
 RNGAT_DEFINE_FILL_SEQ(unif, RNGAT_EMIT_UNIF)
