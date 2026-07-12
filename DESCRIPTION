@@ -1,9 +1,15 @@
 Package: rngat
-Title: What the Package Does (One Line, Title Case)
+Title: Random Access Random Numbers via Counter-Based Generation
 Version: 0.0.0.9000
 Authors@R: 
     person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
-Description: What the package does (one paragraph).
+Description: Deterministic random access random number generation using the
+    Philox counter-based generator from the 'Random123' library by Salmon,
+    Moraes, Dror and Shaw (2011) <doi:10.1145/2063384.2063405>. Random values
+    are addressed by a key, an index and an optional domain instead of being
+    produced from mutable generator state, so any value can be recomputed
+    independently, in any order, on any platform. Independent keys for
+    substreams can be derived deterministically with fold_in().
 License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
     license
 Encoding: UTF-8
