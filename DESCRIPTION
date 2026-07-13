@@ -1,15 +1,14 @@
 Package: rngat
-Title: Random Access Random Numbers via Counter-Based Generation
+Title: Stateless Random Numbers via Counter-Based Generation
 Version: 0.0.0.9000
 Authors@R: 
     person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
-Description: Deterministic random access random number generation using the
-    Philox counter-based generator from the 'Random123' library by Salmon,
-    Moraes, Dror and Shaw (2011) <doi:10.1145/2063384.2063405>. Random values
-    are addressed by a key, an index and an optional domain instead of being
-    produced from mutable generator state, so any value can be recomputed
-    independently, in any order, on any platform. Independent keys for
-    substreams can be derived deterministically with fold_in().
+Description: Stateless deterministic random number generation using the Philox
+    counter-based generator from the 'Random123' library by Salmon, Moraes,
+    Dror and Shaw (2011) <doi:10.1145/2063384.2063405>. Random values are pure
+    functions of immutable keys and sampler arguments, so sampling never reads
+    or mutates '.Random.seed'. Independent substreams are requested as key
+    vectors with rng_key(seed, n) or derived explicitly with rng_fold().
 License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
     license
 Encoding: UTF-8

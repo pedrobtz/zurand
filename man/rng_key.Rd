@@ -2,37 +2,61 @@
 % Please edit documentation in R/rngat.R
 \name{rng_key}
 \alias{rng_key}
-\alias{format.rngat_key}
-\alias{print.rngat_key}
-\title{Create a random number generator key}
+\alias{format.rng_key}
+\alias{print.rng_key}
+\alias{length.rng_key}
+\alias{[.rng_key}
+\alias{[[.rng_key}
+\alias{c.rng_key}
+\title{Create a stateless RNG key}
 \usage{
-rng_key(seed)
+rng_key(seed, n = 1L, engine = "philox4x64")
 
-\method{format}{rngat_key}(x, ...)
+\method{format}{rng_key}(x, ...)
 
-\method{print}{rngat_key}(x, ...)
+\method{print}{rng_key}(x, ...)
+
+\method{length}{rng_key}(x)
+
+\method{[}{rng_key}(x, i, ..., drop = FALSE)
+
+\method{[[}{rng_key}(x, i, ...)
+
+\method{c}{rng_key}(..., recursive = FALSE)
 }
 \arguments{
-\item{seed}{A single whole number.}
+\item{seed}{A single non-negative whole number.}
 
-\item{x}{An \code{rngat_key}.}
+\item{n}{A single non-negative whole number: how many keys to create.}
+
+\item{engine}{The counter-based engine to use. Currently only
+\code{"philox4x64"} is implemented.}
+
+\item{x}{An \code{rng_key}.}
 
 \item{...}{Unused.}
+
+\item{i}{Integer, logical or character row index selecting keys.}
+
+\item{drop}{Ignored; key subsetting always preserves the \code{rng_key} class.}
+
+\item{recursive}{Ignored. Included for compatibility with \code{\link[=c]{c()}}.}
 }
 \value{
-A 128-bit key of class \code{rngat_key}.
+An object of class \code{rng_key} containing \code{n} keys.
 }
 \description{
-An \code{rngat_key} identifies an independent random stream. Together with an
-index (and optionally a domain) it fully determines every value returned
-by \code{\link[=bits_at]{bits_at()}}, \code{\link[=runif_at]{runif_at()}} and \code{\link[=rnorm_at]{rnorm_at()}}: no state is kept or
-advanced. Keys are 16-byte raw vectors and can be stored, compared and
-serialized; the byte layout is platform independent.
+\code{rng_key()} creates immutable keys for the stateless generators in this
+package. A key vector is an opaque S3 object with one key per row; pass it to
+\code{\link[=rng_fold]{rng_fold()}} and the \verb{rng_*()} samplers, but do not rely on its
+internal integer representation.
+}
+\details{
+The samplers in this package never read or update \code{.Random.seed}. Calling a
+sampler twice with the same key and arguments returns the same values.
 }
 \examples{
-key <- rng_key(42)
+key <- rng_key(42L)
+keys <- rng_key(42L, n = 4L)
 key
-}
-\seealso{
-\code{\link[=fold_in]{fold_in()}} to derive new keys, \code{\link[=runif_at]{runif_at()}} for drawing values.
 }

@@ -1,139 +1,215 @@
-#' Create a random number generator key
+#' Create a stateless RNG key
 #'
-#' An `rngat_key` identifies an independent random stream. Together with an
-#' index (and optionally a domain) it fully determines every value returned
-#' by [bits_at()], [runif_at()] and [rnorm_at()]: no state is kept or
-#' advanced. Keys are 16-byte raw vectors and can be stored, compared and
-#' serialized; the byte layout is platform independent.
+#' `rng_key()` creates immutable keys for the stateless generators in this
+#' package. A key vector is an opaque S3 object with one key per row; pass it to
+#' [rng_fold()] and the `rng_*()` samplers, but do not rely on its internal
+#' integer representation.
 #'
-#' @param seed A single whole number.
-#' @return A 128-bit key of class `rngat_key`.
-#' @seealso [fold_in()] to derive new keys, [runif_at()] for drawing values.
+#' The samplers in this package never read or update `.Random.seed`. Calling a
+#' sampler twice with the same key and arguments returns the same values.
+#'
+#' @param seed A single non-negative whole number.
+#' @param n A single non-negative whole number: how many keys to create.
+#' @param engine The counter-based engine to use. Currently only
+#'   `"philox4x64"` is implemented.
+#' @return An object of class `rng_key` containing `n` keys.
 #' @export
 #' @examples
-#' key <- rng_key(42)
+#' key <- rng_key(42L)
+#' keys <- rng_key(42L, n = 4L)
 #' key
-rng_key <- function(seed) {
-  .Call(C_rng_key, seed)
+rng_key <- function(seed, n = 1L, engine = "philox4x64") {
+  engine <- match.arg(engine)
+  .Call(C_rng_key, seed, n, engine)
 }
 
-#' Derive a new key by folding data into an existing key
+#' Create a key from R's RNG
 #'
-#' Deterministically derives a new, statistically independent key from
-#' `key` and `identity`. Use this to give substreams of a computation
-#' (chains, workers, blocks) their own keys without coordinating between
-#' them: `fold_in(key, i)` for distinct `i` yield unrelated streams.
+#' `rng_key_from_r()` is the one convenience function in this package that
+#' intentionally consumes R's global RNG state. Use it when you want a fresh
+#' stateless key from the current `.Random.seed`; all other functions in this
+#' package leave `.Random.seed` untouched.
 #'
-#' Key derivation is domain-separated from value draws: keys produced by
-#' `fold_in(key, i)` share no bits with values drawn at index `i`.
+#' @inheritParams rng_key
+#' @return An object of class `rng_key` containing `n` keys.
+#' @export
+rng_key_from_r <- function(n = 1L, engine = "philox4x64") {
+  engine <- match.arg(engine)
+  .Call(C_rng_key_from_r, n, engine)
+}
+
+#' Fold data into a key
 #'
-#' @param key An `rngat_key`, from [rng_key()] or [fold_in()].
-#' @param identity A single whole number distinguishing the derived key.
-#' @return A new `rngat_key`.
+#' `rng_fold()` deterministically derives a key from `key` and simple data.
+#' This is useful for structured reproducibility, for example deriving a key
+#' from names such as `"chain 3"` or counters such as `10L`.
+#'
+#' @param key An `rng_key` vector.
+#' @param data A character, integer, double, logical or raw vector. Numeric
+#'   values must be whole numbers.
+#' @return An `rng_key` vector with the same length as `key`.
 #' @export
 #' @examples
-#' key <- rng_key(42)
-#' chain_keys <- lapply(1:4, function(i) fold_in(key, i))
-fold_in <- function(key, identity) {
-  .Call(C_fold_in, key, identity)
+#' key <- rng_key(42L)
+#' layer_key <- rng_fold(key, "layer1")
+rng_fold <- function(key, data) {
+  .Call(C_rng_fold, key, data)
 }
 
-#' Draw random values at arbitrary indices
+#' Draw uniform random values
 #'
-#' Random access random numbers: each value is a pure function of
-#' `(key, index, domain)`, computed with the Philox4x64-10 counter-based
-#' generator from the Random123 library. Evaluating the same triple always
-#' gives the same value, in any order, on any platform — there is no
-#' generator state to set, advance or restore.
+#' Stateless uniform sampling. `rng_uniform(key, n, min, max)` is a pure
+#' function of its arguments and returns ordinary numeric vectors or matrices.
 #'
-#' * `bits_at()` returns raw random bits as a 32-bit unsigned integer
-#'   value (stored in a double, range 0 to 2^32 - 1).
-#' * `runif_at()` returns doubles strictly inside (0, 1), built from the
-#'   top 53 bits of the generator output.
-#' * `rnorm_at()` returns standard normal deviates via inversion, so
-#'   `rnorm_at(k, i)` is identical to `qnorm(runif_at(k, i))`.
-#'
-#' @param key An `rngat_key`, from [rng_key()] or [fold_in()].
-#' @param index Vector of whole numbers: the positions to evaluate.
-#' @param domain Optional vector of whole numbers selecting an independent
-#'   stream for the same indices (default `NULL` is domain 0). Either a
-#'   single value or the same length as `index`.
-#' @return A double vector as long as `index` (or `domain`, if `index`
-#'   has length 1).
+#' @param key An `rng_key` vector.
+#' @param n A single non-negative whole number. Defaults to one draw per key.
+#' @param min,max Single finite numeric bounds.
+#' @return A numeric vector of length `n` for one key, or an `n` by
+#'   `length(key)` numeric matrix for multiple keys.
 #' @export
 #' @examples
-#' key <- rng_key(42)
-#' runif_at(key, 1:5)
-#' runif_at(key, 3)              # element 3, without generating 1:2
-#' runif_at(key, 1:5, domain = 1) # an unrelated stream at the same indices
-#' rnorm_at(key, 1:5)
-bits_at <- function(key, index, domain = NULL) {
-  .Call(C_bits_at, key, index, if (is.null(domain)) 0 else domain)
+#' key <- rng_key(42L)
+#' rng_uniform(key)
+#' rng_uniform(key, 5L)
+#' rng_uniform(rng_key(42L, n = 3L), 5L)
+rng_uniform <- function(key, n = 1L, min = 0, max = 1) {
+  .Call(C_rng_uniform, key, n, min, max)
 }
 
-#' @rdname bits_at
-#' @export
-runif_at <- function(key, index, domain = NULL) {
-  .Call(C_runif_at, key, index, if (is.null(domain)) 0 else domain)
-}
-
-#' @rdname bits_at
-#' @export
-rnorm_at <- function(key, index, domain = NULL) {
-  .Call(C_rnorm_at, key, index, if (is.null(domain)) 0 else domain)
-}
-
-#' Draw a contiguous run of random values
+#' Draw normal random values
 #'
-#' Sequential fast path for the common case of a block of consecutive
-#' indices: `runif_seq(key, start, len)` returns exactly
-#' `runif_at(key, start + 0:(len - 1))` — bit for bit the same values —
-#' but without building, reading or validating an index vector, and
-#' emitting four values per Philox call throughout. Use it for bulk
-#' generation; use the `*_at()` forms for scattered indices.
+#' Stateless normal sampling. `rng_normal(key, n, mean, sd)` is a pure function
+#' of its arguments and returns ordinary numeric vectors or matrices.
 #'
-#' There is deliberately no `by` argument: strides of 4 or more share no
-#' Philox blocks, so a strided draw has no fast path — write it as
-#' `runif_at(key, seq(start, by = ..., length.out = ...))` instead.
-#'
-#' @inheritParams bits_at
-#' @param start A single whole number: the first index of the run.
-#' @param len A single non-negative whole number: how many values.
-#' @param domain Optional single whole number selecting an independent
-#'   stream (default `NULL` is domain 0).
-#' @return A double vector of length `len`.
+#' @inheritParams rng_uniform
+#' @param mean A single finite numeric mean.
+#' @param sd A single non-negative finite numeric standard deviation.
+#' @return A numeric vector of length `n` for one key, or an `n` by
+#'   `length(key)` numeric matrix for multiple keys.
 #' @export
 #' @examples
-#' key <- rng_key(42)
-#' identical(runif_seq(key, 1, 10), runif_at(key, 1:10))
-#' runif_seq(key, 1e6, 5)   # 5 values starting at index 1e6
-bits_seq <- function(key, start, len, domain = NULL) {
-  .Call(C_bits_seq, key, start, len, if (is.null(domain)) 0 else domain)
+#' key <- rng_key(42L)
+#' rng_normal(key)
+#' rng_normal(key, 5L)
+rng_normal <- function(key, n = 1L, mean = 0, sd = 1) {
+  .Call(C_rng_normal, key, n, mean, sd)
 }
 
-#' @rdname bits_seq
+#' Draw integer random values
+#'
+#' Stateless integer sampling over the inclusive range `[min, max]`.
+#'
+#' @inheritParams rng_uniform
+#' @param min,max Single whole-number bounds in R's non-missing integer range.
+#' @return An integer vector of length `n` for one key, or an `n` by
+#'   `length(key)` integer matrix for multiple keys.
 #' @export
-runif_seq <- function(key, start, len, domain = NULL) {
-  .Call(C_runif_seq, key, start, len, if (is.null(domain)) 0 else domain)
+#' @examples
+#' key <- rng_key(42L)
+#' rng_integer(key, min = 1L, max = 6L)
+#' rng_integer(key, 10L, min = 1L, max = 6L)
+rng_integer <- function(key, n = 1L, min, max) {
+  if (missing(min) || missing(max)) {
+    stop("`min` and `max` are required", call. = FALSE)
+  }
+  .Call(C_rng_integer, key, n, min, max)
 }
 
-#' @rdname bits_seq
+#' Draw low-level random bits
+#'
+#' `rng_bits()` exposes the raw generator stream. With `bits = 32`, it returns
+#' unsigned 32-bit words stored exactly in a numeric vector. With `bits = 64`,
+#' it returns fixed-width hexadecimal strings so no bits are lost to R's
+#' numeric representation.
+#'
+#' @inheritParams rng_uniform
+#' @param bits Either `32L` or `64L`.
+#' @return A numeric vector or matrix for 32-bit words, or a character vector
+#'   or matrix for 64-bit words.
 #' @export
-rnorm_seq <- function(key, start, len, domain = NULL) {
-  .Call(C_rnorm_seq, key, start, len, if (is.null(domain)) 0 else domain)
+#' @examples
+#' key <- rng_key(42L)
+#' rng_bits(key)
+#' rng_bits(key, 5L)
+rng_bits <- function(key, n = 1L, bits = 32L) {
+  .Call(C_rng_bits, key, n, bits)
 }
 
 #' @rdname rng_key
-#' @param x An `rngat_key`.
+#' @param x An `rng_key`.
 #' @param ... Unused.
 #' @export
-format.rngat_key <- function(x, ...) {
-  paste(format(unclass(x)), collapse = "")
+format.rng_key <- function(x, ...) {
+  .Call(C_rng_key_format, x)
 }
 
 #' @rdname rng_key
 #' @export
-print.rngat_key <- function(x, ...) {
-  cat("<rngat_key> ", format(x), "\n", sep = "")
+print.rng_key <- function(x, ...) {
+  n <- length(x)
+  fp <- format(x)
+  if (n == 1L) {
+    cat("<rng_key> ", fp, "\n", sep = "")
+  } else {
+    cat("<rng_key[", n, "]>\n", sep = "")
+    fp <- sub("^rng_key\\[([0-9a-f]{12})[0-9a-f]+\\]$", "rng_key[\\1...]", fp)
+    show <- min(n, 5L)
+    for (i in seq_len(show)) cat("[", i, "] ", fp[[i]], "\n", sep = "")
+    if (n > show) cat("... ", n - show, " more\n", sep = "")
+  }
   invisible(x)
+}
+
+#' @rdname rng_key
+#' @export
+length.rng_key <- function(x) {
+  nrow(unclass(x))
+}
+
+#' @rdname rng_key
+#' @param i Integer, logical or character row index selecting keys.
+#' @param drop Ignored; key subsetting always preserves the `rng_key` class.
+#' @export
+`[.rng_key` <- function(x, i, ..., drop = FALSE) {
+  words <- unclass(x)
+  if (missing(i)) i <- seq_len(nrow(words))
+  out <- words[i, , drop = FALSE]
+  class(out) <- "rng_key"
+  attr(out, "engine") <- attr(x, "engine", exact = TRUE)
+  out
+}
+
+#' @rdname rng_key
+#' @export
+`[[.rng_key` <- function(x, i, ...) {
+  x[i]
+}
+
+#' @rdname rng_key
+#' @param recursive Ignored. Included for compatibility with [c()].
+#' @export
+c.rng_key <- function(..., recursive = FALSE) {
+  dots <- Filter(Negate(is.null), list(...))
+  if (!length(dots)) {
+    out <- matrix(integer(), nrow = 0L, ncol = 4L)
+    class(out) <- "rng_key"
+    attr(out, "engine") <- "philox4x64"
+    return(out)
+  }
+
+  ok <- vapply(dots, inherits, logical(1), "rng_key")
+  if (!all(ok)) {
+    stop("all inputs to `c.rng_key()` must be <rng_key> objects", call. = FALSE)
+  }
+
+  engines <- vapply(dots, attr, character(1), "engine", exact = TRUE)
+  if (length(unique(engines)) != 1L) {
+    stop("all keys must use the same engine", call. = FALSE)
+  }
+
+  out <- do.call(rbind, lapply(dots, unclass))
+  dimnames(out) <- NULL
+  class(out) <- "rng_key"
+  attr(out, "engine") <- engines[[1L]]
+  out
 }

@@ -6,6 +6,6 @@ y <- rngat::rng_key(123)
 
 res <- bench::mark(
   check = F,
-  rngat = rngat::runif_seq(y, start = 1, len = 1e6),
+  rngat = rngat::rng_uniform(y, n = 1e6),
   randompack = x$unif(len = 1e6),
 )

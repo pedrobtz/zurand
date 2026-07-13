@@ -4,9 +4,9 @@
 \name{rngat-package}
 \alias{rngat}
 \alias{rngat-package}
-\title{rngat: Random Access Random Numbers via Counter-Based Generation}
+\title{rngat: Stateless Random Numbers via Counter-Based Generation}
 \description{
-Deterministic random access random number generation using the Philox counter-based generator from the 'Random123' library by Salmon, Moraes, Dror and Shaw (2011) \doi{10.1145/2063384.2063405}. Random values are addressed by a key, an index and an optional domain instead of being produced from mutable generator state, so any value can be recomputed independently, in any order, on any platform. Independent keys for substreams can be derived deterministically with fold_in().
+Stateless deterministic random number generation using the Philox counter-based generator from the 'Random123' library by Salmon, Moraes, Dror and Shaw (2011) \doi{10.1145/2063384.2063405}. Random values are pure functions of immutable keys and sampler arguments, so sampling never reads or mutates \code{.Random.seed}. Independent substreams are requested as key vectors with \code{rng_key(seed, n)} or derived explicitly with \code{rng_fold()}.
 }
 \author{
 \strong{Maintainer}: First Last \email{first.last@example.com}

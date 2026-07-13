@@ -130,17 +130,18 @@ These exist to plug into Random123's C++ adapter headers (`MicroURNG.hpp`, `unif
 ```c
 #include "Random123/philox.h"
 
-philox4x64_key_t k = {{seed, 0}};                /* 128-bit key: word 0 = seed, word 1 = 0   */
+philox4x64_key_t k = {{key0, key1}};             /* 128-bit key: two uint64 words             */
 philox4x64_ctr_t c = {{index, domain, purpose, 0}}; /* 256-bit counter, one meaning per word  */
 philox4x64_ctr_t r = philox4x64(c, k);           /* 10 rounds; r is a fresh struct            */
 /* r.v[0], r.v[1], r.v[2], r.v[3] are 4 independent uniform uint64s */
 ```
 
-This is essentially the construction rngat uses (see `rngat_block()` in [src/rngat.c](../src/rngat.c)); the one refinement is that rngat packs **four** logical draws into each block instead of using only `r.v[0]` (see below). The R-facing consequences:
+This is essentially the construction rngat uses (see `rngat_block()` in [src/rngat.c](../src/rngat.c)); the one refinement is that rngat packs **four** logical output positions into each block instead of using only `r.v[0]` (see below). The R-facing consequences:
 
-- `runif_at(key, index, domain)` evaluates the block at `{index >> 2, domain, 0, 0}`, picks word `index & 3`, and turns its top 53 bits into a double in (0, 1) — 53 because that is the precision of an R double's mantissa.
-- `fold_in(key, id)` evaluates the block at `{id, 0, 1, 0}` — the third word (*purpose* = 1 instead of 0) guarantees derived keys can never overlap the bits used for draws — and uses `r.v[0]`, `r.v[1]` as the new 128-bit key.
-- An `rngat_key` in R is just the two key words written out as 16 raw bytes (in a fixed byte order, so keys travel across machines).
+- `rng_uniform(key, n)` evaluates output positions `0:(n - 1)` under the uniform purpose, picks word `position & 3`, and turns the top 53 bits into a double in (0, 1) — 53 because that is the precision of an R double's mantissa.
+- `rng_normal()`, `rng_integer()` and `rng_bits()` use the same position layout but separate purpose values, so accidental reuse of the same key across sampler families does not read the identical counter slice.
+- `rng_fold(key, data)` hashes typed data to a 64-bit value, evaluates a fold-purpose block, and uses `r.v[0]`, `r.v[1]` as the derived key.
+- An `rng_key` in R is an opaque integer matrix with one key per row and four 32-bit words per key: `{k0 low, k0 high, k1 low, k1 high}`. The C code copies these by bit pattern because R's integer type is signed and reserves one bit pattern for `NA`.
 
 ## How rngat lays out the counter
 
@@ -148,42 +149,40 @@ Philox itself attaches no meaning to the counter — it is just 256 bits of inpu
 
 | Word | Name | Set by | Meaning |
 |---|---|---|---|
-| `v[0]` | block index | user, as `index >> 2` (or `identity` for `fold_in`) | which 4-value block |
-| `v[1]` | `domain` | user (`domain` argument, default 0) | which parallel stream at the same indices |
-| `v[2]` | `purpose` | internal, never user-visible | what *kind* of question is being asked |
-| `v[3]` | — | fixed 0 | reserved for future extensions |
+| `v[0]` | block index | output position `>> 2` or fold hash | which 4-word block |
+| `v[1]` | domain | usually 0; integer rejection attempt; fold domain | independent subspace for the same block index |
+| `v[2]` | purpose | internal, never user-visible | what kind of question is being asked |
+| `v[3]` | reserved | fixed 0 | reserved for future extensions |
 
-`index` and `domain` are the user-facing coordinates: think of `(index, domain)` as addressing a cell in a 2⁶⁴ × 2⁶⁴ grid of pre-computed random values, any cell readable in any order.
+The public API no longer exposes arbitrary counters. Users pass immutable key vectors plus sampler arguments; samplers internally use output positions `0:(n - 1)` as the counter coordinate for each key. Samplers default to `n = 1L`; with one key they return a plain vector, and with multiple keys they return an `n x length(key)` matrix, including a `1 x K` matrix for one draw per key. Users derive independent streams explicitly with `rng_key(seed, n)` or `rng_fold()`.
 
 ### Four values per block
 
-A `philox4x64` call produces 256 bits — four `uint64` words — but a single uniform or normal draw needs only 53 bits. Using just `r.v[0]` and discarding the other three words would waste ¾ of the generator's work. Instead rngat maps four consecutive logical positions onto one block:
+A `philox4x64` call produces 256 bits — four `uint64` words — but a single uniform or normal draw needs only 53 bits. Using just `r.v[0]` and discarding the other three words would waste 3/4 of the generator's work. Instead rngat maps four consecutive logical positions onto one block:
 
 ```
-value(index, domain) = word (index & 3) of philox( {index >> 2, domain, purpose, 0}, key )
+word_at(position, purpose) =
+  word (position & 3) of philox( {position >> 2, domain, purpose, 0}, key )
 ```
 
-So `index` is split into a **block number** (`index >> 2`, i.e. `index / 4`) placed in the counter, and a **word selector** (`index & 3`, i.e. `index % 4`) choosing which of the block's four words to return. Value #*i* is still an O(1) pure function of *i* — reproducible in any order, on any platform — but a contiguous run such as `runif_at(key, 1:1e6)` now costs about one Philox evaluation per **four** values. The C loop caches the most recently computed block, so neighbouring indices that share a block skip recomputation entirely; scattered indices simply fall back to one block each (never worse than before). This is the standard Random123 idiom (it is exactly what a sequential fill loop does — see randompack's `fill_philox`) and, because Philox's four output words are mutually independent, it changes none of the statistical guarantees.
+So `position` is split into a **block number** (`position >> 2`, i.e. `position / 4`) placed in the counter, and a **word selector** (`position & 3`, i.e. `position % 4`) choosing which of the block's four words to return. A contiguous sampler call such as `rng_uniform(key, 1e6)` costs about one Philox evaluation per **four** values. This is the standard Random123 idiom (it is exactly what a sequential fill loop does — see randompack's `fill_philox`) and, because Philox's four output words are mutually independent, it changes none of the statistical guarantees.
 
 ### The `purpose` word: domain separation
 
-`purpose` (constants `RNGAT_PURPOSE_*` in [src/rngat.c](../src/rngat.c)) partitions the counter space by *use*:
+`purpose` (constants `RNGAT_PURPOSE_*` in [src/rngat.c](../src/rngat.c)) partitions the counter space by use:
 
 | Value | Constant | Used by |
 |---|---|---|
-| 0 | `RNGAT_PURPOSE_DRAW` | `bits_at()`, `runif_at()`, `rnorm_at()` |
-| 1 | `RNGAT_PURPOSE_FOLD` | `fold_in()` |
+| 0 | `RNGAT_PURPOSE_BITS` | `rng_bits()` |
+| 1 | `RNGAT_PURPOSE_UNIFORM` | `rng_uniform()` |
+| 2 | `RNGAT_PURPOSE_NORMAL` | `rng_normal()` |
+| 3 | `RNGAT_PURPOSE_INTEGER` | `rng_integer()` |
+| 4 | `RNGAT_PURPOSE_FOLD` | `rng_fold()` |
 
-**The bug it prevents.** Suppose `fold_in` simply evaluated Philox at `{id, 0, 0, 0}` — a counter in the same `purpose = 0` region that value draws use. Block `id` is exactly the block behind draws at indices `4*id … 4*id + 3` (domain 0), so `fold_in(key, id)` and those draws would read the *identical* output block:
+**The bug it prevents.** Suppose `rng_fold()` simply evaluated Philox in the same purpose region that value draws use. Folded keys would be made from output words that a sampler could also expose through `rng_bits()` or transform through `rng_uniform()`. Anything downstream of the derived key would then be correlated with visible draws from the parent key — a subtle, hard-to-detect statistical defect. With a distinct fold purpose, key derivation reads from a disjoint region of counter space.
 
-```
-fold_in(key, 2)        -> new key = {r.v[0], r.v[1]}   (first 128 bits of block 2)
-bits_at(key, 8)        ->  value  =  r.v[0]            (word 0 of block 2 -- the same 64 bits!)
-bits_at(key, 9)        ->  value  =  r.v[1]            (word 1 of block 2 -- also shared!)
-```
+The same logic applies to distribution families. Domain-separated purposes make accidental key reuse less likely to produce identical raw streams across different operations. This mirrors what cryptographers call domain separation, the same reason protocols prefix hash inputs with distinct tags.
 
-The words of your derived key would literally *be* values you might also draw and print. Anything downstream of the derived key would be correlated with those draws — a subtle, hard-to-detect statistical defect. With `purpose = 1`, `fold_in` reads from a provably disjoint region of counter space: no output block is ever shared between key derivation and value draws, whatever `index`, `domain` or `identity` the user picks. (This mirrors what cryptographers call *domain separation*, the same reason protocols prefix hash inputs with distinct tags.)
+**Extensibility.** The word also leaves room to grow: a future feature that needs its own dedicated bit-stream — say, a distribution that consumes more than 64 bits per variate, or an internal shuffling primitive — can claim a fresh `purpose` value and is automatically independent of everything already defined. The fixed `v[3] = 0` word is the same idea held in reserve: one entire spare 64-bit dimension, at zero cost.
 
-**Extensibility.** The word also leaves room to grow: a future feature that needs its own dedicated bit-stream — say, a distribution that consumes more than 64 bits per variate, or an internal shuffling primitive — can claim `purpose = 2, 3, …` and is automatically independent of everything already defined. Because existing draws all live in the `purpose = 0` slice (and folds in `purpose = 1`), new purposes can be added without changing a single value the package produces today. The fixed `v[3] = 0` word is the same idea held in reserve: one entire spare 64-bit dimension, at zero cost.
-
-**Rule for contributors:** any new use of `rngat_block()` that is not an ordinary value draw must use a fresh `purpose` value, never reuse 0 or 1.
+**Rule for contributors:** any new use of `rngat_block()` must use a purpose value that matches its operation. A new operation gets a fresh purpose.
