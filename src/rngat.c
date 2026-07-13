@@ -1,12 +1,12 @@
 #define R_NO_REMAP
 #include <R.h>
 #include <Rinternals.h>
-#include <Rmath.h>
 #include <R_ext/Rdynload.h>
 #include <R_ext/Random.h>
 #include <stdint.h>
 #include <inttypes.h>
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #ifdef _OPENMP
@@ -43,6 +43,7 @@
 #define RNGAT_PURPOSE_FOLD    ((uint64_t)4)
 
 #define RNGAT_OMP_MIN_VALUES ((R_xlen_t)32768)
+#define RNGAT_TWO_PI 6.28318530717958647692528676655900576839433879875021
 
 /* ---- key representation ---- */
 
@@ -56,9 +57,11 @@ static void check_engine(SEXP engine) {
         Rf_error("`engine` must be \"%s\"", RNGAT_ENGINE);
 }
 
-static uint32_t load_word_at(SEXP x, R_xlen_t nkey, R_xlen_t i, int word) {
+/* `words` is INTEGER(key), hoisted by the caller so that no R API is
+ * touched when keys are re-read inside OpenMP worker threads. */
+static uint32_t load_word_at(const int *words, R_xlen_t nkey, R_xlen_t i, int word) {
     uint32_t out;
-    memcpy(&out, INTEGER(x) + i + nkey * (R_xlen_t)word, sizeof out);
+    memcpy(&out, words + i + nkey * (R_xlen_t)word, sizeof out);
     return out;
 }
 
@@ -88,22 +91,15 @@ static SEXP key_engine(SEXP key) {
     return Rf_getAttrib(key, engine_symbol());
 }
 
-static philox4x64_key_t key_at_unchecked(SEXP key, R_xlen_t nkey, R_xlen_t i) {
+static philox4x64_key_t key_from_words(const int *words, R_xlen_t nkey, R_xlen_t i) {
     philox4x64_key_t k;
-    uint64_t w0 = (uint64_t)load_word_at(key, nkey, i, 0);
-    uint64_t w1 = (uint64_t)load_word_at(key, nkey, i, 1);
-    uint64_t w2 = (uint64_t)load_word_at(key, nkey, i, 2);
-    uint64_t w3 = (uint64_t)load_word_at(key, nkey, i, 3);
+    uint64_t w0 = (uint64_t)load_word_at(words, nkey, i, 0);
+    uint64_t w1 = (uint64_t)load_word_at(words, nkey, i, 1);
+    uint64_t w2 = (uint64_t)load_word_at(words, nkey, i, 2);
+    uint64_t w3 = (uint64_t)load_word_at(words, nkey, i, 3);
     k.v[0] = w0 | (w1 << 32);
     k.v[1] = w2 | (w3 << 32);
     return k;
-}
-
-static philox4x64_key_t key_at(SEXP key, R_xlen_t i) {
-    R_xlen_t nkey = key_count(key);
-    if (i < 0 || i >= nkey)
-        Rf_error("internal key index out of range");
-    return key_at_unchecked(key, nkey, i);
 }
 
 static SEXP alloc_key_vector(R_xlen_t nkey, SEXP engine) {
@@ -119,8 +115,9 @@ static SEXP alloc_key_vector(R_xlen_t nkey, SEXP engine) {
     INTEGER(dim)[1] = RNGAT_KEY_WORDS;
     Rf_setAttrib(ans, R_DimSymbol, dim);
     Rf_setAttrib(ans, engine_symbol(), engine);
-    Rf_classgets(ans, Rf_mkString("rng_key"));
-    UNPROTECT(2);
+    SEXP cls = PROTECT(Rf_mkString("rng_key"));
+    Rf_classgets(ans, cls);
+    UNPROTECT(3);
     return ans;
 }
 
@@ -133,12 +130,13 @@ static void set_key_words(SEXP ans, R_xlen_t nkey, R_xlen_t i, uint64_t k0, uint
 
 SEXP C_rng_key_format(SEXP key) {
     R_xlen_t nkey = key_count(key);
+    const int *kw = INTEGER(key);
     SEXP ans = PROTECT(Rf_allocVector(STRSXP, nkey));
     char buf[42];
     for (R_xlen_t i = 0; i < nkey; i++) {
         snprintf(buf, sizeof buf, "rng_key[%08" PRIx32 "%08" PRIx32 "%08" PRIx32 "%08" PRIx32 "]",
-                 load_word_at(key, nkey, i, 0), load_word_at(key, nkey, i, 1),
-                 load_word_at(key, nkey, i, 2), load_word_at(key, nkey, i, 3));
+                 load_word_at(kw, nkey, i, 0), load_word_at(kw, nkey, i, 1),
+                 load_word_at(kw, nkey, i, 2), load_word_at(kw, nkey, i, 3));
         SET_STRING_ELT(ans, i, Rf_mkChar(buf));
     }
     UNPROTECT(1);
@@ -243,6 +241,82 @@ static double u01_open(uint64_t bits) {
     return ((double)(bits >> 11) + 0.5) * (1.0 / 9007199254740992.0);
 }
 
+static void box_muller_pair(uint64_t bits0, uint64_t bits1,
+                            double mean, double sd,
+                            double *out0, double *out1) {
+    double u1 = u01_open(bits0);
+    double u2 = u01_open(bits1);
+    double radius = sd * sqrt(-2.0 * log(u1));
+    double theta = RNGAT_TWO_PI * u2;
+    *out0 = mean + radius * cos(theta);
+    *out1 = mean + radius * sin(theta);
+}
+
+/* Each Philox block yields four outputs and depends only on its counter,
+ * so the block loops below parallelize with bit-identical results.
+ * `threads` gates the inner parallel region; callers pass 0 when they
+ * already parallelize over key columns. */
+static void fill_normal_column(double *out, R_xlen_t n,
+                               philox4x64_key_t key,
+                               double mean, double sd, int threads) {
+    R_xlen_t nblock = n >> 2;
+#ifdef _OPENMP
+#pragma omp parallel for if(threads) default(none) \
+    shared(out, nblock, key, mean, sd) schedule(static)
+#endif
+    for (R_xlen_t b = 0; b < nblock; b++) {
+        philox4x64_ctr_t block = rngat_block(key, (uint64_t)b, 0,
+                                             RNGAT_PURPOSE_NORMAL);
+        double *o = out + (b << 2);
+        box_muller_pair(block.v[0], block.v[1], mean, sd, o, o + 1);
+        box_muller_pair(block.v[2], block.v[3], mean, sd, o + 2, o + 3);
+    }
+
+    R_xlen_t i = nblock << 2;
+    if (i < n) {
+        double z0, z1;
+        philox4x64_ctr_t block = rngat_block(key, (uint64_t)nblock, 0,
+                                             RNGAT_PURPOSE_NORMAL);
+        box_muller_pair(block.v[0], block.v[1], mean, sd, &z0, &z1);
+        out[i++] = z0;
+        if (i < n)
+            out[i++] = z1;
+        if (i < n) {
+            box_muller_pair(block.v[2], block.v[3], mean, sd, &z0, &z1);
+            out[i++] = z0;
+            if (i < n)
+                out[i] = z1;
+        }
+    }
+}
+
+static void fill_uniform_column(double *out, R_xlen_t n,
+                                philox4x64_key_t key,
+                                double min, double span, int threads) {
+    R_xlen_t nblock = n >> 2;
+#ifdef _OPENMP
+#pragma omp parallel for if(threads) default(none) \
+    shared(out, nblock, key, min, span) schedule(static)
+#endif
+    for (R_xlen_t b = 0; b < nblock; b++) {
+        philox4x64_ctr_t block = rngat_block(key, (uint64_t)b, 0,
+                                             RNGAT_PURPOSE_UNIFORM);
+        double *o = out + (b << 2);
+        o[0] = min + span * u01_open(block.v[0]);
+        o[1] = min + span * u01_open(block.v[1]);
+        o[2] = min + span * u01_open(block.v[2]);
+        o[3] = min + span * u01_open(block.v[3]);
+    }
+
+    R_xlen_t i = nblock << 2;
+    if (i < n) {
+        philox4x64_ctr_t block = rngat_block(key, (uint64_t)nblock, 0,
+                                             RNGAT_PURPOSE_UNIFORM);
+        for (unsigned w = 0; i < n; w++, i++)
+            out[i] = min + span * u01_open(block.v[w]);
+    }
+}
+
 /* ---- stable fold hashing ---- */
 
 static void hash_byte(uint64_t *h, unsigned char byte) {
@@ -252,13 +326,6 @@ static void hash_byte(uint64_t *h, unsigned char byte) {
 
 static void hash_bytes(uint64_t *h, const unsigned char *bytes, size_t n) {
     for (size_t i = 0; i < n; i++) hash_byte(h, bytes[i]);
-}
-
-static void hash_u32(uint64_t *h, uint32_t x) {
-    for (int i = 0; i < 4; i++) {
-        hash_byte(h, (unsigned char)(x & 0xffu));
-        x >>= 8;
-    }
 }
 
 static void hash_u64(uint64_t *h, uint64_t x) {
@@ -287,6 +354,9 @@ static uint64_t hash_data(SEXP data) {
         }
         break;
 
+    /* Integer and double data share one tag and one width so that folding
+     * by 1L and by 1 derives the same key; doubles are already restricted
+     * to exact whole numbers. */
     case INTSXP:
         hash_byte(&h, 2);
         hash_u64(&h, (uint64_t)n);
@@ -294,12 +364,12 @@ static uint64_t hash_data(SEXP data) {
             int value = INTEGER(data)[i];
             if (value == NA_INTEGER)
                 Rf_error("`data` must not contain missing values");
-            hash_u32(&h, (uint32_t)value);
+            hash_u64(&h, (uint64_t)(int64_t)value);
         }
         break;
 
     case REALSXP:
-        hash_byte(&h, 3);
+        hash_byte(&h, 2);
         hash_u64(&h, (uint64_t)n);
         for (R_xlen_t i = 0; i < n; i++) {
             int64_t value = exact_i64_from_double(REAL(data)[i], "data");
@@ -398,9 +468,10 @@ SEXP C_rng_fold(SEXP key, SEXP data) {
     uint64_t domain = h ^ UINT64_C(0x9e3779b97f4a7c15);
     SEXP engine = key_engine(key);
 
+    const int *kw = INTEGER(key);
     SEXP ans = PROTECT(alloc_key_vector(nkey, engine));
     for (R_xlen_t i = 0; i < nkey; i++) {
-        philox4x64_key_t k = key_at(key, i);
+        philox4x64_key_t k = key_from_words(kw, nkey, i);
         philox4x64_ctr_t out = rngat_block(k, h, domain, RNGAT_PURPOSE_FOLD);
         set_key_words(ans, nkey, i, out.v[0], out.v[1]);
     }
@@ -419,19 +490,30 @@ SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     if (min > max)
         Rf_error("`min` must be less than or equal to `max`");
 
+    const int *kw = INTEGER(key);
     SEXP ans = PROTECT(Rf_allocVector(REALSXP, total));
     set_sample_dim(ans, n, nkey);
     double *out = REAL(ans);
     double span = max - min;
+    if (span == 0.0) {
 #ifdef _OPENMP
-#pragma omp parallel for if(nkey > 1 && total >= RNGAT_OMP_MIN_VALUES) schedule(static)
+#pragma omp parallel for if(total >= RNGAT_OMP_MIN_VALUES) default(none) \
+    shared(out, total, min) schedule(static)
+#endif
+        for (R_xlen_t i = 0; i < total; i++)
+            out[i] = min;
+        UNPROTECT(1);
+        return ans;
+    }
+    int par_cols = nkey > 1 && total >= RNGAT_OMP_MIN_VALUES;
+    int par_rows = !par_cols && n >= RNGAT_OMP_MIN_VALUES;
+#ifdef _OPENMP
+#pragma omp parallel for if(par_cols) default(none) \
+    shared(kw, out, n, nkey, min, span, par_rows) schedule(static)
 #endif
     for (R_xlen_t col = 0; col < nkey; col++) {
-        philox4x64_key_t k = key_at_unchecked(key, nkey, col);
-        for (R_xlen_t i = 0; i < n; i++) {
-            uint64_t bits = rngat_word(k, (uint64_t)i, 0, RNGAT_PURPOSE_UNIFORM);
-            out[i + n * col] = min + span * u01_open(bits);
-        }
+        philox4x64_key_t k = key_from_words(kw, nkey, col);
+        fill_uniform_column(out + n * col, n, k, min, span, par_rows);
     }
     UNPROTECT(1);
     return ans;
@@ -446,28 +528,88 @@ SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_) {
     if (sd < 0)
         Rf_error("`sd` must be non-negative");
 
+    const int *kw = INTEGER(key);
     SEXP ans = PROTECT(Rf_allocVector(REALSXP, total));
     set_sample_dim(ans, n, nkey);
     double *out = REAL(ans);
+    if (sd == 0.0) {
+#ifdef _OPENMP
+#pragma omp parallel for if(total >= RNGAT_OMP_MIN_VALUES) default(none) \
+    shared(out, total, mean) schedule(static)
+#endif
+        for (R_xlen_t i = 0; i < total; i++)
+            out[i] = mean;
+        UNPROTECT(1);
+        return ans;
+    }
+    int par_cols = nkey > 1 && total >= RNGAT_OMP_MIN_VALUES;
+    int par_rows = !par_cols && n >= RNGAT_OMP_MIN_VALUES;
+#ifdef _OPENMP
+#pragma omp parallel for if(par_cols) default(none) \
+    shared(kw, out, n, nkey, mean, sd, par_rows) schedule(static)
+#endif
     for (R_xlen_t col = 0; col < nkey; col++) {
-        philox4x64_key_t k = key_at(key, col);
-        for (R_xlen_t i = 0; i < n; i++) {
-            uint64_t bits = rngat_word(k, (uint64_t)i, 0, RNGAT_PURPOSE_NORMAL);
-            out[i + n * col] = mean + sd * qnorm(u01_open(bits), 0.0, 1.0, TRUE, FALSE);
-        }
+        philox4x64_key_t k = key_from_words(kw, nkey, col);
+        fill_normal_column(out + n * col, n, k, mean, sd, par_rows);
     }
     UNPROTECT(1);
     return ans;
 }
 
-static uint32_t bounded_u32(philox4x64_key_t k, uint64_t index, uint32_t range) {
-    uint32_t threshold = (uint32_t)((UINT64_C(0x100000000) - range) % range);
-    for (uint64_t attempt = 0; ; attempt++) {
+/* Lemire bounded sampling: accept unless the low half of x * range falls
+ * below the bias threshold, which the caller computes once per range. */
+static int lemire_accept(uint32_t x, uint32_t range, uint32_t threshold,
+                         uint32_t *offset) {
+    uint64_t product = (uint64_t)x * (uint64_t)range;
+    if ((uint32_t)product < threshold)
+        return 0;
+    *offset = (uint32_t)(product >> 32);
+    return 1;
+}
+
+/* Rejection continuation for one index; attempt 0 was consumed from the
+ * shared block by fill_integer_column. */
+static uint32_t bounded_u32_retry(philox4x64_key_t k, uint64_t index,
+                                  uint32_t range, uint32_t threshold) {
+    for (uint64_t attempt = 1; ; attempt++) {
         uint32_t x = (uint32_t)rngat_word(k, index, attempt, RNGAT_PURPOSE_INTEGER);
-        uint64_t product = (uint64_t)x * (uint64_t)range;
-        uint32_t low = (uint32_t)product;
-        if (low >= threshold)
-            return (uint32_t)(product >> 32);
+        uint32_t offset;
+        if (lemire_accept(x, range, threshold, &offset))
+            return offset;
+    }
+}
+
+static void fill_integer_column(int *out, R_xlen_t n, philox4x64_key_t key,
+                                int min, uint32_t range, uint32_t threshold,
+                                int threads) {
+    R_xlen_t nblock = n >> 2;
+#ifdef _OPENMP
+#pragma omp parallel for if(threads) default(none) \
+    shared(out, nblock, key, min, range, threshold) schedule(static)
+#endif
+    for (R_xlen_t b = 0; b < nblock; b++) {
+        philox4x64_ctr_t block = rngat_block(key, (uint64_t)b, 0,
+                                             RNGAT_PURPOSE_INTEGER);
+        int *o = out + (b << 2);
+        for (unsigned w = 0; w < 4; w++) {
+            uint32_t offset;
+            if (!lemire_accept((uint32_t)block.v[w], range, threshold, &offset))
+                offset = bounded_u32_retry(key, (uint64_t)((b << 2) + w),
+                                           range, threshold);
+            o[w] = min + (int)offset;
+        }
+    }
+
+    R_xlen_t i = nblock << 2;
+    if (i < n) {
+        philox4x64_ctr_t block = rngat_block(key, (uint64_t)nblock, 0,
+                                             RNGAT_PURPOSE_INTEGER);
+        for (unsigned w = 0; i < n; w++, i++) {
+            uint32_t offset;
+            if (!lemire_accept((uint32_t)block.v[w], range, threshold, &offset))
+                offset = bounded_u32_retry(key, (uint64_t)i, range, threshold);
+            out[i] = min + (int)offset;
+        }
     }
 }
 
@@ -481,18 +623,20 @@ SEXP C_rng_integer(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
         Rf_error("`min` must be less than or equal to `max`");
 
     uint32_t range = (uint32_t)((int64_t)max - (int64_t)min + 1);
+    uint32_t threshold = (uint32_t)((UINT64_C(0x100000000) - range) % range);
+    const int *kw = INTEGER(key);
     SEXP ans = PROTECT(Rf_allocVector(INTSXP, total));
     set_sample_dim(ans, n, nkey);
     int *out = INTEGER(ans);
+    int par_cols = nkey > 1 && total >= RNGAT_OMP_MIN_VALUES;
+    int par_rows = !par_cols && n >= RNGAT_OMP_MIN_VALUES;
 #ifdef _OPENMP
-#pragma omp parallel for if(nkey > 1 && total >= RNGAT_OMP_MIN_VALUES) schedule(static)
+#pragma omp parallel for if(par_cols) default(none) \
+    shared(kw, out, n, nkey, min, range, threshold, par_rows) schedule(static)
 #endif
     for (R_xlen_t col = 0; col < nkey; col++) {
-        philox4x64_key_t k = key_at_unchecked(key, nkey, col);
-        for (R_xlen_t i = 0; i < n; i++) {
-            uint32_t offset = bounded_u32(k, (uint64_t)i, range);
-            out[i + n * col] = min + (int)offset;
-        }
+        philox4x64_key_t k = key_from_words(kw, nkey, col);
+        fill_integer_column(out + n * col, n, k, min, range, threshold, par_rows);
     }
     UNPROTECT(1);
     return ans;
@@ -503,16 +647,21 @@ SEXP C_rng_bits(SEXP key, SEXP n_, SEXP bits_) {
     R_xlen_t n = length_scalar(n_, "n");
     R_xlen_t total = checked_product(n, nkey, "sample");
     int bits = bits_scalar(bits_);
+    const int *kw = INTEGER(key);
 
     if (bits == 32) {
         SEXP ans = PROTECT(Rf_allocVector(REALSXP, total));
         set_sample_dim(ans, n, nkey);
         double *out = REAL(ans);
         for (R_xlen_t col = 0; col < nkey; col++) {
-            philox4x64_key_t k = key_at(key, col);
-            for (R_xlen_t i = 0; i < n; i++) {
-                uint64_t word = rngat_word(k, (uint64_t)i, 0, RNGAT_PURPOSE_BITS);
-                out[i + n * col] = (double)(uint32_t)word;
+            philox4x64_key_t k = key_from_words(kw, nkey, col);
+            double *col_out = out + n * col;
+            for (R_xlen_t i = 0; i < n; i += 4) {
+                philox4x64_ctr_t block = rngat_block(k, (uint64_t)(i >> 2), 0,
+                                                     RNGAT_PURPOSE_BITS);
+                R_xlen_t stop = n - i < 4 ? n - i : 4;
+                for (R_xlen_t w = 0; w < stop; w++)
+                    col_out[i + w] = (double)(uint32_t)block.v[w];
             }
         }
         UNPROTECT(1);
@@ -523,11 +672,15 @@ SEXP C_rng_bits(SEXP key, SEXP n_, SEXP bits_) {
     set_sample_dim(ans, n, nkey);
     char buf[17];
     for (R_xlen_t col = 0; col < nkey; col++) {
-        philox4x64_key_t k = key_at(key, col);
-        for (R_xlen_t i = 0; i < n; i++) {
-            uint64_t word = rngat_word(k, (uint64_t)i, 0, RNGAT_PURPOSE_BITS);
-            snprintf(buf, sizeof buf, "%016" PRIx64, word);
-            SET_STRING_ELT(ans, i + n * col, Rf_mkChar(buf));
+        philox4x64_key_t k = key_from_words(kw, nkey, col);
+        for (R_xlen_t i = 0; i < n; i += 4) {
+            philox4x64_ctr_t block = rngat_block(k, (uint64_t)(i >> 2), 0,
+                                                 RNGAT_PURPOSE_BITS);
+            R_xlen_t stop = n - i < 4 ? n - i : 4;
+            for (R_xlen_t w = 0; w < stop; w++) {
+                snprintf(buf, sizeof buf, "%016" PRIx64, block.v[w]);
+                SET_STRING_ELT(ans, i + w + n * col, Rf_mkChar(buf));
+            }
         }
     }
     UNPROTECT(1);

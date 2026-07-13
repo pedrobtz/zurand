@@ -6,7 +6,7 @@
 \alias{rngat-package}
 \title{rngat: Stateless Random Numbers via Counter-Based Generation}
 \description{
-Stateless deterministic random number generation using the Philox counter-based generator from the 'Random123' library by Salmon, Moraes, Dror and Shaw (2011) \doi{10.1145/2063384.2063405}. Random values are pure functions of immutable keys and sampler arguments, so sampling never reads or mutates \code{.Random.seed}. Independent substreams are requested as key vectors with \code{rng_key(seed, n)} or derived explicitly with \code{rng_fold()}.
+Stateless deterministic random number generation using the Philox counter-based generator from the 'Random123' library by Salmon, Moraes, Dror and Shaw (2011) \doi{10.1145/2063384.2063405}. Random values are pure functions of immutable keys and sampler arguments, so sampling never reads or mutates '.Random.seed'. Independent substreams are requested as key vectors with rng_key(seed, n) or derived explicitly with rng_fold().
 }
 \author{
 \strong{Maintainer}: First Last \email{first.last@example.com}

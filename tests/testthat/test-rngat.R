@@ -26,7 +26,23 @@ test_that("rng_key vectors concatenate", {
 
   expect_identical(c(keys[1], keys[2:4]), keys)
   expect_identical(length(c(keys[1], keys[2])), 2L)
+  expect_identical(length(c(keys[0], keys[0])), 0L)
   expect_error(c(keys[1], "not a key"), "rng_key")
+})
+
+test_that("key subsetting rejects indices that would fabricate keys", {
+  keys <- rng_key(42L, n = 4L)
+
+  expect_error(keys[NA], "missing")
+  expect_error(keys[NA_integer_], "missing")
+  expect_error(keys[c(1L, NA, 3L)], "missing")
+  expect_error(keys[1.5], "whole numbers")
+  expect_error(keys[10L], "subscript out of bounds")
+
+  expect_identical(keys[[2L]], keys[2L])
+  expect_error(keys[[c(1L, 2L)]], "exactly one key")
+  expect_error(keys[[TRUE]], "exactly one key")
+  expect_error(keys[[integer()]], "exactly one key")
 })
 
 test_that("rng_fold() derives deterministic keys from typed data", {
@@ -37,6 +53,16 @@ test_that("rng_fold() derives deterministic keys from typed data", {
   expect_false(identical(rng_fold(key, "layer1"), rng_fold(key, "layer2")))
   expect_false(identical(rng_fold(key, 1L), rng_fold(key, "1")))
   expect_false(identical(rng_fold(key, c("a", "b")), rng_fold(key, c("ab"))))
+})
+
+test_that("rng_fold() folds whole-number doubles and integers identically", {
+  key <- rng_key(3L)
+
+  expect_identical(rng_fold(key, 1), rng_fold(key, 1L))
+  expect_identical(rng_fold(key, c(-2, 0, 7)), rng_fold(key, c(-2L, 0L, 7L)))
+  expect_identical(rng_fold(key, 2^40), rng_fold(key, 2^40))
+  expect_false(identical(rng_fold(key, 1), rng_fold(key, TRUE)))
+  expect_false(identical(rng_fold(key, 1), rng_fold(key, as.raw(1))))
 })
 
 test_that("samplers are pure functions of key and arguments", {
@@ -98,16 +124,18 @@ test_that("rng_normal() returns shifted and scaled normal values", {
   key <- rng_key(123L)
   keys <- rng_key(123L, n = 2L)
   z <- rng_normal(key, 10000L, mean = 2, sd = 3)
-  zm <- rng_normal(keys, 4L)
+  zm <- rng_normal(keys, 5L)
 
   expect_type(z, "double")
   expect_length(z, 10000L)
   expect_true(all(is.finite(z)))
   expect_gt(mean(z), 1.8)
   expect_lt(mean(z), 2.2)
+  expect_gt(sd(z), 2.8)
+  expect_lt(sd(z), 3.2)
   expect_identical(rng_normal(key, 3L, mean = 7, sd = 0), rep(7, 3L))
-  expect_equal(dim(zm), c(4L, 2L))
-  expect_identical(zm[, 2L], rng_normal(keys[2], 4L))
+  expect_equal(dim(zm), c(5L, 2L))
+  expect_identical(zm[, 2L], rng_normal(keys[2], 5L))
 })
 
 test_that("rng_integer() returns integers in the inclusive range", {
@@ -141,6 +169,38 @@ test_that("rng_bits() returns exact 32-bit words or 64-bit hex words", {
   expect_equal(dim(b64m), c(5L, 2L))
   expect_identical(b32m[, 2L], rng_bits(keys[2], 5L))
   expect_match(as.vector(b64m), "^[0-9a-f]{16}$")
+})
+
+test_that("large draws extend small draws bit-for-bit, including parallel paths", {
+  # 70001 exceeds the OpenMP threshold (32768) and has an odd tail, so this
+  # exercises the parallel block loops; the prefix comparisons pin the core
+  # counter-mode invariant that draw i never depends on n.
+  key <- rng_key(99L)
+  keys <- rng_key(99L, n = 3L)
+  n_big <- 70001L
+
+  u <- rng_uniform(key, n_big)
+  expect_identical(u[1:257], rng_uniform(key, 257L))
+  z <- rng_normal(key, n_big)
+  expect_identical(z[1:257], rng_normal(key, 257L))
+  x <- rng_integer(key, n_big, -5L, 5L)
+  expect_identical(x[1:257], rng_integer(key, 257L, -5L, 5L))
+  b <- rng_bits(key, n_big)
+  expect_identical(b[1:257], rng_bits(key, 257L))
+  expect_identical(rng_bits(key, 9L, bits = 64L)[1:5], rng_bits(key, 5L, bits = 64L))
+
+  # near-maximal range keeps the rejection path honest
+  r <- rng_integer(key, n_big, 1L, 2000000000L)
+  expect_identical(r[1:257], rng_integer(key, 257L, 1L, 2000000000L))
+
+  # multi-key: columns of the parallel-over-columns fill match per-key draws
+  um <- rng_uniform(keys, n_big)
+  expect_identical(um[, 2L], rng_uniform(keys[2], n_big))
+  expect_identical(um[1:9, 3L], rng_uniform(keys[3], 9L))
+  zm <- rng_normal(keys, n_big)
+  expect_identical(zm[, 1L], rng_normal(keys[1], n_big))
+  xm <- rng_integer(keys, n_big, 0L, 9L)
+  expect_identical(xm[, 3L], rng_integer(keys[3], n_big, 0L, 9L))
 })
 
 test_that("stateless functions do not touch .Random.seed", {
@@ -177,10 +237,10 @@ test_that("invalid inputs error cleanly", {
   expect_error(rng_key(1.5), "whole number")
   expect_error(rng_key(2^53), "2\\^53")
   expect_error(rng_key(NA_integer_), "missing")
-  expect_error(rng_key(1L, n = c(1L, 2L)), "single")
+  expect_error(rng_key(1L, n = c(1L, 2L)), "single value")
   expect_error(rng_key(1L, engine = "threefry"), "philox4x64")
 
-  expect_error(rng_uniform(key, c(1L, 2L)), "single")
+  expect_error(rng_uniform(key, c(1L, 2L)), "single value")
   expect_error(rng_uniform(key, "2"), "integer or double")
   expect_error(rng_uniform(key, -1L), "non-negative")
   expect_error(rng_uniform(key, 1.5), "non-negative whole")

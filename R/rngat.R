@@ -46,7 +46,9 @@ rng_key_from_r <- function(n = 1L, engine = "philox4x64") {
 #'
 #' @param key An `rng_key` vector.
 #' @param data A character, integer, double, logical or raw vector. Numeric
-#'   values must be whole numbers.
+#'   values must be whole numbers; integer and double vectors holding the
+#'   same values (`1L` and `1`) derive the same key. All other type
+#'   distinctions matter: `rng_fold(key, "1")` and `rng_fold(key, 1)` differ.
 #' @return An `rng_key` vector with the same length as `key`.
 #' @export
 #' @examples
@@ -152,7 +154,8 @@ print.rng_key <- function(x, ...) {
     cat("<rng_key> ", fp, "\n", sep = "")
   } else {
     cat("<rng_key[", n, "]>\n", sep = "")
-    fp <- sub("^rng_key\\[([0-9a-f]{12})[0-9a-f]+\\]$", "rng_key[\\1...]", fp)
+    # "rng_key[" plus the first 12 of 32 hex digits
+    fp <- paste0(substr(fp, 1L, 20L), "...]")
     show <- min(n, 5L)
     for (i in seq_len(show)) cat("[", i, "] ", fp[[i]], "\n", sep = "")
     if (n > show) cat("... ", n - show, " more\n", sep = "")
@@ -167,12 +170,20 @@ length.rng_key <- function(x) {
 }
 
 #' @rdname rng_key
-#' @param i Integer, logical or character row index selecting keys.
+#' @param i Integer or logical index selecting keys. Missing values and
+#'   fractional numbers are an error: a silently invented key would
+#'   deterministically collide with every other key subset the same way.
 #' @param drop Ignored; key subsetting always preserves the `rng_key` class.
 #' @export
 `[.rng_key` <- function(x, i, ..., drop = FALSE) {
   words <- unclass(x)
   if (missing(i)) i <- seq_len(nrow(words))
+  if (anyNA(i)) {
+    stop("`i` must not contain missing values", call. = FALSE)
+  }
+  if (is.numeric(i) && any(i != trunc(i))) {
+    stop("`i` must contain whole numbers", call. = FALSE)
+  }
   out <- words[i, , drop = FALSE]
   class(out) <- "rng_key"
   attr(out, "engine") <- attr(x, "engine", exact = TRUE)
@@ -182,7 +193,11 @@ length.rng_key <- function(x) {
 #' @rdname rng_key
 #' @export
 `[[.rng_key` <- function(x, i, ...) {
-  x[i]
+  out <- x[i]
+  if (length(out) != 1L) {
+    stop("`[[` must select exactly one key", call. = FALSE)
+  }
+  out
 }
 
 #' @rdname rng_key
@@ -191,10 +206,7 @@ length.rng_key <- function(x) {
 c.rng_key <- function(..., recursive = FALSE) {
   dots <- Filter(Negate(is.null), list(...))
   if (!length(dots)) {
-    out <- matrix(integer(), nrow = 0L, ncol = 4L)
-    class(out) <- "rng_key"
-    attr(out, "engine") <- "philox4x64"
-    return(out)
+    return(rng_key(0, n = 0L))
   }
 
   ok <- vapply(dots, inherits, logical(1), "rng_key")

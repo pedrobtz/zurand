@@ -36,7 +36,9 @@ rng_key(seed, n = 1L, engine = "philox4x64")
 
 \item{...}{Unused.}
 
-\item{i}{Integer, logical or character row index selecting keys.}
+\item{i}{Integer or logical index selecting keys. Missing values and
+fractional numbers are an error: a silently invented key would
+deterministically collide with every other key subset the same way.}
 
 \item{drop}{Ignored; key subsetting always preserves the \code{rng_key} class.}
 
@@ -48,8 +50,8 @@ An object of class \code{rng_key} containing \code{n} keys.
 \description{
 \code{rng_key()} creates immutable keys for the stateless generators in this
 package. A key vector is an opaque S3 object with one key per row; pass it to
-\code{\link[=rng_fold]{rng_fold()}} and the \verb{rng_*()} samplers, but do not rely on its
-internal integer representation.
+\code{\link[=rng_fold]{rng_fold()}} and the \verb{rng_*()} samplers, but do not rely on its internal
+integer representation.
 }
 \details{
 The samplers in this package never read or update \code{.Random.seed}. Calling a

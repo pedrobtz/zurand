@@ -10,7 +10,9 @@ rng_fold(key, data)
 \item{key}{An \code{rng_key} vector.}
 
 \item{data}{A character, integer, double, logical or raw vector. Numeric
-values must be whole numbers.}
+values must be whole numbers; integer and double vectors holding the
+same values (\code{1L} and \code{1}) derive the same key. All other type
+distinctions matter: \code{rng_fold(key, "1")} and \code{rng_fold(key, 1)} differ.}
 }
 \value{
 An \code{rng_key} vector with the same length as \code{key}.

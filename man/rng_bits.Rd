@@ -14,8 +14,8 @@ rng_bits(key, n = 1L, bits = 32L)
 \item{bits}{Either \code{32L} or \code{64L}.}
 }
 \value{
-A numeric vector or matrix for 32-bit words, or a character vector or matrix
-for 64-bit words.
+A numeric vector or matrix for 32-bit words, or a character vector
+or matrix for 64-bit words.
 }
 \description{
 \code{rng_bits()} exposes the raw generator stream. With \code{bits = 32}, it returns

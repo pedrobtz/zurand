@@ -139,8 +139,9 @@ philox4x64_ctr_t r = philox4x64(c, k);           /* 10 rounds; r is a fresh stru
 This is essentially the construction rngat uses (see `rngat_block()` in [src/rngat.c](../src/rngat.c)); the one refinement is that rngat packs **four** logical output positions into each block instead of using only `r.v[0]` (see below). The R-facing consequences:
 
 - `rng_uniform(key, n)` evaluates output positions `0:(n - 1)` under the uniform purpose, picks word `position & 3`, and turns the top 53 bits into a double in (0, 1) — 53 because that is the precision of an R double's mantissa.
-- `rng_uniform()` and `rng_integer()` can optionally fill different key columns in parallel with OpenMP. Threaded loops do not call R API; they only read validated key words and write primitive output.
-- `rng_normal()`, `rng_integer()` and `rng_bits()` use the same position layout but separate purpose values, so accidental reuse of the same key across sampler families does not read the identical counter slice.
+- `rng_uniform()`, `rng_normal()` and `rng_integer()` can optionally fill different key columns in parallel with OpenMP. Threaded loops do not call R API; they only read validated key words and write primitive output.
+- `rng_normal()` transforms each Philox block into two Box-Muller pairs, so four output values consume the block's four words. It uses a separate purpose value, so accidental key reuse does not read the identical counter slice used by other sampler families.
+- `rng_integer()` and `rng_bits()` use the same position layout as `rng_uniform()` but separate purpose values.
 - `rng_fold(key, data)` hashes typed data to a 64-bit value, evaluates a fold-purpose block, and uses `r.v[0]`, `r.v[1]` as the derived key.
 - An `rng_key` in R is an opaque integer matrix with one key per row and four 32-bit words per key: `{k0 low, k0 high, k1 low, k1 high}`. The C code copies these by bit pattern because R's integer type is signed and reserves one bit pattern for `NA`.
 
@@ -159,14 +160,14 @@ The public API no longer exposes arbitrary counters. Users pass immutable key ve
 
 ### Four values per block
 
-A `philox4x64` call produces 256 bits — four `uint64` words — but a single uniform or normal draw needs only 53 bits. Using just `r.v[0]` and discarding the other three words would waste 3/4 of the generator's work. Instead rngat maps four consecutive logical positions onto one block:
+A `philox4x64` call produces 256 bits — four `uint64` words — but a single uniform draw needs only 53 bits, and a Box-Muller normal pair needs two uniforms. Using just `r.v[0]` and discarding the other three words would waste 3/4 of the generator's work. Instead rngat maps four consecutive logical positions onto one block:
 
 ```
 word_at(position, purpose) =
   word (position & 3) of philox( {position >> 2, domain, purpose, 0}, key )
 ```
 
-So `position` is split into a **block number** (`position >> 2`, i.e. `position / 4`) placed in the counter, and a **word selector** (`position & 3`, i.e. `position % 4`) choosing which of the block's four words to return. A contiguous sampler call such as `rng_uniform(key, 1e6)` costs about one Philox evaluation per **four** values. This is the standard Random123 idiom (it is exactly what a sequential fill loop does — see randompack's `fill_philox`) and, because Philox's four output words are mutually independent, it changes none of the statistical guarantees.
+So `position` is split into a **block number** (`position >> 2`, i.e. `position / 4`) placed in the counter, and a **word selector** (`position & 3`, i.e. `position % 4`) choosing which of the block's four words to return. A contiguous sampler call such as `rng_uniform(key, 1e6)` costs about one Philox evaluation per **four** values. `rng_normal()` follows the same four-value cadence, but words 0/1 and 2/3 are transformed as Box-Muller pairs rather than exposed one word at a time. This is the standard Random123 idiom (it is exactly what a sequential fill loop does — see randompack's `fill_philox`) and, because Philox's four output words are mutually independent, it changes none of the statistical guarantees.
 
 ### The `purpose` word: domain separation
 

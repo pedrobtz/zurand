@@ -18,7 +18,7 @@ An integer vector of length \code{n} for one key, or an \code{n} by
 \code{length(key)} integer matrix for multiple keys.
 }
 \description{
-Stateless integer sampling over the inclusive range \code{[min, max]}.
+Stateless integer sampling over the inclusive range \verb{[min, max]}.
 }
 \examples{
 key <- rng_key(42L)
