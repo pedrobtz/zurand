@@ -26,6 +26,10 @@
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
 #endif
+/* Fixed-point brackets of the wedge test, generated from the NumPy
+ * tables by dev/generate-zig-bounds.R: most wedge decisions need one
+ * wide multiply instead of exp(). */
+#include "zigbounds.h"
 
 /*
  * rngat: stateless random numbers built on Philox4x64-10.
@@ -252,45 +256,82 @@ static double u01_open(uint64_t bits) {
     return ((double)(bits >> 11) + 0.5) * (1.0 / 9007199254740992.0);
 }
 
+/* 53-bit uniform in [0, 1), numpy's next_double mapping. */
+#define RNGAT_U64_TO_DOUBLE(u) (((u) >> 11) * 0x1.0p-53)
+
 /* Cold continuation of zig_normal_at once the one-word fast path has
  * rejected: wedge acceptance and the layer-0 tail, redrawing words at
  * (index, attempt >= 1) so draw `index` stays a pure function of
- * (key, index). Kept out of line so the fast path inlines into the
- * sampler loops. */
+ * (key, index). Most wedge decisions resolve in fixed point against the
+ * Dnorm bracket; only the narrow ambiguous band pays exp(). Kept out of
+ * line so the fast path inlines into the sampler loops. */
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((noinline, cold))
 #endif
 static double zig_normal_slow(philox4x64_key_t key, uint64_t index, uint64_t r) {
     uint64_t attempt = 0;
+    int idx = (int)(r & 0xff);
+    int sign = (int)((r >> 8) & 0x1);
+    uint64_t rabs = (r >> 9) & UINT64_C(0x000fffffffffffff);
+    double x = (double)rabs * wi_double[idx];
+    if (sign)
+        x = -x;
+    /* the caller established rabs >= ki_double[idx] for the entry word */
+
     for (;;) {
-        int idx = (int)(r & 0xff);
-        int sign = (int)((r >> 8) & 0x1);
-        uint64_t rabs = (r >> 9) & UINT64_C(0x000fffffffffffff);
-        double x = (double)rabs * wi_double[idx];
+        uint64_t Y = rngat_word(key, index, ++attempt, RNGAT_PURPOSE_NORMAL);
+
+        if (idx == 0) {
+            /* layer-0 tail; the first ordinate reuses Y */
+            double yy = -log1p(-RNGAT_U64_TO_DOUBLE(Y));
+            for (;;) {
+                double xx = -ziggurat_nor_inv_r *
+                    log1p(-RNGAT_U64_TO_DOUBLE(rngat_word(
+                        key, index, ++attempt, RNGAT_PURPOSE_NORMAL)));
+                if (yy + yy > xx * xx)
+                    return sign ? -(ziggurat_nor_r + xx)
+                                : ziggurat_nor_r + xx;
+                yy = -log1p(-RNGAT_U64_TO_DOUBLE(rngat_word(
+                    key, index, ++attempt, RNGAT_PURPOSE_NORMAL)));
+            }
+        }
+
+        /* wedge: compare Y * (width of layer idx) against the position in
+         * the layer, with Dnorm bracketing the exp curve around its chord;
+         * the curve is convex below the inflection layer and concave above */
+        uint64_t L = (UINT64_C(1) << 52) - ki_double[idx];
+        uint64_t R = (UINT64_C(1) << 52) - rabs;
+        uint64_t YL;
+        (void)mulhilo64(Y, L, &YL);
+        int accept, reject;
+        if (idx > RNGAT_ZIG_INFLECTION) {
+            reject = YL > R;
+            accept = !reject && YL + rngat_zig_gap[idx] < R;
+        } else if (idx < RNGAT_ZIG_INFLECTION) {
+            accept = YL < R;
+            reject = !accept && YL > R + rngat_zig_gap[idx];
+        } else {
+            reject = YL > R + rngat_zig_gap_hi52;
+            accept = !reject && YL + rngat_zig_gap[idx] < R;
+        }
+        if (accept)
+            return x;
+        if (!reject) {
+            double u = RNGAT_U64_TO_DOUBLE(Y);
+            if ((fi_double[idx - 1] - fi_double[idx]) * u + fi_double[idx] <
+                exp(-0.5 * x * x))
+                return x;
+        }
+
+        r = rngat_word(key, index, ++attempt, RNGAT_PURPOSE_NORMAL);
+        idx = (int)(r & 0xff);
+        sign = (int)((r >> 8) & 0x1);
+        rabs = (r >> 9) & UINT64_C(0x000fffffffffffff);
+        x = (double)rabs * wi_double[idx];
         if (sign)
             x = -x;
         if (rabs < ki_double[idx])
             return x;
-
-        if (idx == 0) {
-            double xx, yy;
-            do {
-                xx = -ziggurat_nor_inv_r *
-                     log1p(-u01_open(rngat_word(key, index, ++attempt,
-                                                RNGAT_PURPOSE_NORMAL)));
-                yy = -log1p(-u01_open(rngat_word(key, index, ++attempt,
-                                                 RNGAT_PURPOSE_NORMAL)));
-            } while (yy + yy <= xx * xx);
-            return sign ? -(ziggurat_nor_r + xx) : ziggurat_nor_r + xx;
-        }
-
-        double u = u01_open(rngat_word(key, index, ++attempt,
-                                       RNGAT_PURPOSE_NORMAL));
-        if ((fi_double[idx - 1] - fi_double[idx]) * u + fi_double[idx] <
-            exp(-0.5 * x * x))
-            return x;
-
-        r = rngat_word(key, index, ++attempt, RNGAT_PURPOSE_NORMAL);
     }
 }
 
@@ -314,20 +355,37 @@ R123_STATIC_INLINE double zig_normal_at(philox4x64_key_t key, uint64_t index,
  * `threads` gates the inner parallel region; callers pass 0 when they
  * already parallelize over key columns. */
 /* Fills standard normals; C_rng_normal applies mean/sd in a separate
- * vectorizable pass so the hot loop stays load/compare/multiply only. */
+ * vectorizable pass so the hot loop stays load/compare/multiply only.
+ *
+ * Works in two passes over a small stack chunk: a tight Philox-only loop
+ * (independent iterations the compiler can pipeline across the 10-round
+ * dependency chain), then the ziggurat transform over the buffered words.
+ * Same words, same decisions, same output as a fused loop. */
+#define RNGAT_CHUNK_BLOCKS 128 /* 512 words, 4 KiB per thread */
+
 static void fill_normal_column(double *out, R_xlen_t n,
                                philox4x64_key_t key, int threads) {
     R_xlen_t nblock = n >> 2;
+    R_xlen_t nchunk = (nblock + RNGAT_CHUNK_BLOCKS - 1) / RNGAT_CHUNK_BLOCKS;
 #ifdef _OPENMP
 #pragma omp parallel for if(threads) default(none) \
-    shared(out, nblock, key) schedule(static)
+    shared(out, nblock, nchunk, key) schedule(static)
 #endif
-    for (R_xlen_t b = 0; b < nblock; b++) {
-        philox4x64_ctr_t block = rngat_block(key, (uint64_t)b, 0,
-                                             RNGAT_PURPOSE_NORMAL);
-        double *o = out + (b << 2);
-        for (unsigned w = 0; w < 4; w++)
-            o[w] = zig_normal_at(key, (uint64_t)((b << 2) + w), block.v[w]);
+    for (R_xlen_t c = 0; c < nchunk; c++) {
+        uint64_t buf[RNGAT_CHUNK_BLOCKS * 4];
+        R_xlen_t b0 = c * RNGAT_CHUNK_BLOCKS;
+        int nb = (int)(nblock - b0 < RNGAT_CHUNK_BLOCKS ? nblock - b0
+                                                        : RNGAT_CHUNK_BLOCKS);
+        for (int j = 0; j < nb; j++) {
+            philox4x64_ctr_t block = rngat_block(key, (uint64_t)(b0 + j), 0,
+                                                 RNGAT_PURPOSE_NORMAL);
+            memcpy(buf + 4 * j, block.v, sizeof block.v);
+        }
+
+        double *o = out + (b0 << 2);
+        uint64_t base = (uint64_t)(b0 << 2);
+        for (int j = 0; j < nb * 4; j++)
+            o[j] = zig_normal_at(key, base + (uint64_t)j, buf[j]);
     }
 
     R_xlen_t i = nblock << 2;
