@@ -138,6 +138,19 @@ test_that("rng_normal() returns shifted and scaled normal values", {
   expect_identical(zm[, 2L], rng_normal(keys[2], 5L))
 })
 
+test_that("rng_normal() draws from the normal distribution", {
+  # deterministic given the key, so these are regression tests, not flaky
+  # statistical ones; n exceeds the OpenMP threshold
+  z <- rng_normal(rng_key(2024L), 50000L)
+
+  ks <- suppressWarnings(stats::ks.test(z, "pnorm"))
+  expect_gt(ks$p.value, 0.001)
+  # the ziggurat fast path is capped at |z| < 3.6542; seeing larger values
+  # proves the tail branch runs
+  expect_gt(max(abs(z)), 3.6542)
+  expect_lt(min(z), -3.6542)
+})
+
 test_that("rng_integer() returns integers in the inclusive range", {
   key <- rng_key(7L)
   keys <- rng_key(7L, n = 2L)

@@ -15,6 +15,18 @@
 
 #include "Random123/philox.h"
 
+/* NumPy's ziggurat tables (BSD 3-clause, see src/numpyzig/LICENSE). The
+ * header is vendored verbatim and also carries float/exponential tables
+ * this package does not use. */
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-const-variable"
+#endif
+#include "numpyzig/ziggurat_constants.h"
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+
 /*
  * rngat: stateless random numbers built on Philox4x64-10.
  *
@@ -43,7 +55,6 @@
 #define RNGAT_PURPOSE_FOLD    ((uint64_t)4)
 
 #define RNGAT_OMP_MIN_VALUES ((R_xlen_t)32768)
-#define RNGAT_TWO_PI 6.28318530717958647692528676655900576839433879875021
 
 /* ---- key representation ---- */
 
@@ -241,52 +252,90 @@ static double u01_open(uint64_t bits) {
     return ((double)(bits >> 11) + 0.5) * (1.0 / 9007199254740992.0);
 }
 
-static void box_muller_pair(uint64_t bits0, uint64_t bits1,
-                            double mean, double sd,
-                            double *out0, double *out1) {
-    double u1 = u01_open(bits0);
-    double u2 = u01_open(bits1);
-    double radius = sd * sqrt(-2.0 * log(u1));
-    double theta = RNGAT_TWO_PI * u2;
-    *out0 = mean + radius * cos(theta);
-    *out1 = mean + radius * sin(theta);
+/* Cold continuation of zig_normal_at once the one-word fast path has
+ * rejected: wedge acceptance and the layer-0 tail, redrawing words at
+ * (index, attempt >= 1) so draw `index` stays a pure function of
+ * (key, index). Kept out of line so the fast path inlines into the
+ * sampler loops. */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline, cold))
+#endif
+static double zig_normal_slow(philox4x64_key_t key, uint64_t index, uint64_t r) {
+    uint64_t attempt = 0;
+    for (;;) {
+        int idx = (int)(r & 0xff);
+        int sign = (int)((r >> 8) & 0x1);
+        uint64_t rabs = (r >> 9) & UINT64_C(0x000fffffffffffff);
+        double x = (double)rabs * wi_double[idx];
+        if (sign)
+            x = -x;
+        if (rabs < ki_double[idx])
+            return x;
+
+        if (idx == 0) {
+            double xx, yy;
+            do {
+                xx = -ziggurat_nor_inv_r *
+                     log1p(-u01_open(rngat_word(key, index, ++attempt,
+                                                RNGAT_PURPOSE_NORMAL)));
+                yy = -log1p(-u01_open(rngat_word(key, index, ++attempt,
+                                                 RNGAT_PURPOSE_NORMAL)));
+            } while (yy + yy <= xx * xx);
+            return sign ? -(ziggurat_nor_r + xx) : ziggurat_nor_r + xx;
+        }
+
+        double u = u01_open(rngat_word(key, index, ++attempt,
+                                       RNGAT_PURPOSE_NORMAL));
+        if ((fi_double[idx - 1] - fi_double[idx]) * u + fi_double[idx] <
+            exp(-0.5 * x * x))
+            return x;
+
+        r = rngat_word(key, index, ++attempt, RNGAT_PURPOSE_NORMAL);
+    }
+}
+
+/* One standard normal deviate for output position `index`, following
+ * numpy's random_standard_normal: 8 bits of layer index, 1 sign bit and a
+ * 52-bit magnitude from a single word decide ~99% of draws with one table
+ * compare. `r` is the attempt-0 word from the shared Philox block. */
+R123_STATIC_INLINE double zig_normal_at(philox4x64_key_t key, uint64_t index,
+                                        uint64_t r) {
+    int idx = (int)(r & 0xff);
+    uint64_t rabs = (r >> 9) & UINT64_C(0x000fffffffffffff);
+    if (R123_BUILTIN_EXPECT(rabs < ki_double[idx], 1)) {
+        double x = (double)rabs * wi_double[idx];
+        return (r >> 8) & 0x1 ? -x : x;
+    }
+    return zig_normal_slow(key, index, r);
 }
 
 /* Each Philox block yields four outputs and depends only on its counter,
  * so the block loops below parallelize with bit-identical results.
  * `threads` gates the inner parallel region; callers pass 0 when they
  * already parallelize over key columns. */
+/* Fills standard normals; C_rng_normal applies mean/sd in a separate
+ * vectorizable pass so the hot loop stays load/compare/multiply only. */
 static void fill_normal_column(double *out, R_xlen_t n,
-                               philox4x64_key_t key,
-                               double mean, double sd, int threads) {
+                               philox4x64_key_t key, int threads) {
     R_xlen_t nblock = n >> 2;
 #ifdef _OPENMP
 #pragma omp parallel for if(threads) default(none) \
-    shared(out, nblock, key, mean, sd) schedule(static)
+    shared(out, nblock, key) schedule(static)
 #endif
     for (R_xlen_t b = 0; b < nblock; b++) {
         philox4x64_ctr_t block = rngat_block(key, (uint64_t)b, 0,
                                              RNGAT_PURPOSE_NORMAL);
         double *o = out + (b << 2);
-        box_muller_pair(block.v[0], block.v[1], mean, sd, o, o + 1);
-        box_muller_pair(block.v[2], block.v[3], mean, sd, o + 2, o + 3);
+        for (unsigned w = 0; w < 4; w++)
+            o[w] = zig_normal_at(key, (uint64_t)((b << 2) + w), block.v[w]);
     }
 
     R_xlen_t i = nblock << 2;
     if (i < n) {
-        double z0, z1;
         philox4x64_ctr_t block = rngat_block(key, (uint64_t)nblock, 0,
                                              RNGAT_PURPOSE_NORMAL);
-        box_muller_pair(block.v[0], block.v[1], mean, sd, &z0, &z1);
-        out[i++] = z0;
-        if (i < n)
-            out[i++] = z1;
-        if (i < n) {
-            box_muller_pair(block.v[2], block.v[3], mean, sd, &z0, &z1);
-            out[i++] = z0;
-            if (i < n)
-                out[i] = z1;
-        }
+        for (unsigned w = 0; i < n; w++, i++)
+            out[i] = zig_normal_at(key, (uint64_t)i, block.v[w]);
     }
 }
 
@@ -546,11 +595,19 @@ SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_) {
     int par_rows = !par_cols && n >= RNGAT_OMP_MIN_VALUES;
 #ifdef _OPENMP
 #pragma omp parallel for if(par_cols) default(none) \
-    shared(kw, out, n, nkey, mean, sd, par_rows) schedule(static)
+    shared(kw, out, n, nkey, par_rows) schedule(static)
 #endif
     for (R_xlen_t col = 0; col < nkey; col++) {
         philox4x64_key_t k = key_from_words(kw, nkey, col);
-        fill_normal_column(out + n * col, n, k, mean, sd, par_rows);
+        fill_normal_column(out + n * col, n, k, par_rows);
+    }
+    if (mean != 0.0 || sd != 1.0) {
+#ifdef _OPENMP
+#pragma omp parallel for if(total >= RNGAT_OMP_MIN_VALUES) default(none) \
+    shared(out, total, mean, sd) schedule(static)
+#endif
+        for (R_xlen_t i = 0; i < total; i++)
+            out[i] = mean + sd * out[i];
     }
     UNPROTECT(1);
     return ans;
