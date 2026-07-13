@@ -139,6 +139,7 @@ philox4x64_ctr_t r = philox4x64(c, k);           /* 10 rounds; r is a fresh stru
 This is essentially the construction rngat uses (see `rngat_block()` in [src/rngat.c](../src/rngat.c)); the one refinement is that rngat packs **four** logical output positions into each block instead of using only `r.v[0]` (see below). The R-facing consequences:
 
 - `rng_uniform(key, n)` evaluates output positions `0:(n - 1)` under the uniform purpose, picks word `position & 3`, and turns the top 53 bits into a double in (0, 1) — 53 because that is the precision of an R double's mantissa.
+- `rng_uniform()` and `rng_integer()` can optionally fill different key columns in parallel with OpenMP. Threaded loops do not call R API; they only read validated key words and write primitive output.
 - `rng_normal()`, `rng_integer()` and `rng_bits()` use the same position layout but separate purpose values, so accidental reuse of the same key across sampler families does not read the identical counter slice.
 - `rng_fold(key, data)` hashes typed data to a 64-bit value, evaluates a fold-purpose block, and uses `r.v[0]`, `r.v[1]` as the derived key.
 - An `rng_key` in R is an opaque integer matrix with one key per row and four 32-bit words per key: `{k0 low, k0 high, k1 low, k1 high}`. The C code copies these by bit pattern because R's integer type is signed and reserves one bit pattern for `NA`.

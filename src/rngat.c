@@ -9,6 +9,9 @@
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 #include "Random123/philox.h"
 
@@ -38,6 +41,8 @@
 #define RNGAT_PURPOSE_NORMAL  ((uint64_t)2)
 #define RNGAT_PURPOSE_INTEGER ((uint64_t)3)
 #define RNGAT_PURPOSE_FOLD    ((uint64_t)4)
+
+#define RNGAT_OMP_MIN_VALUES ((R_xlen_t)32768)
 
 /* ---- key representation ---- */
 
@@ -83,11 +88,7 @@ static SEXP key_engine(SEXP key) {
     return Rf_getAttrib(key, engine_symbol());
 }
 
-static philox4x64_key_t key_at(SEXP key, R_xlen_t i) {
-    R_xlen_t nkey = key_count(key);
-    if (i < 0 || i >= nkey)
-        Rf_error("internal key index out of range");
-
+static philox4x64_key_t key_at_unchecked(SEXP key, R_xlen_t nkey, R_xlen_t i) {
     philox4x64_key_t k;
     uint64_t w0 = (uint64_t)load_word_at(key, nkey, i, 0);
     uint64_t w1 = (uint64_t)load_word_at(key, nkey, i, 1);
@@ -96,6 +97,13 @@ static philox4x64_key_t key_at(SEXP key, R_xlen_t i) {
     k.v[0] = w0 | (w1 << 32);
     k.v[1] = w2 | (w3 << 32);
     return k;
+}
+
+static philox4x64_key_t key_at(SEXP key, R_xlen_t i) {
+    R_xlen_t nkey = key_count(key);
+    if (i < 0 || i >= nkey)
+        Rf_error("internal key index out of range");
+    return key_at_unchecked(key, nkey, i);
 }
 
 static SEXP alloc_key_vector(R_xlen_t nkey, SEXP engine) {
@@ -415,8 +423,11 @@ SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     set_sample_dim(ans, n, nkey);
     double *out = REAL(ans);
     double span = max - min;
+#ifdef _OPENMP
+#pragma omp parallel for if(nkey > 1 && total >= RNGAT_OMP_MIN_VALUES) schedule(static)
+#endif
     for (R_xlen_t col = 0; col < nkey; col++) {
-        philox4x64_key_t k = key_at(key, col);
+        philox4x64_key_t k = key_at_unchecked(key, nkey, col);
         for (R_xlen_t i = 0; i < n; i++) {
             uint64_t bits = rngat_word(k, (uint64_t)i, 0, RNGAT_PURPOSE_UNIFORM);
             out[i + n * col] = min + span * u01_open(bits);
@@ -473,8 +484,11 @@ SEXP C_rng_integer(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     SEXP ans = PROTECT(Rf_allocVector(INTSXP, total));
     set_sample_dim(ans, n, nkey);
     int *out = INTEGER(ans);
+#ifdef _OPENMP
+#pragma omp parallel for if(nkey > 1 && total >= RNGAT_OMP_MIN_VALUES) schedule(static)
+#endif
     for (R_xlen_t col = 0; col < nkey; col++) {
-        philox4x64_key_t k = key_at(key, col);
+        philox4x64_key_t k = key_at_unchecked(key, nkey, col);
         for (R_xlen_t i = 0; i < n; i++) {
             uint32_t offset = bounded_u32(k, (uint64_t)i, range);
             out[i + n * col] = min + (int)offset;
