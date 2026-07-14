@@ -60,6 +60,21 @@
 
 #define RNGAT_OMP_MIN_VALUES ((R_xlen_t)32768)
 
+/* Package-local OpenMP thread cap set by rng_threads(); 0 means "no cap"
+ * (use omp_get_max_threads()). Applied per pragma via num_threads(), so it
+ * governs only rngat's own fills, not other OpenMP code in the process. */
+static int rngat_thread_cap = 0;
+
+static int rngat_threads(void) {
+#ifdef _OPENMP
+    int max = omp_get_max_threads();
+    return (rngat_thread_cap > 0 && rngat_thread_cap < max) ? rngat_thread_cap
+                                                            : max;
+#else
+    return 1;
+#endif
+}
+
 /* ---- key representation ---- */
 
 static SEXP engine_symbol(void) {
@@ -251,9 +266,17 @@ static uint64_t rngat_word(philox4x64_key_t key, uint64_t index,
     return block.v[index & 3u];
 }
 
-/* 53 random bits -> double strictly inside (0, 1) */
+/* Top 52 random bits, centered in their bucket -> exactly (m + 0.5) *
+ * 2^-52, strictly inside (0, 1): stuff the bits into the mantissa of a
+ * double in [1, 2), then shift the interval; the subtraction is exact.
+ * Integer ops plus one FP subtract, so fill loops vectorize. (The former
+ * ((bits >> 11) + 0.5) * 2^-53 form rounded for bits >= 2^52 and could
+ * even yield exactly 1.0, breaking the open interval.) */
 static double u01_open(uint64_t bits) {
-    return ((double)(bits >> 11) + 0.5) * (1.0 / 9007199254740992.0);
+    uint64_t stuffed = (bits >> 12) | UINT64_C(0x3ff0000000000000);
+    double d;
+    memcpy(&d, &stuffed, sizeof d);
+    return d - (1.0 - 0x1.0p-53);
 }
 
 /* 53-bit uniform in [0, 1), numpy's next_double mapping. */
@@ -297,8 +320,9 @@ static double zig_normal_slow(philox4x64_key_t key, uint64_t index, uint64_t r) 
         }
 
         /* wedge: compare Y * (width of layer idx) against the position in
-         * the layer, with Dnorm bracketing the exp curve around its chord;
-         * the curve is convex below the inflection layer and concave above */
+         * the layer, with rngat_zig_gap bracketing the exp curve around its
+         * chord; f is concave below the inflection layer (x < 1, curve
+         * above the chord) and convex above it */
         uint64_t L = (UINT64_C(1) << 52) - ki_double[idx];
         uint64_t R = (UINT64_C(1) << 52) - rabs;
         uint64_t YL;
@@ -368,7 +392,8 @@ static void fill_normal_column(double *out, R_xlen_t n,
     R_xlen_t nblock = n >> 2;
     R_xlen_t nchunk = (nblock + RNGAT_CHUNK_BLOCKS - 1) / RNGAT_CHUNK_BLOCKS;
 #ifdef _OPENMP
-#pragma omp parallel for if(threads) default(none) \
+#pragma omp parallel for if(threads > 1) \
+    num_threads(threads > 0 ? threads : 1) default(none) \
     shared(out, nblock, nchunk, key) schedule(static)
 #endif
     for (R_xlen_t c = 0; c < nchunk; c++) {
@@ -397,22 +422,27 @@ static void fill_normal_column(double *out, R_xlen_t n,
     }
 }
 
+/* Fills uniforms on (0, 1); C_rng_uniform applies min/span in a separate
+ * vectorizable pass so the hot loop stays Philox plus the bit trick.
+ * `threads` is the thread count for the inner parallel region; callers
+ * pass 0 to keep the column serial (e.g. when parallelizing over key
+ * columns). */
 static void fill_uniform_column(double *out, R_xlen_t n,
-                                philox4x64_key_t key,
-                                double min, double span, int threads) {
+                                philox4x64_key_t key, int threads) {
     R_xlen_t nblock = n >> 2;
 #ifdef _OPENMP
-#pragma omp parallel for if(threads) default(none) \
-    shared(out, nblock, key, min, span) schedule(static)
+#pragma omp parallel for if(threads > 1) \
+    num_threads(threads > 0 ? threads : 1) default(none) \
+    shared(out, nblock, key) schedule(static)
 #endif
     for (R_xlen_t b = 0; b < nblock; b++) {
         philox4x64_ctr_t block = rngat_block(key, (uint64_t)b, 0,
                                              RNGAT_PURPOSE_UNIFORM);
         double *o = out + (b << 2);
-        o[0] = min + span * u01_open(block.v[0]);
-        o[1] = min + span * u01_open(block.v[1]);
-        o[2] = min + span * u01_open(block.v[2]);
-        o[3] = min + span * u01_open(block.v[3]);
+        o[0] = u01_open(block.v[0]);
+        o[1] = u01_open(block.v[1]);
+        o[2] = u01_open(block.v[2]);
+        o[3] = u01_open(block.v[3]);
     }
 
     R_xlen_t i = nblock << 2;
@@ -420,7 +450,7 @@ static void fill_uniform_column(double *out, R_xlen_t n,
         philox4x64_ctr_t block = rngat_block(key, (uint64_t)nblock, 0,
                                              RNGAT_PURPOSE_UNIFORM);
         for (unsigned w = 0; i < n; w++, i++)
-            out[i] = min + span * u01_open(block.v[w]);
+            out[i] = u01_open(block.v[w]);
     }
 }
 
@@ -586,6 +616,17 @@ SEXP C_rng_fold(SEXP key, SEXP data) {
     return ans;
 }
 
+SEXP C_rng_threads(SEXP threads_) {
+    int prev = rngat_threads();
+    if (!Rf_isNull(threads_)) {
+        double value = numeric_scalar(threads_, "threads");
+        if (value != trunc(value) || value < 1 || value > 1048576)
+            Rf_error("`threads` must be a single whole number that is at least 1");
+        rngat_thread_cap = (int)value;
+    }
+    return Rf_ScalarInteger(prev);
+}
+
 /* ---- .Call entry points: samplers ---- */
 
 SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
@@ -602,25 +643,34 @@ SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     set_sample_dim(ans, n, nkey);
     double *out = REAL(ans);
     double span = max - min;
+    int nt = rngat_threads();
     if (span == 0.0) {
 #ifdef _OPENMP
-#pragma omp parallel for if(total >= RNGAT_OMP_MIN_VALUES) default(none) \
-    shared(out, total, min) schedule(static)
+#pragma omp parallel for if(nt > 1 && total >= RNGAT_OMP_MIN_VALUES) \
+    num_threads(nt) default(none) shared(out, total, min) schedule(static)
 #endif
         for (R_xlen_t i = 0; i < total; i++)
             out[i] = min;
         UNPROTECT(1);
         return ans;
     }
-    int par_cols = nkey > 1 && total >= RNGAT_OMP_MIN_VALUES;
-    int par_rows = !par_cols && n >= RNGAT_OMP_MIN_VALUES;
+    int par_cols = nt > 1 && nkey > 1 && total >= RNGAT_OMP_MIN_VALUES;
+    int par_rows = !par_cols && n >= RNGAT_OMP_MIN_VALUES ? nt : 0;
 #ifdef _OPENMP
-#pragma omp parallel for if(par_cols) default(none) \
-    shared(kw, out, n, nkey, min, span, par_rows) schedule(static)
+#pragma omp parallel for if(par_cols) num_threads(nt) default(none) \
+    shared(kw, out, n, nkey, par_rows) schedule(static)
 #endif
     for (R_xlen_t col = 0; col < nkey; col++) {
         philox4x64_key_t k = key_from_words(kw, nkey, col);
-        fill_uniform_column(out + n * col, n, k, min, span, par_rows);
+        fill_uniform_column(out + n * col, n, k, par_rows);
+    }
+    if (min != 0.0 || span != 1.0) {
+#ifdef _OPENMP
+#pragma omp parallel for if(nt > 1 && total >= RNGAT_OMP_MIN_VALUES) \
+    num_threads(nt) default(none) shared(out, total, min, span) schedule(static)
+#endif
+        for (R_xlen_t i = 0; i < total; i++)
+            out[i] = min + span * out[i];
     }
     UNPROTECT(1);
     return ans;
@@ -639,20 +689,21 @@ SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_) {
     SEXP ans = PROTECT(Rf_allocVector(REALSXP, total));
     set_sample_dim(ans, n, nkey);
     double *out = REAL(ans);
+    int nt = rngat_threads();
     if (sd == 0.0) {
 #ifdef _OPENMP
-#pragma omp parallel for if(total >= RNGAT_OMP_MIN_VALUES) default(none) \
-    shared(out, total, mean) schedule(static)
+#pragma omp parallel for if(nt > 1 && total >= RNGAT_OMP_MIN_VALUES) \
+    num_threads(nt) default(none) shared(out, total, mean) schedule(static)
 #endif
         for (R_xlen_t i = 0; i < total; i++)
             out[i] = mean;
         UNPROTECT(1);
         return ans;
     }
-    int par_cols = nkey > 1 && total >= RNGAT_OMP_MIN_VALUES;
-    int par_rows = !par_cols && n >= RNGAT_OMP_MIN_VALUES;
+    int par_cols = nt > 1 && nkey > 1 && total >= RNGAT_OMP_MIN_VALUES;
+    int par_rows = !par_cols && n >= RNGAT_OMP_MIN_VALUES ? nt : 0;
 #ifdef _OPENMP
-#pragma omp parallel for if(par_cols) default(none) \
+#pragma omp parallel for if(par_cols) num_threads(nt) default(none) \
     shared(kw, out, n, nkey, par_rows) schedule(static)
 #endif
     for (R_xlen_t col = 0; col < nkey; col++) {
@@ -661,8 +712,8 @@ SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_) {
     }
     if (mean != 0.0 || sd != 1.0) {
 #ifdef _OPENMP
-#pragma omp parallel for if(total >= RNGAT_OMP_MIN_VALUES) default(none) \
-    shared(out, total, mean, sd) schedule(static)
+#pragma omp parallel for if(nt > 1 && total >= RNGAT_OMP_MIN_VALUES) \
+    num_threads(nt) default(none) shared(out, total, mean, sd) schedule(static)
 #endif
         for (R_xlen_t i = 0; i < total; i++)
             out[i] = mean + sd * out[i];
@@ -699,7 +750,8 @@ static void fill_integer_column(int *out, R_xlen_t n, philox4x64_key_t key,
                                 int threads) {
     R_xlen_t nblock = n >> 2;
 #ifdef _OPENMP
-#pragma omp parallel for if(threads) default(none) \
+#pragma omp parallel for if(threads > 1) \
+    num_threads(threads > 0 ? threads : 1) default(none) \
     shared(out, nblock, key, min, range, threshold) schedule(static)
 #endif
     for (R_xlen_t b = 0; b < nblock; b++) {
@@ -743,10 +795,11 @@ SEXP C_rng_integer(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     SEXP ans = PROTECT(Rf_allocVector(INTSXP, total));
     set_sample_dim(ans, n, nkey);
     int *out = INTEGER(ans);
-    int par_cols = nkey > 1 && total >= RNGAT_OMP_MIN_VALUES;
-    int par_rows = !par_cols && n >= RNGAT_OMP_MIN_VALUES;
+    int nt = rngat_threads();
+    int par_cols = nt > 1 && nkey > 1 && total >= RNGAT_OMP_MIN_VALUES;
+    int par_rows = !par_cols && n >= RNGAT_OMP_MIN_VALUES ? nt : 0;
 #ifdef _OPENMP
-#pragma omp parallel for if(par_cols) default(none) \
+#pragma omp parallel for if(par_cols) num_threads(nt) default(none) \
     shared(kw, out, n, nkey, min, range, threshold, par_rows) schedule(static)
 #endif
     for (R_xlen_t col = 0; col < nkey; col++) {
@@ -813,6 +866,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"C_rng_normal",     (DL_FUNC) &C_rng_normal,     4},
     {"C_rng_integer",    (DL_FUNC) &C_rng_integer,    4},
     {"C_rng_bits",       (DL_FUNC) &C_rng_bits,       3},
+    {"C_rng_threads",    (DL_FUNC) &C_rng_threads,    1},
     {NULL, NULL, 0}
 };
 

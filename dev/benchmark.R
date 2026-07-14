@@ -9,7 +9,9 @@ y10 <- rng_key(123, n = 10)
 # NOTE: rng_*(y10, n = 1e6) draws 1e6 values per key = 1e7 values total, so
 # multi-key comparisons need len = 1e7 on the randompack side.
 
+rng_threads(1L)
 res_unif <- bench::mark(
+  min_iterations = 40,
   check = F,
   rngat = rng_uniform(y1, n = 1e6),
   randompack = x$unif(len = 1e6),
