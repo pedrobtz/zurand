@@ -148,12 +148,16 @@ rng_bits <- function(key, n = 1L, bits = 32L) {
 #'
 #' Draws below an internal size threshold always run single-threaded.
 #'
-#' @param threads `NULL` to query, or a single whole number of at least 1.
-#'   Values above the machine's thread count are allowed and equivalent to
-#'   no cap.
-#' @return The previous maximum as an integer: visibly when querying,
-#'   invisibly when setting, so `old <- rng_threads(1L)` supports restoring
-#'   with `rng_threads(old)`.
+#' @param threads `NULL` to query the effective maximum, a single whole
+#'   number of at least 1 to cap rngat's thread use, or `0` to remove the
+#'   cap. Values above the machine's thread count are allowed and
+#'   equivalent to no cap.
+#' @return Querying returns the effective maximum thread count as an
+#'   integer. Setting invisibly returns the previous *configured* cap,
+#'   with `0L` meaning "no cap was set", so `old <- rng_threads(1L)`
+#'   followed by `rng_threads(old)` restores the exact prior
+#'   configuration -- including the uncapped state, which keeps tracking
+#'   later changes to the process-wide OpenMP maximum.
 #' @export
 #' @examples
 #' rng_threads()

@@ -27,9 +27,17 @@
 #pragma GCC diagnostic pop
 #endif
 /* Fixed-point brackets of the wedge test, generated from the NumPy
- * tables by dev/generate-zig-bounds.R: most wedge decisions need one
+ * tables by tools/generate-zig-bounds.R: most wedge decisions need one
  * wide multiply instead of exp(). */
 #include "zigbounds.h"
+
+/* Width of the deferred band on the chord side of the wedge shortcut, in
+ * the same 52-bit fixed point as rngat_zig_gap. Must dominate the ~7-unit
+ * chord crossing that ki rounding causes at layer edges (measured in
+ * tools/generate-zig-bounds.R) plus the fallback's own double-rounding
+ * (~tens of units); 4096 leaves two orders of magnitude of headroom at a
+ * hit rate of ~2^-40 per wedge draw. */
+#define RNGAT_ZIG_GUARD ((uint64_t)4096)
 
 /*
  * rngat: stateless random numbers built on Philox4x64-10.
@@ -322,17 +330,22 @@ static double zig_normal_slow(philox4x64_key_t key, uint64_t index, uint64_t r) 
         /* wedge: compare Y * (width of layer idx) against the position in
          * the layer, with rngat_zig_gap bracketing the exp curve around its
          * chord; f is concave below the inflection layer (x < 1, curve
-         * above the chord) and convex above it */
+         * above the chord) and convex above it. RNGAT_ZIG_GUARD widens the
+         * ambiguous band on the chord side: ki rounding lets the true curve
+         * cross the chord by a few fixed-point units, and the fallback's
+         * own double rounding lives there too, so the hairline band defers
+         * to the exp() test instead of deciding. With the guard, shortcut
+         * decisions never contradict the fallback. */
         uint64_t L = (UINT64_C(1) << 52) - ki_double[idx];
         uint64_t R = (UINT64_C(1) << 52) - rabs;
         uint64_t YL;
         (void)mulhilo64(Y, L, &YL);
         int accept, reject;
         if (idx > RNGAT_ZIG_INFLECTION) {
-            reject = YL > R;
+            reject = YL > R + RNGAT_ZIG_GUARD;
             accept = !reject && YL + rngat_zig_gap[idx] < R;
         } else if (idx < RNGAT_ZIG_INFLECTION) {
-            accept = YL < R;
+            accept = YL + RNGAT_ZIG_GUARD < R;
             reject = !accept && YL > R + rngat_zig_gap[idx];
         } else {
             reject = YL > R + rngat_zig_gap_hi52;
@@ -616,14 +629,20 @@ SEXP C_rng_fold(SEXP key, SEXP data) {
     return ans;
 }
 
+/* NULL queries the effective maximum. A value sets the cap (0 removes it)
+ * and returns the previous *raw* cap, 0 when none was set, so that
+ * rng_threads(old) restores the uncapped state rather than pinning
+ * whatever the OpenMP maximum happened to be at save time. */
 SEXP C_rng_threads(SEXP threads_) {
-    int prev = rngat_threads();
-    if (!Rf_isNull(threads_)) {
-        double value = numeric_scalar(threads_, "threads");
-        if (value != trunc(value) || value < 1 || value > 1048576)
-            Rf_error("`threads` must be a single whole number that is at least 1");
-        rngat_thread_cap = (int)value;
-    }
+    if (Rf_isNull(threads_))
+        return Rf_ScalarInteger(rngat_threads());
+
+    double value = numeric_scalar(threads_, "threads");
+    if (value != trunc(value) || value < 0)
+        Rf_error("`threads` must be a single whole number that is at least 1, "
+                 "or 0 to remove the cap");
+    int prev = rngat_thread_cap;
+    rngat_thread_cap = value > (double)INT_MAX ? INT_MAX : (int)value;
     return Rf_ScalarInteger(prev);
 }
 

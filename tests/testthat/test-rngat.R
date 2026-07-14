@@ -217,9 +217,8 @@ test_that("large draws extend small draws bit-for-bit, including parallel paths"
 })
 
 test_that("rng_threads() caps parallelism without changing results", {
-  old <- rng_threads()
-  on.exit(rng_threads(old))
-  expect_gte(old, 1L)
+  eff <- rng_threads()
+  expect_gte(eff, 1L)
 
   key <- rng_key(31L)
   keys <- rng_key(31L, n = 3L)
@@ -227,20 +226,30 @@ test_that("rng_threads() caps parallelism without changing results", {
   z <- rng_normal(keys, 40001L)
   x <- rng_integer(key, 70001L, -9L, 9L)
 
-  prev <- rng_threads(1L)
-  expect_identical(prev, old)
+  raw <- rng_threads(1L)
+  on.exit(rng_threads(raw))
+  expect_gte(raw, 0L)
   expect_identical(rng_threads(), 1L)
   expect_identical(rng_uniform(key, 70001L), u)
   expect_identical(rng_normal(keys, 40001L), z)
   expect_identical(rng_integer(key, 70001L, -9L, 9L), x)
 
-  rng_threads(old)
-  expect_identical(rng_threads(), old)
+  # setting returns the raw previous cap so restores round-trip exactly,
+  # including back to the uncapped state
+  prev <- rng_threads(0L)
+  expect_identical(prev, 1L)
+  expect_identical(rng_threads(), eff)
+  expect_identical(rng_uniform(key, 70001L), u)
 
-  expect_error(rng_threads(0L), "at least 1")
+  # far above the machine count is allowed and equivalent to no cap
+  rng_threads(1e9)
+  expect_identical(rng_threads(), eff)
+  rng_threads(0L)
+
+  expect_error(rng_threads(-1L), "at least 1")
   expect_error(rng_threads(1.5), "at least 1")
   expect_error(rng_threads(c(1L, 2L)), "single value")
-  expect_identical(rng_threads(), old)
+  expect_identical(rng_threads(), eff)
 })
 
 test_that("stateless functions do not touch .Random.seed", {

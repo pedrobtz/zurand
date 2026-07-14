@@ -7,14 +7,18 @@
 rng_threads(threads = NULL)
 }
 \arguments{
-\item{threads}{\code{NULL} to query, or a single whole number of at least 1.
-Values above the machine's thread count are allowed and equivalent to
-no cap.}
+\item{threads}{\code{NULL} to query the effective maximum, a single whole
+number of at least 1 to cap rngat's thread use, or \code{0} to remove the
+cap. Values above the machine's thread count are allowed and
+equivalent to no cap.}
 }
 \value{
-The previous maximum as an integer: visibly when querying,
-invisibly when setting, so \code{old <- rng_threads(1L)} supports restoring
-with \code{rng_threads(old)}.
+Querying returns the effective maximum thread count as an
+integer. Setting invisibly returns the previous \emph{configured} cap,
+with \code{0L} meaning "no cap was set", so \code{old <- rng_threads(1L)}
+followed by \code{rng_threads(old)} restores the exact prior
+configuration -- including the uncapped state, which keeps tracking
+later changes to the process-wide OpenMP maximum.
 }
 \description{
 \code{rng_threads()} reports the maximum number of OpenMP threads the samplers
