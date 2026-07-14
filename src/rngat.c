@@ -290,17 +290,39 @@ static double u01_open(uint64_t bits) {
 /* 53-bit uniform in [0, 1), numpy's next_double mapping. */
 #define RNGAT_U64_TO_DOUBLE(u) (((u) >> 11) * 0x1.0p-53)
 
+/* Retry-word stream for the slow path: group g >= 1 is one Philox block
+ * at counter {index, g, purpose}, consumed word by word, so all four
+ * words of each retry block are used and draw `index` stays a pure
+ * function of (key, index). Distinct from the fast-path counters, whose
+ * second word is always 0. (The former one-word-per-attempt scheme paid
+ * a full Philox call per retry word and discarded the other three;
+ * batching measured ~3% faster on bulk rnorm overall.) */
+typedef struct {
+    philox4x64_ctr_t blk;
+    uint64_t group;
+    unsigned w;
+} zig_stream;
+
+R123_STATIC_INLINE uint64_t zig_next(zig_stream *s, philox4x64_key_t key,
+                                     uint64_t index) {
+    if (s->w == 4) {
+        s->blk = rngat_block(key, index, ++s->group, RNGAT_PURPOSE_NORMAL);
+        s->w = 0;
+    }
+    return s->blk.v[s->w++];
+}
+
 /* Cold continuation of zig_normal_at once the one-word fast path has
- * rejected: wedge acceptance and the layer-0 tail, redrawing words at
- * (index, attempt >= 1) so draw `index` stays a pure function of
- * (key, index). Most wedge decisions resolve in fixed point against the
- * Dnorm bracket; only the narrow ambiguous band pays exp(). Kept out of
- * line so the fast path inlines into the sampler loops. */
+ * rejected: wedge acceptance and the layer-0 tail, redrawing words from
+ * the zig_stream retry blocks. Most wedge decisions resolve in fixed
+ * point against the Dnorm bracket; only the narrow ambiguous band pays
+ * exp(). Kept out of line so the fast path inlines into the sampler
+ * loops. */
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((noinline, cold))
 #endif
 static double zig_normal_slow(philox4x64_key_t key, uint64_t index, uint64_t r) {
-    uint64_t attempt = 0;
+    zig_stream s = {.group = 0, .w = 4};
     int idx = (int)(r & 0xff);
     int sign = (int)((r >> 8) & 0x1);
     uint64_t rabs = (r >> 9) & UINT64_C(0x000fffffffffffff);
@@ -310,20 +332,18 @@ static double zig_normal_slow(philox4x64_key_t key, uint64_t index, uint64_t r) 
     /* the caller established rabs >= ki_double[idx] for the entry word */
 
     for (;;) {
-        uint64_t Y = rngat_word(key, index, ++attempt, RNGAT_PURPOSE_NORMAL);
+        uint64_t Y = zig_next(&s, key, index);
 
         if (idx == 0) {
             /* layer-0 tail; the first ordinate reuses Y */
             double yy = -log1p(-RNGAT_U64_TO_DOUBLE(Y));
             for (;;) {
                 double xx = -ziggurat_nor_inv_r *
-                    log1p(-RNGAT_U64_TO_DOUBLE(rngat_word(
-                        key, index, ++attempt, RNGAT_PURPOSE_NORMAL)));
+                    log1p(-RNGAT_U64_TO_DOUBLE(zig_next(&s, key, index)));
                 if (yy + yy > xx * xx)
                     return sign ? -(ziggurat_nor_r + xx)
                                 : ziggurat_nor_r + xx;
-                yy = -log1p(-RNGAT_U64_TO_DOUBLE(rngat_word(
-                    key, index, ++attempt, RNGAT_PURPOSE_NORMAL)));
+                yy = -log1p(-RNGAT_U64_TO_DOUBLE(zig_next(&s, key, index)));
             }
         }
 
@@ -360,7 +380,7 @@ static double zig_normal_slow(philox4x64_key_t key, uint64_t index, uint64_t r) 
                 return x;
         }
 
-        r = rngat_word(key, index, ++attempt, RNGAT_PURPOSE_NORMAL);
+        r = zig_next(&s, key, index);
         idx = (int)(r & 0xff);
         sign = (int)((r >> 8) & 0x1);
         rabs = (r >> 9) & UINT64_C(0x000fffffffffffff);
@@ -380,10 +400,15 @@ R123_STATIC_INLINE double zig_normal_at(philox4x64_key_t key, uint64_t index,
                                         uint64_t r) {
     int idx = (int)(r & 0xff);
     uint64_t rabs = (r >> 9) & UINT64_C(0x000fffffffffffff);
-    if (R123_BUILTIN_EXPECT(rabs < ki_double[idx], 1)) {
-        double x = (double)rabs * wi_double[idx];
-        return (r >> 8) & 0x1 ? -x : x;
-    }
+    /* Negate before the int->double convert: (-rabs) * wi and
+     * -(rabs * wi) are bit-identical, and the signed form costs one
+     * cneg instead of a second multiply feeding a select. Computed
+     * unconditionally so the convert/multiply chain starts before the
+     * acceptance compare resolves. */
+    int64_t s = (r >> 8) & 0x1 ? -(int64_t)rabs : (int64_t)rabs;
+    double x = (double)s * wi_double[idx];
+    if (R123_BUILTIN_EXPECT(rabs < ki_double[idx], 1))
+        return x;
     return zig_normal_slow(key, index, r);
 }
 
@@ -397,7 +422,10 @@ R123_STATIC_INLINE double zig_normal_at(philox4x64_key_t key, uint64_t index,
  * Works in two passes over a small stack chunk: a tight Philox-only loop
  * (independent iterations the compiler can pipeline across the 10-round
  * dependency chain), then the ziggurat transform over the buffered words.
- * Same words, same decisions, same output as a fused loop. */
+ * Same words, same decisions, same output as a fused loop. (Transforming
+ * in place over the output slice instead — randompack's layout — measured
+ * ~12% slower here: it turns the output stream's write-once pattern into
+ * write-read-write.) */
 #define RNGAT_CHUNK_BLOCKS 128 /* 512 words, 4 KiB per thread */
 
 static void fill_normal_column(double *out, R_xlen_t n,
