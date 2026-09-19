@@ -1,9 +1,9 @@
-# rngat
+# zurand
 
 <!-- badges: start -->
-[![R-CMD-check](https://github.com/pedrobtz/rngat/actions/workflows/R-CMD-check.yml/badge.svg)](https://github.com/pedrobtz/rngat/actions/workflows/R-CMD-check.yml)
-[![native-checks](https://github.com/pedrobtz/rngat/actions/workflows/native-checks.yml/badge.svg)](https://github.com/pedrobtz/rngat/actions/workflows/native-checks.yml)
-![Coverage](https://github.com/pedrobtz/rngat/raw/main/.github/badges/coverage.svg)
+[![R-CMD-check](https://github.com/pedrobtz/zurand/actions/workflows/R-CMD-check.yml/badge.svg)](https://github.com/pedrobtz/zurand/actions/workflows/R-CMD-check.yml)
+[![native-checks](https://github.com/pedrobtz/zurand/actions/workflows/native-checks.yml/badge.svg)](https://github.com/pedrobtz/zurand/actions/workflows/native-checks.yml)
+![Coverage](https://github.com/pedrobtz/zurand/raw/main/.github/badges/coverage.svg)
 <!-- badges: end -->
 
 Stateless random numbers for R, built on the Philox4x64-10 counter-based
@@ -18,7 +18,7 @@ threads the machine has.
 
 ```r
 # install.packages("pak")
-pak::pak("pedrobtz/rngat")
+pak::pak("pedrobtz/zurand")
 ```
 
 ## Quick start
@@ -27,7 +27,7 @@ Create a key, then draw from it. The same key and arguments always give the
 same values:
 
 ```r
-library(rngat)
+library(zurand)
 
 key <- rng_key(42L)
 key

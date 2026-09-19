@@ -16,7 +16,7 @@
 # fixed-point flooring error plus double-rounding headroom. The nominally
 # margin-free comparisons above are NOT exact on their own: ki rounding can
 # push the true curve a few units across the chord (see WRONG_SIDE_TOL
-# below), so the C side additionally defers a RNGAT_ZIG_GUARD-wide band on
+# below), so the C side additionally defers a ZURAND_ZIG_GUARD-wide band on
 # the chord side to the exp() fallback. With that guard, shortcut decisions
 # never contradict the fallback.
 #
@@ -102,7 +102,7 @@ for (idx in 1:255) {
 # validation: on a dense grid the claimed one-sided bounds must hold.
 # Because ki is a rounded integer, the curve can cross the chord by a few
 # YL units at the rabs = ki end even away from the inflection; measured
-# maximum is ~7.2. RNGAT_ZIG_GUARD in src/rngat.c must stay comfortably
+# maximum is ~7.2. ZURAND_ZIG_GUARD in src/zurand.c must stay comfortably
 # above this value (plus the fallback's own double-rounding, ~tens of
 # units) for the shortcut-never-contradicts-fallback invariant to hold.
 WRONG_SIDE_TOL <- 16
@@ -133,14 +133,14 @@ lines <- c(
   " * (f concave) the gap bounds the curve above the chord and gates",
   " * rejection; above the inflection (f convex) it bounds the curve below",
   " * the chord and gates acceptance; the straddling layer uses both. */",
-  "#ifndef RNGAT_ZIGBOUNDS_H",
-  "#define RNGAT_ZIGBOUNDS_H",
+  "#ifndef ZURAND_ZIGBOUNDS_H",
+  "#define ZURAND_ZIGBOUNDS_H",
   "",
-  sprintf("#define RNGAT_ZIG_INFLECTION %d", inflect),
-  sprintf("static const uint64_t rngat_zig_gap_hi52 = %s;",
+  sprintf("#define ZURAND_ZIG_INFLECTION %d", inflect),
+  sprintf("static const uint64_t zurand_zig_gap_hi52 = %s;",
           fmt_u64(gap52_hi)),
   "",
-  "static const uint64_t rngat_zig_gap[] = {"
+  "static const uint64_t zurand_zig_gap[] = {"
 )
 body <- vapply(seq(1, 256, by = 2), function(i) {
   paste0("    ", paste(fmt_u64(gap[i:min(i + 1, 256)]), collapse = ", "), ",")

@@ -7,6 +7,6 @@
 # * https://testthat.r-lib.org/articles/special-files.html
 
 library(testthat)
-library(rngat)
+library(zurand)
 
-test_check("rngat")
+test_check("zurand")

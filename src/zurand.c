@@ -17,16 +17,16 @@
  * so that build is simply serial rather than broken. */
 #ifdef __has_include
 #  if __has_include(<omp.h>)
-#    define RNGAT_HAVE_OMP_H 1
+#    define ZURAND_HAVE_OMP_H 1
 #  endif
 #else
 /* No __has_include: assume the header is present, the previous behaviour. */
-#  define RNGAT_HAVE_OMP_H 1
+#  define ZURAND_HAVE_OMP_H 1
 #endif
 
-#if defined(_OPENMP) && defined(RNGAT_HAVE_OMP_H)
+#if defined(_OPENMP) && defined(ZURAND_HAVE_OMP_H)
 #  include <omp.h>
-#  define RNGAT_OPENMP 1
+#  define ZURAND_OPENMP 1
 #endif
 
 #include "Random123/philox.h"
@@ -48,15 +48,15 @@
 #include "zigbounds.h"
 
 /* Width of the deferred band on the chord side of the wedge shortcut, in
- * the same 52-bit fixed point as rngat_zig_gap. Must dominate the ~7-unit
+ * the same 52-bit fixed point as zurand_zig_gap. Must dominate the ~7-unit
  * chord crossing that ki rounding causes at layer edges (measured in
  * tools/generate-zig-bounds.R) plus the fallback's own double-rounding
  * (~tens of units); 4096 leaves two orders of magnitude of headroom at a
  * hit rate of ~2^-40 per wedge draw. */
-#define RNGAT_ZIG_GUARD ((uint64_t)4096)
+#define ZURAND_ZIG_GUARD ((uint64_t)4096)
 
 /*
- * rngat: stateless random numbers built on Philox4x64-10.
+ * zurand: stateless random numbers built on Philox4x64-10.
  *
  * A public key vector is an opaque integer matrix with one key per row and
  * four 32-bit words per row:
@@ -72,27 +72,27 @@
  * purpose values domain-separate folding and distribution draws.
  */
 
-#define RNGAT_KEY_WORDS 4
-#define RNGAT_ENGINE "philox4x64"
-#define RNGAT_MAX_EXACT_INT 9007199254740991.0
+#define ZURAND_KEY_WORDS 4
+#define ZURAND_ENGINE "philox4x64"
+#define ZURAND_MAX_EXACT_INT 9007199254740991.0
 
-#define RNGAT_PURPOSE_BITS    ((uint64_t)0)
-#define RNGAT_PURPOSE_UNIFORM ((uint64_t)1)
-#define RNGAT_PURPOSE_NORMAL  ((uint64_t)2)
-#define RNGAT_PURPOSE_INTEGER ((uint64_t)3)
-#define RNGAT_PURPOSE_FOLD    ((uint64_t)4)
+#define ZURAND_PURPOSE_BITS    ((uint64_t)0)
+#define ZURAND_PURPOSE_UNIFORM ((uint64_t)1)
+#define ZURAND_PURPOSE_NORMAL  ((uint64_t)2)
+#define ZURAND_PURPOSE_INTEGER ((uint64_t)3)
+#define ZURAND_PURPOSE_FOLD    ((uint64_t)4)
 
-#define RNGAT_OMP_MIN_VALUES ((R_xlen_t)32768)
+#define ZURAND_OMP_MIN_VALUES ((R_xlen_t)32768)
 
 /* Package-local OpenMP thread cap set by rng_threads(); 0 means "no cap"
  * (use omp_get_max_threads()). Applied per pragma via num_threads(), so it
- * governs only rngat's own fills, not other OpenMP code in the process. */
-static int rngat_thread_cap = 0;
+ * governs only zurand's own fills, not other OpenMP code in the process. */
+static int zurand_thread_cap = 0;
 
-static int rngat_threads(void) {
-#ifdef RNGAT_OPENMP
+static int zurand_threads(void) {
+#ifdef ZURAND_OPENMP
     int max = omp_get_max_threads();
-    return (rngat_thread_cap > 0 && rngat_thread_cap < max) ? rngat_thread_cap
+    return (zurand_thread_cap > 0 && zurand_thread_cap < max) ? zurand_thread_cap
                                                             : max;
 #else
     return 1;
@@ -107,8 +107,8 @@ static SEXP engine_symbol(void) {
 
 static void check_engine(SEXP engine) {
     if (TYPEOF(engine) != STRSXP || Rf_xlength(engine) != 1 ||
-        strcmp(CHAR(STRING_ELT(engine, 0)), RNGAT_ENGINE) != 0)
-        Rf_error("`engine` must be \"%s\"", RNGAT_ENGINE);
+        strcmp(CHAR(STRING_ELT(engine, 0)), ZURAND_ENGINE) != 0)
+        Rf_error("`engine` must be \"%s\"", ZURAND_ENGINE);
 }
 
 /* `words` is INTEGER(key), hoisted by the caller so that no R API is
@@ -130,9 +130,9 @@ static R_xlen_t key_count(SEXP key) {
 
     SEXP dim = Rf_getAttrib(key, R_DimSymbol);
     if (TYPEOF(dim) != INTSXP || Rf_xlength(dim) != 2 ||
-        INTEGER(dim)[0] < 0 || INTEGER(dim)[1] != RNGAT_KEY_WORDS)
+        INTEGER(dim)[0] < 0 || INTEGER(dim)[1] != ZURAND_KEY_WORDS)
         Rf_error("`key` has an invalid internal shape");
-    if (Rf_xlength(key) != (R_xlen_t)INTEGER(dim)[0] * RNGAT_KEY_WORDS)
+    if (Rf_xlength(key) != (R_xlen_t)INTEGER(dim)[0] * ZURAND_KEY_WORDS)
         Rf_error("`key` has an invalid internal length");
 
     SEXP engine = Rf_getAttrib(key, engine_symbol());
@@ -158,15 +158,15 @@ static philox4x64_key_t key_from_words(const int *words, R_xlen_t nkey, R_xlen_t
 
 static SEXP alloc_key_vector(R_xlen_t nkey, SEXP engine) {
     check_engine(engine);
-    if (nkey > R_XLEN_T_MAX / RNGAT_KEY_WORDS)
+    if (nkey > R_XLEN_T_MAX / ZURAND_KEY_WORDS)
         Rf_error("too many keys requested");
     if (nkey > INT_MAX)
         Rf_error("too many keys for a matrix-shaped key vector");
 
-    SEXP ans = PROTECT(Rf_allocVector(INTSXP, nkey * RNGAT_KEY_WORDS));
+    SEXP ans = PROTECT(Rf_allocVector(INTSXP, nkey * ZURAND_KEY_WORDS));
     SEXP dim = PROTECT(Rf_allocVector(INTSXP, 2));
     INTEGER(dim)[0] = (int)nkey;
-    INTEGER(dim)[1] = RNGAT_KEY_WORDS;
+    INTEGER(dim)[1] = ZURAND_KEY_WORDS;
     Rf_setAttrib(ans, R_DimSymbol, dim);
     Rf_setAttrib(ans, engine_symbol(), engine);
     SEXP cls = PROTECT(Rf_mkString("rng_key"));
@@ -223,7 +223,7 @@ static uint64_t u64_seed(SEXP x) {
     double value = numeric_scalar(x, "seed");
     if (value != trunc(value))
         Rf_error("`seed` must be a whole number");
-    if (value < 0 || value > RNGAT_MAX_EXACT_INT)
+    if (value < 0 || value > ZURAND_MAX_EXACT_INT)
         Rf_error("`seed` must be between 0 and 2^53 - 1");
     return (uint64_t)value;
 }
@@ -260,7 +260,7 @@ static int integer_bound(SEXP x, const char *what) {
 static int64_t exact_i64_from_double(double value, const char *what) {
     if (!R_FINITE(value) || value != trunc(value))
         Rf_error("`%s` must contain only finite whole numbers", what);
-    if (value < -RNGAT_MAX_EXACT_INT || value > RNGAT_MAX_EXACT_INT)
+    if (value < -ZURAND_MAX_EXACT_INT || value > ZURAND_MAX_EXACT_INT)
         Rf_error("`%s` values must be exactly representable integers", what);
     return (int64_t)value;
 }
@@ -274,9 +274,9 @@ static uint64_t splitmix64_next(uint64_t *state) {
     return z ^ (z >> 31);
 }
 
-R123_STATIC_INLINE R123_FORCE_INLINE(philox4x64_ctr_t rngat_block(
+R123_STATIC_INLINE R123_FORCE_INLINE(philox4x64_ctr_t zurand_block(
     philox4x64_key_t key, uint64_t index, uint64_t domain, uint64_t purpose));
-R123_STATIC_INLINE philox4x64_ctr_t rngat_block(philox4x64_key_t key,
+R123_STATIC_INLINE philox4x64_ctr_t zurand_block(philox4x64_key_t key,
                                                 uint64_t index,
                                                 uint64_t domain,
                                                 uint64_t purpose) {
@@ -284,9 +284,9 @@ R123_STATIC_INLINE philox4x64_ctr_t rngat_block(philox4x64_key_t key,
     return philox4x64(ctr, key);
 }
 
-static uint64_t rngat_word(philox4x64_key_t key, uint64_t index,
+static uint64_t zurand_word(philox4x64_key_t key, uint64_t index,
                            uint64_t domain, uint64_t purpose) {
-    philox4x64_ctr_t block = rngat_block(key, index >> 2, domain, purpose);
+    philox4x64_ctr_t block = zurand_block(key, index >> 2, domain, purpose);
     return block.v[index & 3u];
 }
 
@@ -304,7 +304,7 @@ static double u01_open(uint64_t bits) {
 }
 
 /* 53-bit uniform in [0, 1), numpy's next_double mapping. */
-#define RNGAT_U64_TO_DOUBLE(u) (((u) >> 11) * 0x1.0p-53)
+#define ZURAND_U64_TO_DOUBLE(u) (((u) >> 11) * 0x1.0p-53)
 
 /* Retry-word stream for the slow path: group g >= 1 is one Philox block
  * at counter {index, g, purpose}, consumed word by word, so all four
@@ -322,7 +322,7 @@ typedef struct {
 R123_STATIC_INLINE uint64_t zig_next(zig_stream *s, philox4x64_key_t key,
                                      uint64_t index) {
     if (s->w == 4) {
-        s->blk = rngat_block(key, index, ++s->group, RNGAT_PURPOSE_NORMAL);
+        s->blk = zurand_block(key, index, ++s->group, ZURAND_PURPOSE_NORMAL);
         s->w = 0;
     }
     return s->blk.v[s->w++];
@@ -352,21 +352,21 @@ static double zig_normal_slow(philox4x64_key_t key, uint64_t index, uint64_t r) 
 
         if (idx == 0) {
             /* layer-0 tail; the first ordinate reuses Y */
-            double yy = -log1p(-RNGAT_U64_TO_DOUBLE(Y));
+            double yy = -log1p(-ZURAND_U64_TO_DOUBLE(Y));
             for (;;) {
                 double xx = -ziggurat_nor_inv_r *
-                    log1p(-RNGAT_U64_TO_DOUBLE(zig_next(&s, key, index)));
+                    log1p(-ZURAND_U64_TO_DOUBLE(zig_next(&s, key, index)));
                 if (yy + yy > xx * xx)
                     return sign ? -(ziggurat_nor_r + xx)
                                 : ziggurat_nor_r + xx;
-                yy = -log1p(-RNGAT_U64_TO_DOUBLE(zig_next(&s, key, index)));
+                yy = -log1p(-ZURAND_U64_TO_DOUBLE(zig_next(&s, key, index)));
             }
         }
 
         /* wedge: compare Y * (width of layer idx) against the position in
-         * the layer, with rngat_zig_gap bracketing the exp curve around its
+         * the layer, with zurand_zig_gap bracketing the exp curve around its
          * chord; f is concave below the inflection layer (x < 1, curve
-         * above the chord) and convex above it. RNGAT_ZIG_GUARD widens the
+         * above the chord) and convex above it. ZURAND_ZIG_GUARD widens the
          * ambiguous band on the chord side: ki rounding lets the true curve
          * cross the chord by a few fixed-point units, and the fallback's
          * own double rounding lives there too, so the hairline band defers
@@ -377,20 +377,20 @@ static double zig_normal_slow(philox4x64_key_t key, uint64_t index, uint64_t r) 
         uint64_t YL;
         (void)mulhilo64(Y, L, &YL);
         int accept, reject;
-        if (idx > RNGAT_ZIG_INFLECTION) {
-            reject = YL > R + RNGAT_ZIG_GUARD;
-            accept = !reject && YL + rngat_zig_gap[idx] < R;
-        } else if (idx < RNGAT_ZIG_INFLECTION) {
-            accept = YL + RNGAT_ZIG_GUARD < R;
-            reject = !accept && YL > R + rngat_zig_gap[idx];
+        if (idx > ZURAND_ZIG_INFLECTION) {
+            reject = YL > R + ZURAND_ZIG_GUARD;
+            accept = !reject && YL + zurand_zig_gap[idx] < R;
+        } else if (idx < ZURAND_ZIG_INFLECTION) {
+            accept = YL + ZURAND_ZIG_GUARD < R;
+            reject = !accept && YL > R + zurand_zig_gap[idx];
         } else {
-            reject = YL > R + rngat_zig_gap_hi52;
-            accept = !reject && YL + rngat_zig_gap[idx] < R;
+            reject = YL > R + zurand_zig_gap_hi52;
+            accept = !reject && YL + zurand_zig_gap[idx] < R;
         }
         if (accept)
             return x;
         if (!reject) {
-            double u = RNGAT_U64_TO_DOUBLE(Y);
+            double u = ZURAND_U64_TO_DOUBLE(Y);
             if ((fi_double[idx - 1] - fi_double[idx]) * u + fi_double[idx] <
                 exp(-0.5 * x * x))
                 return x;
@@ -442,25 +442,25 @@ R123_STATIC_INLINE double zig_normal_at(philox4x64_key_t key, uint64_t index,
  * in place over the output slice instead — randompack's layout — measured
  * ~12% slower here: it turns the output stream's write-once pattern into
  * write-read-write.) */
-#define RNGAT_CHUNK_BLOCKS 128 /* 512 words, 4 KiB per thread */
+#define ZURAND_CHUNK_BLOCKS 128 /* 512 words, 4 KiB per thread */
 
 static void fill_normal_column(double *out, R_xlen_t n,
                                philox4x64_key_t key, int threads) {
     R_xlen_t nblock = n >> 2;
-    R_xlen_t nchunk = (nblock + RNGAT_CHUNK_BLOCKS - 1) / RNGAT_CHUNK_BLOCKS;
-#ifdef RNGAT_OPENMP
+    R_xlen_t nchunk = (nblock + ZURAND_CHUNK_BLOCKS - 1) / ZURAND_CHUNK_BLOCKS;
+#ifdef ZURAND_OPENMP
 #pragma omp parallel for if(threads > 1) \
     num_threads(threads > 0 ? threads : 1) default(none) \
     shared(out, nblock, nchunk, key) schedule(static)
 #endif
     for (R_xlen_t c = 0; c < nchunk; c++) {
-        uint64_t buf[RNGAT_CHUNK_BLOCKS * 4];
-        R_xlen_t b0 = c * RNGAT_CHUNK_BLOCKS;
-        int nb = (int)(nblock - b0 < RNGAT_CHUNK_BLOCKS ? nblock - b0
-                                                        : RNGAT_CHUNK_BLOCKS);
+        uint64_t buf[ZURAND_CHUNK_BLOCKS * 4];
+        R_xlen_t b0 = c * ZURAND_CHUNK_BLOCKS;
+        int nb = (int)(nblock - b0 < ZURAND_CHUNK_BLOCKS ? nblock - b0
+                                                        : ZURAND_CHUNK_BLOCKS);
         for (int j = 0; j < nb; j++) {
-            philox4x64_ctr_t block = rngat_block(key, (uint64_t)(b0 + j), 0,
-                                                 RNGAT_PURPOSE_NORMAL);
+            philox4x64_ctr_t block = zurand_block(key, (uint64_t)(b0 + j), 0,
+                                                 ZURAND_PURPOSE_NORMAL);
             memcpy(buf + 4 * j, block.v, sizeof block.v);
         }
 
@@ -472,8 +472,8 @@ static void fill_normal_column(double *out, R_xlen_t n,
 
     R_xlen_t i = nblock << 2;
     if (i < n) {
-        philox4x64_ctr_t block = rngat_block(key, (uint64_t)nblock, 0,
-                                             RNGAT_PURPOSE_NORMAL);
+        philox4x64_ctr_t block = zurand_block(key, (uint64_t)nblock, 0,
+                                             ZURAND_PURPOSE_NORMAL);
         for (unsigned w = 0; i < n; w++, i++)
             out[i] = zig_normal_at(key, (uint64_t)i, block.v[w]);
     }
@@ -487,14 +487,14 @@ static void fill_normal_column(double *out, R_xlen_t n,
 static void fill_uniform_column(double *out, R_xlen_t n,
                                 philox4x64_key_t key, int threads) {
     R_xlen_t nblock = n >> 2;
-#ifdef RNGAT_OPENMP
+#ifdef ZURAND_OPENMP
 #pragma omp parallel for if(threads > 1) \
     num_threads(threads > 0 ? threads : 1) default(none) \
     shared(out, nblock, key) schedule(static)
 #endif
     for (R_xlen_t b = 0; b < nblock; b++) {
-        philox4x64_ctr_t block = rngat_block(key, (uint64_t)b, 0,
-                                             RNGAT_PURPOSE_UNIFORM);
+        philox4x64_ctr_t block = zurand_block(key, (uint64_t)b, 0,
+                                             ZURAND_PURPOSE_UNIFORM);
         double *o = out + (b << 2);
         o[0] = u01_open(block.v[0]);
         o[1] = u01_open(block.v[1]);
@@ -504,8 +504,8 @@ static void fill_uniform_column(double *out, R_xlen_t n,
 
     R_xlen_t i = nblock << 2;
     if (i < n) {
-        philox4x64_ctr_t block = rngat_block(key, (uint64_t)nblock, 0,
-                                             RNGAT_PURPOSE_UNIFORM);
+        philox4x64_ctr_t block = zurand_block(key, (uint64_t)nblock, 0,
+                                             ZURAND_PURPOSE_UNIFORM);
         for (unsigned w = 0; i < n; w++, i++)
             out[i] = u01_open(block.v[w]);
     }
@@ -666,7 +666,7 @@ SEXP C_rng_fold(SEXP key, SEXP data) {
     SEXP ans = PROTECT(alloc_key_vector(nkey, engine));
     for (R_xlen_t i = 0; i < nkey; i++) {
         philox4x64_key_t k = key_from_words(kw, nkey, i);
-        philox4x64_ctr_t out = rngat_block(k, h, domain, RNGAT_PURPOSE_FOLD);
+        philox4x64_ctr_t out = zurand_block(k, h, domain, ZURAND_PURPOSE_FOLD);
         set_key_words(ans, nkey, i, out.v[0], out.v[1]);
     }
     UNPROTECT(1);
@@ -679,14 +679,14 @@ SEXP C_rng_fold(SEXP key, SEXP data) {
  * whatever the OpenMP maximum happened to be at save time. */
 SEXP C_rng_threads(SEXP threads_) {
     if (Rf_isNull(threads_))
-        return Rf_ScalarInteger(rngat_threads());
+        return Rf_ScalarInteger(zurand_threads());
 
     double value = numeric_scalar(threads_, "threads");
     if (value != trunc(value) || value < 0)
         Rf_error("`threads` must be a single whole number that is at least 1, "
                  "or 0 to remove the cap");
-    int prev = rngat_thread_cap;
-    rngat_thread_cap = value > (double)INT_MAX ? INT_MAX : (int)value;
+    int prev = zurand_thread_cap;
+    zurand_thread_cap = value > (double)INT_MAX ? INT_MAX : (int)value;
     return Rf_ScalarInteger(prev);
 }
 
@@ -706,10 +706,10 @@ SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     set_sample_dim(ans, n, nkey);
     double *out = REAL(ans);
     double span = max - min;
-    int nt = rngat_threads();
+    int nt = zurand_threads();
     if (span == 0.0) {
-#ifdef RNGAT_OPENMP
-#pragma omp parallel for if(nt > 1 && total >= RNGAT_OMP_MIN_VALUES) \
+#ifdef ZURAND_OPENMP
+#pragma omp parallel for if(nt > 1 && total >= ZURAND_OMP_MIN_VALUES) \
     num_threads(nt) default(none) shared(out, total, min) schedule(static)
 #endif
         for (R_xlen_t i = 0; i < total; i++)
@@ -717,9 +717,9 @@ SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
         UNPROTECT(1);
         return ans;
     }
-    int par_cols = nt > 1 && nkey > 1 && total >= RNGAT_OMP_MIN_VALUES;
-    int par_rows = !par_cols && n >= RNGAT_OMP_MIN_VALUES ? nt : 0;
-#ifdef RNGAT_OPENMP
+    int par_cols = nt > 1 && nkey > 1 && total >= ZURAND_OMP_MIN_VALUES;
+    int par_rows = !par_cols && n >= ZURAND_OMP_MIN_VALUES ? nt : 0;
+#ifdef ZURAND_OPENMP
 #pragma omp parallel for if(par_cols) num_threads(nt) default(none) \
     shared(kw, out, n, nkey, par_rows) schedule(static)
 #endif
@@ -728,8 +728,8 @@ SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
         fill_uniform_column(out + n * col, n, k, par_rows);
     }
     if (min != 0.0 || span != 1.0) {
-#ifdef RNGAT_OPENMP
-#pragma omp parallel for if(nt > 1 && total >= RNGAT_OMP_MIN_VALUES) \
+#ifdef ZURAND_OPENMP
+#pragma omp parallel for if(nt > 1 && total >= ZURAND_OMP_MIN_VALUES) \
     num_threads(nt) default(none) shared(out, total, min, span) schedule(static)
 #endif
         for (R_xlen_t i = 0; i < total; i++)
@@ -752,10 +752,10 @@ SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_) {
     SEXP ans = PROTECT(Rf_allocVector(REALSXP, total));
     set_sample_dim(ans, n, nkey);
     double *out = REAL(ans);
-    int nt = rngat_threads();
+    int nt = zurand_threads();
     if (sd == 0.0) {
-#ifdef RNGAT_OPENMP
-#pragma omp parallel for if(nt > 1 && total >= RNGAT_OMP_MIN_VALUES) \
+#ifdef ZURAND_OPENMP
+#pragma omp parallel for if(nt > 1 && total >= ZURAND_OMP_MIN_VALUES) \
     num_threads(nt) default(none) shared(out, total, mean) schedule(static)
 #endif
         for (R_xlen_t i = 0; i < total; i++)
@@ -763,9 +763,9 @@ SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_) {
         UNPROTECT(1);
         return ans;
     }
-    int par_cols = nt > 1 && nkey > 1 && total >= RNGAT_OMP_MIN_VALUES;
-    int par_rows = !par_cols && n >= RNGAT_OMP_MIN_VALUES ? nt : 0;
-#ifdef RNGAT_OPENMP
+    int par_cols = nt > 1 && nkey > 1 && total >= ZURAND_OMP_MIN_VALUES;
+    int par_rows = !par_cols && n >= ZURAND_OMP_MIN_VALUES ? nt : 0;
+#ifdef ZURAND_OPENMP
 #pragma omp parallel for if(par_cols) num_threads(nt) default(none) \
     shared(kw, out, n, nkey, par_rows) schedule(static)
 #endif
@@ -774,8 +774,8 @@ SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_) {
         fill_normal_column(out + n * col, n, k, par_rows);
     }
     if (mean != 0.0 || sd != 1.0) {
-#ifdef RNGAT_OPENMP
-#pragma omp parallel for if(nt > 1 && total >= RNGAT_OMP_MIN_VALUES) \
+#ifdef ZURAND_OPENMP
+#pragma omp parallel for if(nt > 1 && total >= ZURAND_OMP_MIN_VALUES) \
     num_threads(nt) default(none) shared(out, total, mean, sd) schedule(static)
 #endif
         for (R_xlen_t i = 0; i < total; i++)
@@ -801,7 +801,7 @@ static int lemire_accept(uint32_t x, uint32_t range, uint32_t threshold,
 static uint32_t bounded_u32_retry(philox4x64_key_t k, uint64_t index,
                                   uint32_t range, uint32_t threshold) {
     for (uint64_t attempt = 1; ; attempt++) {
-        uint32_t x = (uint32_t)rngat_word(k, index, attempt, RNGAT_PURPOSE_INTEGER);
+        uint32_t x = (uint32_t)zurand_word(k, index, attempt, ZURAND_PURPOSE_INTEGER);
         uint32_t offset;
         if (lemire_accept(x, range, threshold, &offset))
             return offset;
@@ -812,14 +812,14 @@ static void fill_integer_column(int *out, R_xlen_t n, philox4x64_key_t key,
                                 int min, uint32_t range, uint32_t threshold,
                                 int threads) {
     R_xlen_t nblock = n >> 2;
-#ifdef RNGAT_OPENMP
+#ifdef ZURAND_OPENMP
 #pragma omp parallel for if(threads > 1) \
     num_threads(threads > 0 ? threads : 1) default(none) \
     shared(out, nblock, key, min, range, threshold) schedule(static)
 #endif
     for (R_xlen_t b = 0; b < nblock; b++) {
-        philox4x64_ctr_t block = rngat_block(key, (uint64_t)b, 0,
-                                             RNGAT_PURPOSE_INTEGER);
+        philox4x64_ctr_t block = zurand_block(key, (uint64_t)b, 0,
+                                             ZURAND_PURPOSE_INTEGER);
         int *o = out + (b << 2);
         for (unsigned w = 0; w < 4; w++) {
             uint32_t offset;
@@ -832,8 +832,8 @@ static void fill_integer_column(int *out, R_xlen_t n, philox4x64_key_t key,
 
     R_xlen_t i = nblock << 2;
     if (i < n) {
-        philox4x64_ctr_t block = rngat_block(key, (uint64_t)nblock, 0,
-                                             RNGAT_PURPOSE_INTEGER);
+        philox4x64_ctr_t block = zurand_block(key, (uint64_t)nblock, 0,
+                                             ZURAND_PURPOSE_INTEGER);
         for (unsigned w = 0; i < n; w++, i++) {
             uint32_t offset;
             if (!lemire_accept((uint32_t)block.v[w], range, threshold, &offset))
@@ -858,10 +858,10 @@ SEXP C_rng_integer(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     SEXP ans = PROTECT(Rf_allocVector(INTSXP, total));
     set_sample_dim(ans, n, nkey);
     int *out = INTEGER(ans);
-    int nt = rngat_threads();
-    int par_cols = nt > 1 && nkey > 1 && total >= RNGAT_OMP_MIN_VALUES;
-    int par_rows = !par_cols && n >= RNGAT_OMP_MIN_VALUES ? nt : 0;
-#ifdef RNGAT_OPENMP
+    int nt = zurand_threads();
+    int par_cols = nt > 1 && nkey > 1 && total >= ZURAND_OMP_MIN_VALUES;
+    int par_rows = !par_cols && n >= ZURAND_OMP_MIN_VALUES ? nt : 0;
+#ifdef ZURAND_OPENMP
 #pragma omp parallel for if(par_cols) num_threads(nt) default(none) \
     shared(kw, out, n, nkey, min, range, threshold, par_rows) schedule(static)
 #endif
@@ -888,8 +888,8 @@ SEXP C_rng_bits(SEXP key, SEXP n_, SEXP bits_) {
             philox4x64_key_t k = key_from_words(kw, nkey, col);
             double *col_out = out + n * col;
             for (R_xlen_t i = 0; i < n; i += 4) {
-                philox4x64_ctr_t block = rngat_block(k, (uint64_t)(i >> 2), 0,
-                                                     RNGAT_PURPOSE_BITS);
+                philox4x64_ctr_t block = zurand_block(k, (uint64_t)(i >> 2), 0,
+                                                     ZURAND_PURPOSE_BITS);
                 R_xlen_t stop = n - i < 4 ? n - i : 4;
                 for (R_xlen_t w = 0; w < stop; w++)
                     col_out[i + w] = (double)(uint32_t)block.v[w];
@@ -905,8 +905,8 @@ SEXP C_rng_bits(SEXP key, SEXP n_, SEXP bits_) {
     for (R_xlen_t col = 0; col < nkey; col++) {
         philox4x64_key_t k = key_from_words(kw, nkey, col);
         for (R_xlen_t i = 0; i < n; i += 4) {
-            philox4x64_ctr_t block = rngat_block(k, (uint64_t)(i >> 2), 0,
-                                                 RNGAT_PURPOSE_BITS);
+            philox4x64_ctr_t block = zurand_block(k, (uint64_t)(i >> 2), 0,
+                                                 ZURAND_PURPOSE_BITS);
             R_xlen_t stop = n - i < 4 ? n - i : 4;
             for (R_xlen_t w = 0; w < stop; w++) {
                 snprintf(buf, sizeof buf, "%016" PRIx64, block.v[w]);
@@ -933,7 +933,7 @@ static const R_CallMethodDef CallEntries[] = {
     {NULL, NULL, 0}
 };
 
-void R_init_rngat(DllInfo *dll) {
+void R_init_zurand(DllInfo *dll) {
     R_registerRoutines(dll, NULL, CallEntries, NULL, NULL);
     R_useDynamicSymbols(dll, FALSE);
 }

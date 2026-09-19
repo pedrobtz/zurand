@@ -6,13 +6,13 @@
  * (f concave) the gap bounds the curve above the chord and gates
  * rejection; above the inflection (f convex) it bounds the curve below
  * the chord and gates acceptance; the straddling layer uses both. */
-#ifndef RNGAT_ZIGBOUNDS_H
-#define RNGAT_ZIGBOUNDS_H
+#ifndef ZURAND_ZIGBOUNDS_H
+#define ZURAND_ZIGBOUNDS_H
 
-#define RNGAT_ZIG_INFLECTION 52
-static const uint64_t rngat_zig_gap_hi52 = UINT64_C(0x0000000004ecd62c);
+#define ZURAND_ZIG_INFLECTION 52
+static const uint64_t zurand_zig_gap_hi52 = UINT64_C(0x0000000004ecd62c);
 
-static const uint64_t rngat_zig_gap[] = {
+static const uint64_t zurand_zig_gap[] = {
     UINT64_C(0x0000000000000000), UINT64_C(0x0003f71f48500322),
     UINT64_C(0x000021a9106b2d26), UINT64_C(0x00000ae25b3faea0),
     UINT64_C(0x0000053459b9978c), UINT64_C(0x000002ff9fa48851),

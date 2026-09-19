@@ -9,7 +9,7 @@ Reviewed commits:
 
 ### 1. Low: the ziggurat shortcut is not fully conservative
 
-`src/rngat.c:331` accepts or rejects without a margin on one side of the
+`src/zurand.c:331` accepts or rejects without a margin on one side of the
 fixed-point comparison, although `dev/generate-zig-bounds.R:98` acknowledges
 that rounding of the `ki` values can move the curve across the chord.
 
@@ -26,8 +26,8 @@ have negligible performance cost.
 
 ### 2. Low: `rng_threads()` rejects values allowed by its documentation
 
-`R/rngat.R:151` documents `threads` as any whole number of at least 1 and says
-values above the machine thread count are allowed. `src/rngat.c:623` imposes an
+`R/zurand.R:151` documents `threads` as any whole number of at least 1 and says
+values above the machine thread count are allowed. `src/zurand.c:623` imposes an
 undocumented upper bound of 1,048,576, while its error message only mentions
 the lower bound.
 
@@ -37,13 +37,13 @@ message, or accept values through `INT_MAX`.
 ### 3. Low: the documented save/restore pattern does not restore an uncapped state
 
 `C_rng_threads()` returns the current effective maximum from
-`rngat_threads()`, rather than the raw configured cap. Consequently:
+`zurand_threads()`, rather than the raw configured cap. Consequently:
 
 1. An initially uncapped package with an OpenMP maximum of 8 returns 8 from
    `old <- rng_threads(1)`.
 2. `rng_threads(old)` stores an explicit cap of 8, rather than restoring the
    uncapped state.
-3. If another package later raises the OpenMP maximum to 16, rngat remains
+3. If another package later raises the OpenMP maximum to 16, zurand remains
    capped at 8.
 
 This makes the documented restoration pattern incomplete and weakens the
