@@ -393,6 +393,10 @@ static int lemire_accept(uint32_t x, uint32_t range, uint32_t threshold,
  * nwords may write up to 3 words past it. Every chunk buffer is sized
  * ZURAND_CHUNK_WORDS + ZURAND_CHUNK_SLACK for that reason. */
 #define ZURAND_CHUNK_SLACK 3
+/* An engine may take a wider chunk than the default: xoshiro groups four
+ * 512-word sub-chunks so four can run in parallel SIMD lanes. Every chunk
+ * buffer is sized for the widest, so one constant governs stack use. */
+#define ZURAND_MAX_CHUNK_WORDS (ZURAND_CHUNK_WORDS * 4)
 
 #define ZE_SUFFIX philox
 #define ZE_KEY_T  philox4x64_key_t
@@ -431,26 +435,164 @@ R123_STATIC_INLINE uint64_t zurand_rotl64(uint64_t x, int k) {
     return (x << k) | (x >> (64 - k));
 }
 
+/* Sub-chunk: the unit a single xoshiro state covers, and the unit the
+ * stream is defined in. A fill asks for four of these at a time so four
+ * can run in parallel lanes, but sub-chunk s is always seeded at
+ * {s, 0, purpose, 0}, so global word w comes from sub-chunk w / 512 at
+ * offset w % 512 whatever the grouping. Grouping is a fill decision; it
+ * is not visible in the output. */
+#define ZURAND_XOSHIRO_SUB ZURAND_CHUNK_WORDS
+#define ZURAND_XOSHIRO_LANES 4
+
+R123_STATIC_INLINE void xoshiro_seed(philox4x64_key_t key, uint64_t sub,
+                                     uint64_t purpose, uint64_t *st) {
+    philox4x64_ctr_t ctr = {{sub, 0, purpose, 0}};
+    philox4x64_ctr_t r = philox4x64_R(10, ctr, key);
+    st[0] = r.v[0]; st[1] = r.v[1]; st[2] = r.v[2]; st[3] = r.v[3];
+    /* xoshiro cannot leave the all-zero state; Philox reaching it has
+     * probability 2^-256, but the branch is once per sub-chunk. */
+    if ((st[0] | st[1] | st[2] | st[3]) == 0) st[0] = 1;
+}
+
+/* One sub-chunk, scalar. The reference definition of the stream. */
+static void xoshiro_sub_scalar(philox4x64_key_t key, uint64_t sub,
+                               uint64_t purpose, uint64_t *buf, int nwords) {
+    uint64_t s[4];
+    xoshiro_seed(key, sub, purpose, s);
+    for (int j = 0; j < nwords; j++) {
+        uint64_t r = zurand_rotl64(s[0] + s[3], 23) + s[0];  /* "++" scrambler */
+        uint64_t t = s[1] << 17;
+        s[2] ^= s[0]; s[3] ^= s[1]; s[1] ^= s[2]; s[0] ^= s[3]; s[2] ^= t;
+        s[3] = zurand_rotl64(s[3], 45);
+        buf[j] = r;
+    }
+}
+
+/* ---- optional AVX2 path ----
+ *
+ * Four *sub-chunks* in the four lanes of one register, each running the
+ * scalar recurrence unchanged. Vectorising across sub-chunks rather than
+ * within one is what makes this a pure speedup: the output is the scalar
+ * output, bit for bit, so no stream depends on whether it ran.
+ *
+ * Interleaving lanes within a sub-chunk was measured first and rejected --
+ * four lanes are sixteen live state words on sixteen registers, and it
+ * cost ~20% on baseline builds while losing even under AVX2. See
+ * dev/simd/ and Phase 5 of dev/roadmap.md.
+ *
+ * Built with a target attribute rather than a separate -mavx2 object, so
+ * src/Makevars stays portable and R CMD check sees no unusual flags. */
+#if defined(__x86_64__) || defined(__i386__)
+#  if defined(__GNUC__) || defined(__clang__)
+#    define ZURAND_X86_DISPATCH 1
+#    include <immintrin.h>
+#  endif
+#endif
+
+#ifdef ZURAND_X86_DISPATCH
+__attribute__((target("avx2")))
+static void xoshiro_group_avx2(philox4x64_key_t key, uint64_t sub0,
+                               uint64_t purpose, uint64_t *buf) {
+    uint64_t st[ZURAND_XOSHIRO_LANES][4];
+    for (int l = 0; l < ZURAND_XOSHIRO_LANES; l++)
+        xoshiro_seed(key, sub0 + (uint64_t)l, purpose, st[l]);
+
+    __m256i s0 = _mm256_set_epi64x((long long)st[3][0], (long long)st[2][0],
+                                   (long long)st[1][0], (long long)st[0][0]);
+    __m256i s1 = _mm256_set_epi64x((long long)st[3][1], (long long)st[2][1],
+                                   (long long)st[1][1], (long long)st[0][1]);
+    __m256i s2 = _mm256_set_epi64x((long long)st[3][2], (long long)st[2][2],
+                                   (long long)st[1][2], (long long)st[0][2]);
+    __m256i s3 = _mm256_set_epi64x((long long)st[3][3], (long long)st[2][3],
+                                   (long long)st[1][3], (long long)st[0][3]);
+#define ZR_VROTL(x, k) _mm256_or_si256(_mm256_slli_epi64((x), (k)), \
+                                       _mm256_srli_epi64((x), 64 - (k)))
+    /* Four steps are buffered and transposed so each sub-chunk receives
+     * contiguous stores; storing per step would scatter across four
+     * 4 KiB-apart destinations. */
+    for (int j = 0; j < ZURAND_XOSHIRO_SUB; j += 4) {
+        __m256i v[4];
+        for (int k = 0; k < 4; k++) {
+            v[k] = _mm256_add_epi64(
+                ZR_VROTL(_mm256_add_epi64(s0, s3), 23), s0);
+            __m256i t = _mm256_slli_epi64(s1, 17);
+            s2 = _mm256_xor_si256(s2, s0); s3 = _mm256_xor_si256(s3, s1);
+            s1 = _mm256_xor_si256(s1, s2); s0 = _mm256_xor_si256(s0, s3);
+            s2 = _mm256_xor_si256(s2, t);  s3 = ZR_VROTL(s3, 45);
+        }
+        __m256i t0 = _mm256_unpacklo_epi64(v[0], v[1]);
+        __m256i t1 = _mm256_unpackhi_epi64(v[0], v[1]);
+        __m256i t2 = _mm256_unpacklo_epi64(v[2], v[3]);
+        __m256i t3 = _mm256_unpackhi_epi64(v[2], v[3]);
+        _mm256_storeu_si256((__m256i *)(buf + 0 * ZURAND_XOSHIRO_SUB + j),
+                            _mm256_permute2x128_si256(t0, t2, 0x20));
+        _mm256_storeu_si256((__m256i *)(buf + 1 * ZURAND_XOSHIRO_SUB + j),
+                            _mm256_permute2x128_si256(t1, t3, 0x20));
+        _mm256_storeu_si256((__m256i *)(buf + 2 * ZURAND_XOSHIRO_SUB + j),
+                            _mm256_permute2x128_si256(t0, t2, 0x31));
+        _mm256_storeu_si256((__m256i *)(buf + 3 * ZURAND_XOSHIRO_SUB + j),
+                            _mm256_permute2x128_si256(t1, t3, 0x31));
+    }
+#undef ZR_VROTL
+}
+#endif
+
+/* What the CPU offers (-1 until probed) and whether the user has turned it
+ * off. Separated so that rng_simd(TRUE) restores detection rather than
+ * asserting a capability the machine may not have. */
+static int zurand_avx2_available = -1;
+static int zurand_simd_off = 0;
+
+static int zurand_use_avx2(void) {
+    if (zurand_avx2_available < 0) {
+#ifdef ZURAND_X86_DISPATCH
+        zurand_avx2_available = __builtin_cpu_supports("avx2") ? 1 : 0;
+#else
+        zurand_avx2_available = 0;
+#endif
+    }
+    return zurand_avx2_available && !zurand_simd_off;
+}
+
+/* Querying returns the active path; setting FALSE forces the scalar one.
+ * The point of exposing this is that "both paths emit identical bits" is
+ * the whole basis for dispatching at all, and a claim nobody can check is
+ * not worth making -- tests/testthat/test-simd.R checks it. */
+SEXP C_rng_simd(SEXP enable) {
+    int prev = zurand_use_avx2();
+    if (enable != R_NilValue) {
+        int e = Rf_asLogical(enable);
+        if (e == NA_LOGICAL)
+            Rf_error("`enable` must be TRUE or FALSE");
+        zurand_simd_off = !e;
+    }
+    return Rf_mkString(prev ? "avx2" : "none");
+}
+
 static void chunk_words_xoshiro(philox4x64_key_t key, uint64_t c,
                                 uint64_t purpose, uint64_t *buf, int nwords) {
-    philox4x64_ctr_t ctr = {{c, 0, purpose, 0}};
-    philox4x64_ctr_t st = philox4x64_R(10, ctr, key);
-    uint64_t s0 = st.v[0], s1 = st.v[1], s2 = st.v[2], s3 = st.v[3];
-    /* xoshiro cannot leave the all-zero state. Philox reaching it has
-     * probability 2^-256, but the branch is once per chunk and free. */
-    if ((s0 | s1 | s2 | s3) == 0) s0 = 1;
-    for (int j = 0; j < nwords; j++) {
-        uint64_t r = zurand_rotl64(s0 + s3, 23) + s0;   /* the "++" scrambler */
-        uint64_t t = s1 << 17;
-        s2 ^= s0; s3 ^= s1; s1 ^= s2; s0 ^= s3; s2 ^= t;
-        s3 = zurand_rotl64(s3, 45);
-        buf[j] = r;
+    uint64_t sub0 = c * ZURAND_XOSHIRO_LANES;
+#ifdef ZURAND_X86_DISPATCH
+    if (nwords == ZURAND_XOSHIRO_SUB * ZURAND_XOSHIRO_LANES && zurand_use_avx2()) {
+        xoshiro_group_avx2(key, sub0, purpose, buf);
+        return;
+    }
+#endif
+    /* Scalar: the same sub-chunks, one at a time. Also the path taken for
+     * the final short chunk of a fill, where the group is not full. */
+    for (int l = 0; l < ZURAND_XOSHIRO_LANES; l++) {
+        int have = nwords - l * ZURAND_XOSHIRO_SUB;
+        if (have <= 0) break;
+        xoshiro_sub_scalar(key, sub0 + (uint64_t)l, purpose,
+                           buf + l * ZURAND_XOSHIRO_SUB,
+                           have < ZURAND_XOSHIRO_SUB ? have : ZURAND_XOSHIRO_SUB);
     }
 }
 
 /* Philox for the key type and for the retry paths; xoshiro for bulk words. */
 #define ZE_SUFFIX xoshiro
 #define ZE_KEY_T  philox4x64_key_t
+#define ZE_CHUNK_WORDS (ZURAND_CHUNK_WORDS * ZURAND_XOSHIRO_LANES)
 #define ZE_GEN(c, k) philox4x64_R(10, (c), (k))
 #define ZE_CUSTOM_CHUNK 1
 #include "zurand_engine.h"
@@ -804,6 +946,25 @@ SEXP C_rng_integer(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     return ans;
 }
 
+/* Words per chunk for an engine, mirroring ZE_CHUNK_WORDS inside the
+ * engine header. Code outside the header -- rng_bits() -- has to agree
+ * with it: passing a 512-word chunk index to an engine that groups four
+ * of them silently reads the wrong sub-chunks. */
+static R_xlen_t engine_chunk_words(zurand_engine_t eng) {
+    R_xlen_t w = eng == ZURAND_ENG_XOSHIRO
+        ? (R_xlen_t)ZURAND_CHUNK_WORDS * ZURAND_XOSHIRO_LANES
+        : (R_xlen_t)ZURAND_CHUNK_WORDS;
+    /* Every caller writes this many words into a buffer sized by
+     * ZURAND_MAX_CHUNK_WORDS. Leaving one at the narrow width while this
+     * returned the wide one overflowed the stack by 1533 words, which the
+     * test suite ran straight past and only R CMD check caught, as an
+     * abort with no output. */
+    if (w > ZURAND_MAX_CHUNK_WORDS)
+        Rf_error("internal: chunk width %lld exceeds buffer capacity %d",
+                 (long long)w, ZURAND_MAX_CHUNK_WORDS);
+    return w;
+}
+
 /* rng_bits() exposes the raw stream and must follow whichever engine the
  * key names, a chunk at a time. The previous version fetched one block per
  * call, which for xoshiro meant regenerating from the chunk start every
@@ -836,11 +997,12 @@ SEXP C_rng_bits(SEXP key, SEXP n_, SEXP bits_) {
             philox4x64_key_t kp = key_from_words(kw, nkey, col);
             threefry4x64_key_t kt = key_from_words_threefry(kw, nkey, col);
             double *col_out = out + n * col;
-            R_xlen_t nchunk = (n + ZURAND_CHUNK_WORDS - 1) / ZURAND_CHUNK_WORDS;
+            R_xlen_t cw = engine_chunk_words(eng);
+            R_xlen_t nchunk = (n + cw - 1) / cw;
             for (R_xlen_t c = 0; c < nchunk; c++) {
-                uint64_t buf[ZURAND_CHUNK_WORDS + ZURAND_CHUNK_SLACK];
-                R_xlen_t w0 = c * ZURAND_CHUNK_WORDS;
-                int m = (int)(n - w0 < ZURAND_CHUNK_WORDS ? n - w0 : ZURAND_CHUNK_WORDS);
+                uint64_t buf[ZURAND_MAX_CHUNK_WORDS + ZURAND_CHUNK_SLACK];
+                R_xlen_t w0 = c * cw;
+                int m = (int)(n - w0 < cw ? n - w0 : cw);
                 bits_chunk(eng, kp, kt, (uint64_t)c, buf, m);
                 for (int j = 0; j < m; j++)
                     col_out[w0 + j] = (double)(uint32_t)buf[j];
@@ -856,11 +1018,12 @@ SEXP C_rng_bits(SEXP key, SEXP n_, SEXP bits_) {
     for (R_xlen_t col = 0; col < nkey; col++) {
         philox4x64_key_t kp = key_from_words(kw, nkey, col);
         threefry4x64_key_t kt = key_from_words_threefry(kw, nkey, col);
-        R_xlen_t nchunk = (n + ZURAND_CHUNK_WORDS - 1) / ZURAND_CHUNK_WORDS;
+        R_xlen_t cw = engine_chunk_words(eng);
+            R_xlen_t nchunk = (n + cw - 1) / cw;
         for (R_xlen_t c = 0; c < nchunk; c++) {
-            uint64_t buf[ZURAND_CHUNK_WORDS + ZURAND_CHUNK_SLACK];
-            R_xlen_t w0 = c * ZURAND_CHUNK_WORDS;
-            int m = (int)(n - w0 < ZURAND_CHUNK_WORDS ? n - w0 : ZURAND_CHUNK_WORDS);
+            uint64_t buf[ZURAND_MAX_CHUNK_WORDS + ZURAND_CHUNK_SLACK];
+            R_xlen_t w0 = c * cw;
+            int m = (int)(n - w0 < cw ? n - w0 : cw);
             bits_chunk(eng, kp, kt, (uint64_t)c, buf, m);
             for (int j = 0; j < m; j++) {
                 snprintf(hex, sizeof hex, "%016" PRIx64, buf[j]);
@@ -884,6 +1047,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"C_rng_integer",    (DL_FUNC) &C_rng_integer,    4},
     {"C_rng_bits",       (DL_FUNC) &C_rng_bits,       3},
     {"C_rng_threads",    (DL_FUNC) &C_rng_threads,    1},
+    {"C_rng_simd",       (DL_FUNC) &C_rng_simd,       1},
     {NULL, NULL, 0}
 };
 

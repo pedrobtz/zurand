@@ -335,81 +335,75 @@ scalar ziggurat at about 1.9 ns/draw, so beating ~400 M/s there needs a
 SIMD-friendly transform, which is a research problem rather than an
 optimisation.
 
-## Phase 5 -- SIMD (not started)
+## Phase 5 -- SIMD (not started; measured 2026-09-19)
 
-Recorded while the context is fresh. `xoshiro256pp` closed the gap to the
-field; SIMD is what is left, and it is a portability project rather than
-an optimisation.
+`xoshiro256pp` closed the gap to the field; SIMD is what is left. This
+section was first written as a design that forced a stream decision. It
+was measured before being built, and the measurement removed the decision.
 
-### The ceiling it is chasing
+### The false premise
 
-Measured on x86_64, single thread, reused buffer:
+The earlier draft said SIMD needs lanes *within* a chunk, so the lane
+layout must be part of the engine definition and fixed before the engine
+has users. That assumed SIMD had to run inside one chunk. Chunks are
+already independent streams; nothing requires it.
 
-| | M values/s |
-|---|---:|
-| philox4x64-10 fill | ~320 |
-| xoshiro256pp fill (current best) | ~580 uniform, ~320 normal |
-| `numeric(n)` -- allocate and zero-fill | ~1180 |
+### What was measured
 
-That last row is roughly the single-core write bandwidth, about 9.4 GB/s,
-and nothing returning a fresh vector can pass it. So uniform has maybe
-2x of headroom left and Gaussian rather more, but Gaussian is bounded
-first by the scalar ziggurat at ~1.9 ns/draw.
+zurand's two-pass uniform fill, reused buffer, x86_64, ratio to the
+shipped one-lane sequential engine (`seq`):
 
-### 5.1 SIMD xoshiro for uniform
+| word source | baseline `-O2` (CRAN) | `-mavx2` | stack ops |
+|---|---:|---:|---:|
+| seq, 1 lane (shipped) | 1.00 | 1.00 | 7 |
+| seq + 8 Philox seeds per chunk (control) | 0.95-0.98 | -- | 7 |
+| il2, 2 lanes interleaved | **~1.00** | 1.05 | 16 |
+| il4, 4 lanes interleaved | **0.78** | **0.82** | 51 |
+| il8, 8 lanes interleaved | **0.79** | 1.43 | 96 |
+| avx4, 4 lanes, hand intrinsics | -- | 1.27-1.42 | 22 |
+| **seq4c: 4 chunks per AVX2 register** | -- | **1.44-1.45** | -- |
 
-xoshiro256++ is add/shift/rotate/xor and vectorises cleanly: four
-independent lanes in AVX2 (4 x 64-bit), eight in AVX-512, two per NEON
-register on arm64 -- though the M1 has four NEON units, so it issues
-wider than that suggests. `u01_open` vectorises too and already does at
-SSE2 width.
+Three things fell out. Interleaving within a chunk spills: 4 lanes are
+16 live state words on a 16-register machine, and both 4 and 8 lanes cost
+about 20% on every baseline build -- roughly 4% of it Philox seeding, the
+rest register traffic. 4 lanes loses even under AVX2. And **`seq4c`
+matches il8's payoff while producing the shipped stream word for word**:
+four consecutive chunks, one per lane, each running the sequential
+recurrence exactly as today, with four steps buffered and a 4x4 transpose
+so each chunk gets contiguous vector stores instead of a 4 KiB scatter.
 
-**The constraint that matters, and it is easy to miss.** Output must not
-depend on whether SIMD was available at build or run time, or the golden
-tests break and the package's central promise with them. That means the
-lane assignment is part of the *engine definition*, not an implementation
-detail: pick it once -- lane L takes words L, L+4, L+8, ... of a chunk,
-or contiguous quarters -- and make the scalar path reproduce exactly that
-interleaving. Writing the scalar version first and vectorising it later
-will produce two different streams.
+### What this settles
 
-This also argues for deciding it now, before `xoshiro256pp` has users: if
-the lane layout is baked into the engine from the start, a later SIMD
-implementation is a pure speedup with no stream change. As it stands the
-current engine is defined as a single sequential recurrence per chunk, so
-adding SIMD later *would* change its output and need a fourth engine name.
-Worth fixing while nothing depends on it.
+- The `xoshiro256pp` stream needs no change, now or later. A SIMD path
+  vectorises **across chunks**, emits identical bits, and is a pure
+  speedup behind dispatch.
+- On arm64, NEON is 2x64: two chunks per register, same idea, and the
+  M1's four NEON units pipeline it. Unmeasured there, but nothing about
+  the stream depends on the lane count, so the width is free to differ
+  per ISA.
+- Gaussian is unchanged by any of this: still bounded by the scalar
+  ziggurat at ~1.9 ns/draw, and its per-draw table lookup needs a gather
+  (~12 cycles on Coffee Lake) that may cost more than it saves. Accept
+  ~400 M/s or treat it as a research problem.
 
-### 5.2 SIMD Gaussian
+### What remains
 
-Harder, and possibly not worth it. The ziggurat's per-draw table lookup is
-the obstacle: AVX2 has `vgatherqpd` but it is slow on older cores (~12
-cycles on Coffee Lake), which can cost more than it saves. Options, none
-free:
+5.1  ~~Runtime dispatch~~ **DONE.** No separate translation unit was
+     needed: `__attribute__((target("avx2")))` on the one function lets a
+     baseline-compiled object carry an AVX2 path, selected by
+     `__builtin_cpu_supports`. `src/Makevars` is untouched, so `configure`
+     (3.3) does not grow and `R CMD check` sees no unusual flags.
+     `rng_simd()` reports the active path and forces the portable one, and
+     `tests/testthat/test-simd.R` runs both and compares -- identical
+     output is the premise of dispatching at all, so it is checked rather
+     than asserted. Measured through the R API at n=1e7:
 
-- Vectorise the fast path with gather, keep a scalar fallback for the ~1%
-  that reject. Needs measuring before it is believed.
-- A transform without table lookups -- Box-Muller vectorises well but
-  needs `sin`/`cos`/`log`, so it wants polynomial approximations and is
-  slower scalar. It would also be a different stream, i.e. another engine.
-- Accept ~400 M/s as the Gaussian ceiling and put the effort elsewhere.
+       uniform  481 -> 619 M/s  1.29-1.44x   2.1-2.7x dqrng
+       normal   269 -> 297 M/s  1.10-1.23x   1.7-2.0x RcppZiggurat MT
 
-### 5.3 Runtime dispatch
-
-CRAN does not accept `-march=native`, so the SIMD path cannot simply be
-compiled in. The standard shape is a separate translation unit built with
-`-mavx2`, selected at run time behind a CPUID check, with a baseline
-build always present. `configure` (item 3.3) would grow the job of
-deciding whether the compiler accepts the flags at all.
-
-Combined with 5.1's constraint, the dispatch must be a *performance*
-choice only: both paths must emit identical bits, and a golden test
-should run under each.
-
-### Order
-
-1. Settle the lane layout for `xoshiro256pp` before it has users (5.1a).
-2. Prototype SIMD xoshiro as a standalone microbenchmark on both x86_64
-   and the M1 -- the pattern that has worked all along, and the one that
-   stopped philox4x64-7 and ARS from being built.
-3. Only then decide whether the dispatch machinery earns its complexity.
+5.2  Still to do on the M1: NEON is 2x64, so two sub-chunks per register
+     rather than four. Nothing in the stream depends on the lane count, so
+     the width is free to differ per ISA.
+5.3  Gaussian gains least, as predicted -- it is bounded by the scalar
+     ziggurat, not by word generation. A SIMD-friendly transform remains a
+     research problem rather than an optimisation.
