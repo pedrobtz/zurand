@@ -32,7 +32,27 @@ machine it ran on as a header -- these numbers mean nothing without it.
 zurand must be measured after `R CMD INSTALL` (`-O2`). A `load_all()` debug
 build understates it.
 
-## Normal, n = 1e7, single thread
+## Current standing, n = 1e7, single thread (2026-09-19, x86_64)
+
+Full field, both samplers, with the `xoshiro256pp` engine and its AVX2
+path active.
+
+| rank | uniform | M/s | | rank | Gaussian | M/s |
+|---:|---|---:|---|---:|---|---:|
+| 1 | **zurand xoshiro256pp** | **776** | | 1 | **zurand xoshiro256pp** | **376** |
+| 2 | dqrng | 327 | | 2 | zurand philox4x64 | 215 |
+| 3 | zurand philox4x64 | 314 | | 3 | RcppZiggurat MT | 198 |
+| 4 | randompack | 257 | | 4 | randompack | 181 |
+| 5 | sitmo | 185 | | 5 | RcppZiggurat LZLLV | 155 |
+| 6 | rTRNG | 171 | | 6 | dqrng | 140 |
+| 7 | base R | 77 | | 7 | base R | 24 |
+
+randompack is fourth on both. It had been left out of the ad-hoc runs
+during the engine work, and of the CI benchmark workflow, so the ratios
+quoted in those commits were against dqrng and RcppZiggurat only. Both
+harnesses now carry the whole field.
+
+## Original baseline: normal, n = 1e7, single thread
 
 | rank | method | M values/s | ns/value | vs zurand |
 |---:|---|---:|---:|---:|
