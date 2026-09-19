@@ -2,6 +2,7 @@ import sys, os, io, contextlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 with contextlib.redirect_stdout(io.StringIO()):      # silence the self-validation
     from philox_ref import philox4x64
+    from threefry_ref import threefry4x64
 def u32(i): return i & 0xffffffff
 CASES = {
   42:   [803958421,-1109970394,-1301876477,686809907],
@@ -64,6 +65,29 @@ for seed, w in CASES.items():
     L.append('  # seed %d  ->  k0 = %016x, k1 = %016x' % (seed, k[0], k[1]))
     L.append('  expect_identical(')
     L.append('    as.character(rng_bits(rng_key(%dL), %dL, bits = 64L)),' % (seed, NW))
+    L.append('    c(')
+    L.append(rvec(vals, '      '))
+    L.append('    ))')
+L.append('})')
+L.append('')
+L.append('test_that("the threefry4x64 engine really is threefry4x64-13", {')
+L.append('  # Same argument as above, with one extra link. A zurand key stores 128')
+L.append('  # bits and threefry4x64 wants 256, so src/zurand.c derives the upper')
+L.append("  # half by xor with Threefry's own Weyl constants. These expectations run")
+L.append('  # that derivation through the independent reference too, so the test')
+L.append('  # covers the key expansion and not only the cipher.')
+for seed, w in CASES.items():
+    k = [u32(w[0]) | (u32(w[1]) << 32), u32(w[2]) | (u32(w[3]) << 32)]
+    tk = [k[0], k[1], k[0] ^ 0x9e3779b97f4a7c15, k[1] ^ 0xbb67ae8584caa73b]
+    vals = []
+    for b in range(3):
+        vals += ['%016x' % x for x in threefry4x64([b,0,0,0], tk, 13)]
+    L.append('')
+    L.append('  # seed %d  ->  derived key %s' % (seed, " ".join("%016x" % x for x in tk[:2])))
+    L.append('  #                          %s' % " ".join("%016x" % x for x in tk[2:]))
+    L.append('  expect_identical(')
+    L.append('    as.character(rng_bits(rng_key(%dL, engine = "threefry4x64"), %dL,' % (seed, NW))
+    L.append('                          bits = 64L)),')
     L.append('    c(')
     L.append(rvec(vals, '      '))
     L.append('    ))')

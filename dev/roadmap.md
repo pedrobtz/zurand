@@ -114,7 +114,7 @@ change has a gate.
 
 | # | task | why | verify | effort |
 |--:|---|---|---|---|
-| 0.1 | **Known-answer test against Random123's reference vectors.** Upstream ships `tests/kat_vectors` with philox4x64 entries. Compare `rng_bits(key, n, bits = 64L)` for the reference keys/counters. | Nothing today proves the Philox is Philox. | new test file; ~15 lines | 1 h |
+| 0.1 | ~~KAT against Random123's reference vectors~~ **DONE, both engines** Upstream ships `tests/kat_vectors` with philox4x64 entries. Compare `rng_bits(key, n, bits = 64L)` for the reference keys/counters. | Nothing today proves the Philox is Philox. | new test file; ~15 lines | 1 h |
 | 0.2 | **Golden-value test for the full pipeline.** Hardcode ~256 values each of `rng_uniform`, `rng_normal`, `rng_integer` for a fixed key, including values known to hit the ziggurat wedge and tail paths. | CI runs on arm64, x86_64, i386 and musl; nothing asserts they agree. This is the reproducibility guarantee stateless generation exists to give, and the gate every later change passes through. | new test file | 2 h |
 | 0.3 | **One-time statistical audit, recorded in `dev/`.** PractRand (or TestU01 SmallCrush) on `rng_bits()`; the same on `pnorm(rng_normal())` to exercise the custom wedge shortcut and tail. Not CI -- a document. | The uniform conversion and wedge brackets are custom code. One KS test at n=50k is a smoke test, not evidence. | `dev/statistical-audit.md` | 1 day |
 | 0.4 | **Make `src/zigbounds.h` platform-independent.** Generated on the M1, it drifts by +/-1 low bit when regenerated on x86_64 (libm ulp differences). `ZURAND_ZIG_GUARD` absorbs it, so it is not a correctness bug, but "rerun the script" yields spurious diffs off the M1. Either compute the brackets with `Rmpfr`/exact rationals, or document "regenerate on arm64 only" in the header itself. | Reproducibility of the build, not of the output. | regenerate on both machines, `diff` empty | 2 h |
@@ -147,8 +147,8 @@ default and stays bit-identical.
 
 | # | candidate | Philox cost | why it might win | why it might not | effort |
 |--:|---|---|---|---|---|
-| 2.1 | **`philox4x64-7`** -- same generator, 7 rounds | ~0.7x | Random123's authors report 7 rounds passes BigCrush; 10 is their safety margin. Simplest change, largest certain gain: **~+21% Gaussian, ~+40% uniform**. | Thinner margin above the failure threshold (BigCrush fails at 6). Needs its own Phase 0.3 audit. | 1 day incl. tests |
-| 2.2 | **Threefry4x64** | ? | Add/rotate/xor only. Vectorises 4-wide on AVX2 and NEON, where Philox's 64x64->128 multiply cannot. | Slower than Philox *scalar*; the win exists only with SIMD. Measure before committing. | 2 days to prototype |
+| 2.1 | ~~`philox4x64-7`~~ **REJECTED** | **0.95x -- slower than 10 rounds**, reproducibly, over four runs | would have broken every stream for a regression | closed |
+| 2.2 | ~~Threefry4x64-13~~ **SHIPPED** as `engine = "threefry4x64"` | 1.78x raw generator, but only **1.09x uniform / 1.15x normal** end to end | past L1 the fill is not generator-bound; see the note below | done |
 | 2.3 | **`philox4x32-10`** | ? | 32x32->64 multiplies vectorise (8 lanes AVX2, 4 lanes NEON). | A double needs two 32-bit words; per-double cost is unclear and the ziggurat wants a 64-bit word. | 2 days to prototype |
 | 2.4 | **SIMD Philox4x64 on AVX-512** | ~2-4x on capable CPUs | `_mm512_mullo_epi64` + high-half emulation. | Neither dev machine has AVX-512; CRAN cannot ship `-march=native`. Runtime dispatch only. Park unless a target machine appears. | -- |
 
@@ -213,3 +213,30 @@ says so.
   ceiling makes that a coin flip at best; the honest path is a new engine.
 - `-march=native` or any build that produces machine-specific output.
 - Changing what any existing key produces. Ever.
+
+## Amendment, after Phase 2 (2026-09-19)
+
+Faster generators are not the lever this roadmap assumed.
+
+threefry4x64-13 is 1.78x philox4x64-10 per word in a register-only
+microbenchmark, and delivers 1.09x on uniform and 1.15x on normal at
+n = 1e7. Sweeping the working set shows why: the speedup is 1.53x at
+n = 1000, where the output fits L1, and is gone by n = 10000. A real fill
+stores to memory, and past L1 the generator is no longer the constraint.
+
+This is consistent with the one big win so far: the two-pass uniform fill,
+a pure memory-layout change, bought +56%, while a 1.78x faster generator
+bought +9%.
+
+So Phase 3's memory-traffic items outrank any further engine work, and
+should be measured before they are built:
+
+- Is the chunk buffer's store-and-reload actually costing what was assumed?
+  The in-place variant measured ~12% slower for normal, but that predates
+  the two-pass uniform change and deserves a re-test.
+- Is the 17% first-touch page-fault figure real? It was one median on a
+  loaded machine, and single medians have been wrong three times today.
+
+ARS remains the fastest thing measured (3.40x) and cannot be a default:
+without AES-NI `ars4x32_ctr_t` is not declared, and neither ars.h nor aes.h
+has a NEON path, so it does not compile on the M1 at all.

@@ -65,6 +65,50 @@ test_that("rng_bits() matches an independent Philox across keys and blocks", {
     ))
 })
 
+test_that("the threefry4x64 engine really is threefry4x64-13", {
+  # Same argument as above, with one extra link. A zurand key stores 128
+  # bits and threefry4x64 wants 256, so src/zurand.c derives the upper
+  # half by xor with Threefry's own Weyl constants. These expectations run
+  # that derivation through the independent reference too, so the test
+  # covers the key expansion and not only the cipher.
+
+  # seed 42  ->  derived key bdd732262feb6e95 28efe333b266f103
+  #                          23e04b9f50a11280 93884db636ac5638
+  expect_identical(
+    as.character(rng_bits(rng_key(42L, engine = "threefry4x64"), 12L,
+                          bits = 64L)),
+    c(
+      "34c97278d79b0d7b", "0c2eef287dc2f066", "c2b878ac91de3e96",
+      "d9d98a208ae031cc", "b9eb27c2c2aeb507", "30fe88a576ae91e0",
+      "99a286e4fab778df", "9eaa661d56524df0", "dade34f23716ed4f",
+      "72185b392dbcc061", "56f468cb20f7c549", "638e93e206be3712"
+    ))
+
+  # seed 1  ->  derived key 910a2dec89025cc1 beeb8da1658eec67
+  #                          0f3d5455f64820d4 058c2324e1444b5c
+  expect_identical(
+    as.character(rng_bits(rng_key(1L, engine = "threefry4x64"), 12L,
+                          bits = 64L)),
+    c(
+      "32df86fb3aafc23e", "5f2ebc6bf807184f", "4def0762be0da85c",
+      "94d30c986dbb5e30", "b89e1eb654a5b06b", "4ee849b5804cd42f",
+      "28cb443e6f09ed34", "104caa2c734225c5", "34620cf838ee1f00",
+      "0966580573df3d67", "38dbfc75d794c17d", "5b219df0ca3ca524"
+    ))
+
+  # seed 2026  ->  derived key db9c559891948d23 78bc927ded35455d
+  #                          45ab2c21eedef136 c3db3cf869ffe266
+  expect_identical(
+    as.character(rng_bits(rng_key(2026L, engine = "threefry4x64"), 12L,
+                          bits = 64L)),
+    c(
+      "7a6af12555eaf393", "b6046174c5b150ff", "a88552da1885b93f",
+      "e1b969331557065e", "057369fcfaecb8b3", "0d315b9a0d94fdff",
+      "8b2f0c5bb847cb40", "974faccefcc76fdb", "0381d0bf894c9d2c",
+      "899a8d1fd4711838", "866409fddb46bd74", "34b98d664f4c30d0"
+    ))
+})
+
 test_that("rng_bits(32) is the low half of the 64-bit stream", {
   # The two widths must be views of one stream, not two streams.
   key <- rng_key(42L)
