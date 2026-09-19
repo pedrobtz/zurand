@@ -1,0 +1,23 @@
+Package: rngat
+Title: Stateless Random Numbers via Counter-Based Generation
+Version: 0.0.0.9000
+Authors@R: c(
+    person("Pedro", "Baltazar", , "pedrobtz@gmail.com", role = c("aut", "cre", "cph")),
+    person("D. E. Shaw Research", role = "cph",
+           comment = "Random123 library, src/Random123/"),
+    person("NumPy Developers", role = "cph",
+           comment = "Ziggurat constant tables, src/numpyzig/")
+  )
+Description: Stateless deterministic random number generation using the Philox
+    counter-based generator from the 'Random123' library by Salmon, Moraes,
+    Dror and Shaw (2011) <doi:10.1145/2063384.2063405>. Random values are pure
+    functions of immutable keys and sampler arguments, so sampling never reads
+    or mutates '.Random.seed'. Independent substreams are requested as key
+    vectors with rng_key(seed, n) or derived explicitly with rng_fold().
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 8.0.0
+Suggests: 
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3

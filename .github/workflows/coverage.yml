@@ -1,0 +1,22 @@
+on:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - ".github/badges/coverage.svg"
+  pull_request:
+
+name: coverage
+
+jobs:
+  coverage:
+    uses: pedrobtz/r-actions/.github/workflows/coverage.yml@v1
+    permissions:
+      contents: write
+    with:
+      # rngat is ~900 lines of C behind ~250 lines of R wrapper, so the covr
+      # number alone says very little about what the tests actually reach.
+      native: true
+      # The default runner does `Rscript tests/testthat.R` from the repo root,
+      # where test_check() looks for ./testthat and finds nothing. R CMD check
+      # runs test files with tests/ as the working directory; match that.
+      native-run: cd tests && Rscript testthat.R

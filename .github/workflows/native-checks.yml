@@ -1,0 +1,39 @@
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+name: native-checks
+
+# Required, not decorative: this repository's default_workflow_permissions is
+# "read", and every called workflow declares `permissions: read-all`. Without
+# this the whole workflow is rejected at startup before any job runs.
+permissions: read-all
+
+jobs:
+  sanitizers:
+    uses: pedrobtz/r-actions/.github/workflows/sanitizers.yml@v1
+    with:
+      asan: true
+
+  valgrind:
+    uses: pedrobtz/r-actions/.github/workflows/valgrind.yml@v1
+
+  lto:
+    uses: pedrobtz/r-actions/.github/workflows/lto.yml@v1
+
+  gctorture:
+    uses: pedrobtz/r-actions/.github/workflows/gctorture.yml@v1
+
+  rchk:
+    uses: pedrobtz/r-actions/.github/workflows/rchk.yml@v1
+
+  analyzers:
+    uses: pedrobtz/r-actions/.github/workflows/analyzers.yml@v1
+    with:
+      # Random123 and NumPy's ziggurat tables are vendored verbatim and are
+      # not ours to fix upstream. Excluded findings still appear in the job
+      # summary under their own heading.
+      exclude: |
+        src/Random123
+        src/numpyzig

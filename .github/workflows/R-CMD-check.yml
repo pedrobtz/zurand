@@ -1,0 +1,12 @@
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+name: R-CMD-check
+
+permissions: read-all
+
+jobs:
+  R-CMD-check:
+    uses: pedrobtz/r-actions/.github/workflows/r-cmd-check.yml@v1
