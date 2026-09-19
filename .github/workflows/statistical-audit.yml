@@ -1,0 +1,133 @@
+# Statistical test battery. On demand only: a useful run takes tens of
+# minutes to hours, which does not belong on a push, and the result is a
+# document rather than a gate.
+#
+# What it is for. test-kat.R proves the generators are really Philox and
+# Threefry, and test-golden.R proves every platform agrees. Neither says
+# anything about whether the numbers are *distributed* correctly. The
+# ziggurat -- in particular the fixed-point wedge shortcut and the tail --
+# is this package's own code and is the least scrutinised thing in it.
+#
+# Does not gate anything. A battery this long has flaky individual tests,
+# and "WEAK" on one of 100+ is noise, not a defect. Read the summary.
+on:
+  workflow_dispatch:
+    inputs:
+      sampler:
+        description: "Which sampler to test"
+        type: choice
+        options: [normal, uniform, bits, all]
+        default: normal
+      engine:
+        description: "Which engine"
+        type: choice
+        options: [philox4x64, threefry4x64, both]
+        default: both
+      gb:
+        description: "Gigabytes of stream per combination"
+        default: "4"
+      tool:
+        description: "Test battery"
+        type: choice
+        options: [practrand, dieharder]
+        default: practrand
+
+name: statistical-audit
+
+permissions: read-all
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          http-user-agent: release
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          needs: check
+
+      - name: Install the package (-O2, never load_all)
+        run: R CMD INSTALL .
+
+      - name: Build PractRand
+        if: inputs.tool == 'practrand'
+        run: |
+          set -eu
+          # Built from source rather than apt: PractRand is not packaged,
+          # and it is the strongest battery that takes a stream on stdin.
+          curl -fsSL -o pr.zip \
+            https://downloads.sourceforge.net/project/pracrand/PractRand-pre0.95.zip
+          mkdir practrand && cd practrand && unzip -q ../pr.zip
+          g++ -std=c++17 -O2 -Iinclude -o RNG_test \
+              tools/RNG_test.cpp src/*.cpp src/RNGs/*.cpp src/RNGs/other/*.cpp \
+              -pthread
+          echo "$PWD" >> "$GITHUB_PATH"
+
+      - name: Install dieharder
+        if: inputs.tool == 'dieharder'
+        run: sudo apt-get update && sudo apt-get install -y dieharder
+
+      - name: Run the battery
+        run: |
+          set -u
+          samplers="${{ inputs.sampler }}"
+          [ "$samplers" = "all" ] && samplers="normal uniform bits"
+          engines="${{ inputs.engine }}"
+          [ "$engines" = "both" ] && engines="philox4x64 threefry4x64"
+          mkdir -p audit
+          for s in $samplers; do
+            for e in $engines; do
+              name="$s-$e"
+              echo "=== $name ==="
+              if [ "${{ inputs.tool }}" = "practrand" ]; then
+                Rscript tools/statistical-audit.R --sampler="$s" --engine="$e" \
+                        --gb='${{ inputs.gb }}' \
+                  | RNG_test stdin32 -tlmin 256KB -multithreaded \
+                  > "audit/$name.txt" 2>&1 || true
+              else
+                Rscript tools/statistical-audit.R --sampler="$s" --engine="$e" \
+                        --gb='${{ inputs.gb }}' --out="audit/$name.bin"
+                dieharder -a -g 201 -f "audit/$name.bin" \
+                  > "audit/$name.txt" 2>&1 || true
+                rm -f "audit/$name.bin"
+              fi
+            done
+          done
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "## Statistical audit"
+            echo ""
+            echo "tool \`${{ inputs.tool }}\` · ${{ inputs.gb }} GB per combination"
+            echo ""
+            echo "| combination | FAIL | WEAK | verdict |"
+            echo "|---|---:|---:|---|"
+            for f in audit/*.txt; do
+              [ -e "$f" ] || continue
+              n=$(basename "$f" .txt)
+              fail=$(grep -ciE '\bFAIL(ED)?\b' "$f" || true)
+              weak=$(grep -ciE '\bWEAK\b|\bSUSPECT\b' "$f" || true)
+              if [ "$fail" -gt 0 ]; then v="**investigate**"
+              elif [ "$weak" -gt 0 ]; then v="weak only — usually noise"
+              else v="clean"; fi
+              echo "| \`$n\` | $fail | $weak | $v |"
+            done
+            echo ""
+            echo "A stray WEAK among a hundred-plus tests is expected."
+            echo "A repeatable FAIL is not. Full logs are in the artifact."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: statistical-audit-${{ inputs.tool }}
+          path: audit/
+          if-no-files-found: warn
