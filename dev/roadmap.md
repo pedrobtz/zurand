@@ -240,3 +240,66 @@ should be measured before they are built:
 ARS remains the fastest thing measured (3.40x) and cannot be a default:
 without AES-NI `ars4x32_ctr_t` is not declared, and neither ars.h nor aes.h
 has a NEON path, so it does not compile on the M1 at all.
+
+## Memory-traffic measurements (2026-09-19)
+
+The amendment above said to measure Phase 3's assumptions before building
+them. Done, in C so the allocator and the fill can be separated, then
+confirmed at the R level.
+
+### The chunk buffer is not costing us -- item closed
+
+Three layouts, identical output, one allocation reused across reps so
+page-fault cost is excluded:
+
+| layout | n=1e5 | n=1e6 | n=1e7 |
+|---|---:|---:|---:|
+| **(a) two-pass, stack buffer (current)** | **351 M/s** | **334** | **305** |
+| (b) fused, no buffer | 200 (0.57x) | 198 (0.59x) | 189 (0.62x) |
+| (c) raw words into out[], transform in place | 340 (0.97x) | 293 (0.88x) | 278 (0.91x) |
+
+The current design wins at every size. The stack buffer stays in L1 while
+the output is written once and streamed; (c) turns that into
+write-read-write over the full output, and (b) makes every store wait on a
+10-round Philox chain. Nothing to win here -- the store-and-reload
+hypothesis is wrong.
+
+### Allocation is the real cost, and it is R-wide
+
+Same fill, reused buffer vs a fresh malloc per call:
+
+| n | reused | fresh alloc | penalty |
+|---|---:|---:|---:|
+| 1e6 (7.6 MB) | 300 M/s | 296 | +1.3% |
+| 1e7 (76 MB) | 290 M/s | 253 | **+14.6%** |
+| 5e7 (381 MB) | 289 M/s | 134 | **+116%** |
+
+R pays it, and `bench` reports a GC in every iteration at the larger sizes:
+
+| n | zurand | dqrng | ratio |
+|---|---:|---:|---:|
+| 1e6 | 251 M/s | 275 | 0.91 |
+| 1e7 | 242 M/s | 267 | 0.91 |
+| 5e7 | 142 M/s | 139 | **1.03** |
+
+Two things follow. The tax is **not zurand-specific** -- dqrng degrades
+identically, and at 5e7 the allocation cost so dominates that zurand edges
+ahead. And it is **large**: at 5e7 R gets 142 M/s where the same fill into
+a reused buffer gets 289.
+
+So the earlier "17% at n=1e7" figure was about right, and understated what
+happens above it.
+
+### What this means for item 3.1
+
+An in-place fill is the only lever that touches this, and no competitor
+offers one, so it is a real differentiator rather than a micro-optimisation.
+The risk noted earlier stands and has a standard answer: do not mutate a
+caller's vector unconditionally. Take the vector, check `MAYBE_REFERENCED`,
+fill in place only when unshared and duplicate otherwise, and return it --
+the same contract R's own subassignment uses. A caller writing
+`x <- rng_fill_uniform(x, key)` in a loop then gets the benefit safely, and
+a caller who aliased the vector gets correct results instead of corruption.
+
+Still unbuilt, and still a permanent public API commitment, so it wants an
+explicit decision rather than being taken as implied by the numbers.
