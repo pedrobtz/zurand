@@ -388,11 +388,22 @@ so each chunk gets contiguous vector stores instead of a 4 KiB scatter.
 
 ### What remains
 
-5.1  Runtime dispatch. CRAN does not accept `-march=native`, so the AVX2
-     path is a separate translation unit built with `-mavx2`, selected by
-     CPUID behind a baseline that is always present. `configure` (3.3)
-     grows the job of probing the flags. A golden test must run under each
-     path, since identical output is the whole point.
-5.2  Prototype on the M1 before building dispatch. The pattern that has
-     held all day: a standalone microbenchmark first, on both machines.
-5.3  Then decide whether ~1.45x on uniform earns the dispatch machinery.
+5.1  ~~Runtime dispatch~~ **DONE.** No separate translation unit was
+     needed: `__attribute__((target("avx2")))` on the one function lets a
+     baseline-compiled object carry an AVX2 path, selected by
+     `__builtin_cpu_supports`. `src/Makevars` is untouched, so `configure`
+     (3.3) does not grow and `R CMD check` sees no unusual flags.
+     `rng_simd()` reports the active path and forces the portable one, and
+     `tests/testthat/test-simd.R` runs both and compares -- identical
+     output is the premise of dispatching at all, so it is checked rather
+     than asserted. Measured through the R API at n=1e7:
+
+       uniform  481 -> 619 M/s  1.29-1.44x   2.1-2.7x dqrng
+       normal   269 -> 297 M/s  1.10-1.23x   1.7-2.0x RcppZiggurat MT
+
+5.2  Still to do on the M1: NEON is 2x64, so two sub-chunks per register
+     rather than four. Nothing in the stream depends on the lane count, so
+     the width is free to differ per ISA.
+5.3  Gaussian gains least, as predicted -- it is bounded by the scalar
+     ziggurat, not by word generation. A SIMD-friendly transform remains a
+     research problem rather than an optimisation.
