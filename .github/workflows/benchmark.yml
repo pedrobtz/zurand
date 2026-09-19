@@ -1,0 +1,116 @@
+# Uniform and Gaussian throughput against the field. On demand, because it
+# is a measurement rather than a gate and nothing here should fail a push.
+#
+# A shared runner is not a quiet machine, so this reports the way the noise
+# demands: competitors are timed in the same bench::mark() call as zurand,
+# repeated over several rounds, and what is published is the ratio and its
+# spread. An absolute M/s from a runner means very little; a ratio measured
+# side by side in the same process survives the runner being busy.
+#
+# It is also not the tuning platform -- zurand is tuned on Apple Silicon and
+# GitHub's Linux runners are x86_64. Treat this as a second datapoint that
+# is at least reproducible by anyone, not as the reference.
+on:
+  workflow_dispatch:
+    inputs:
+      n:
+        description: "Values per draw"
+        default: "1e7"
+      rounds:
+        description: "Repeated rounds (ratio spread comes from these)"
+        default: "5"
+      os:
+        description: "Runner"
+        type: choice
+        options: [ubuntu-latest, macos-latest, windows-latest]
+        default: ubuntu-latest
+
+name: benchmark
+
+permissions: read-all
+
+jobs:
+  benchmark:
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          http-user-agent: release
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: |
+            any::bench
+            any::dqrng
+            any::RcppZiggurat
+          needs: check
+
+      - name: Install the package
+        # R CMD INSTALL, never load_all(): its default debug = TRUE compiles
+        # -O0 and measures 11x slower.
+        run: R CMD INSTALL .
+
+      - name: Benchmark
+        shell: Rscript {0}
+        env:
+          ZURAND_N: ${{ inputs.n }}
+          ZURAND_ROUNDS: ${{ inputs.rounds }}
+        run: |
+          suppressMessages({library(zurand); library(bench)
+                            library(dqrng); library(RcppZiggurat)})
+          n      <- as.integer(as.numeric(Sys.getenv("ZURAND_N")))
+          rounds <- as.integer(Sys.getenv("ZURAND_ROUNDS"))
+          rng_threads(1L); dqset.seed(42L)
+          kp <- rng_key(42L); kt <- rng_key(42L, engine = "threefry4x64")
+
+          # Ratios, not absolutes: everything in one call, repeated.
+          run <- function(exprs) {
+            m <- vapply(seq_len(rounds), function(i)
+              as.numeric(bench::mark(exprs = exprs, check = FALSE,
+                                     min_iterations = 10)$median), numeric(length(exprs)))
+            # vapply drops names; the rows are the methods, in order.
+            rownames(m) <- names(exprs)
+            n / m / 1e6                       # M values/s, one column per round
+          }
+          fmt <- function(v) sprintf("%.0f", stats::median(v))
+          row <- function(label, s, ref) {
+            r <- s / ref                      # per-round ratio vs the reference
+            sprintf("| %s | %s | %.2f | %.2f-%.2f |", label, fmt(s),
+                    stats::median(r), min(r), max(r))
+          }
+
+          cat("## Benchmark\n\n",
+              sprintf("`%s` · n = %s · %d rounds · R %s\n\n",
+                      Sys.getenv("RUNNER_OS"), format(n, big.mark = ","),
+                      rounds, getRversion()),
+              "Ratios are measured within each round against the reference,\n",
+              "so a busy runner moves both sides together.\n\n", sep = "",
+              file = Sys.getenv("GITHUB_STEP_SUMMARY"), append = TRUE)
+
+          u <- run(list(zurand_philox   = quote(rng_uniform(kp, n)),
+                        zurand_threefry = quote(rng_uniform(kt, n)),
+                        dqrng           = quote(dqrunif(n)),
+                        base_R          = quote(runif(n))))
+          g <- run(list(zurand_philox   = quote(rng_normal(kp, n)),
+                        zurand_threefry = quote(rng_normal(kt, n)),
+                        RcppZig_MT      = quote(zrnormMT(n)),
+                        dqrng           = quote(dqrnorm(n)),
+                        base_R          = quote(rnorm(n))))
+
+          emit <- function(title, s, refname) {
+            ref <- s[refname, , drop = TRUE]
+            lines <- c(sprintf("### %s", title), "",
+                       sprintf("| method | M/s | vs %s | range |", refname),
+                       "|---|---:|---:|---|",
+                       vapply(rownames(s), function(k)
+                         row(k, s[k, , drop = TRUE], ref), character(1)), "")
+            cat(paste(lines, collapse = "\n"), "\n",
+                file = Sys.getenv("GITHUB_STEP_SUMMARY"), append = TRUE)
+            cat(paste(lines, collapse = "\n"), "\n")
+          }
+          emit("Uniform", u, "dqrng")
+          emit("Gaussian", g, "RcppZig_MT")
