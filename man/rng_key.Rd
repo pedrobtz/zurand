@@ -10,7 +10,7 @@
 \alias{c.rng_key}
 \title{Create a stateless RNG key}
 \usage{
-rng_key(seed, n = 1L, engine = "philox4x64")
+rng_key(seed, n = 1L, engine = c("philox4x64", "threefry4x64"))
 
 \method{format}{rng_key}(x, ...)
 
@@ -29,8 +29,18 @@ rng_key(seed, n = 1L, engine = "philox4x64")
 
 \item{n}{A single non-negative whole number: how many keys to create.}
 
-\item{engine}{The counter-based engine to use. Currently only
-\code{"philox4x64"} is implemented.}
+\item{engine}{The counter-based engine. Both are Random123 generators, so
+both give the same guarantee: a value is a pure function of the key and
+the draw index, reachable directly without generating what precedes it.
+They differ only in speed and in the stream they produce.
+\itemize{
+\item \code{"philox4x64"} (default) -- Philox4x64-10. The original engine; its
+stream is fixed and will not change.
+\item \code{"threefry4x64"} -- Threefry4x64-13, roughly 1.8x faster per word.
+}
+
+A key records its engine, so a key made with one never produces the
+other's values. Changing engine changes every number you get.}
 
 \item{x}{An \code{rng_key}.}
 

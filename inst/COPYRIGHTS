@@ -11,6 +11,7 @@ Random123
 -------------------------------------------------------------------------
 
 Files:      src/Random123/philox.h
+            src/Random123/threefry.h
             src/Random123/array.h
             src/Random123/features/*.h
 Copyright:  Copyright 2010-2012, D. E. Shaw Research. All rights reserved.
@@ -25,8 +26,8 @@ The Version field above is the pinned upstream release, and it is the only
 reads it with `sed -n 's/^Version: *//p'` to ask whether upstream has shipped
 a newer release. Keep it in step when re-vendoring.
 
-Provides the Philox4x64-10 counter-based random number generator used by
-every sampler in this package. Reference: J. K. Salmon, M. A. Moraes,
+Provides the counter-based generators behind every sampler in this package:
+Philox4x64-10 (the default engine) and Threefry4x64-13. Reference: J. K. Salmon, M. A. Moraes,
 R. O. Dror and D. E. Shaw (2011), "Parallel random numbers: as easy as
 1, 2, 3", SC '11, <doi:10.1145/2063384.2063405>.
 

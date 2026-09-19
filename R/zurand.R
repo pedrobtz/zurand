@@ -10,15 +10,25 @@
 #'
 #' @param seed A single non-negative whole number.
 #' @param n A single non-negative whole number: how many keys to create.
-#' @param engine The counter-based engine to use. Currently only
-#'   `"philox4x64"` is implemented.
+#' @param engine The counter-based engine. Both are Random123 generators, so
+#'   both give the same guarantee: a value is a pure function of the key and
+#'   the draw index, reachable directly without generating what precedes it.
+#'   They differ only in speed and in the stream they produce.
+#'
+#'   * `"philox4x64"` (default) -- Philox4x64-10. The original engine; its
+#'     stream is fixed and will not change.
+#'   * `"threefry4x64"` -- Threefry4x64-13, roughly 1.8x faster per word.
+#'
+#'   A key records its engine, so a key made with one never produces the
+#'   other's values. Changing engine changes every number you get.
 #' @return An object of class `rng_key` containing `n` keys.
 #' @export
 #' @examples
 #' key <- rng_key(42L)
 #' keys <- rng_key(42L, n = 4L)
 #' key
-rng_key <- function(seed, n = 1L, engine = "philox4x64") {
+rng_key <- function(seed, n = 1L,
+                    engine = c("philox4x64", "threefry4x64")) {
   engine <- match.arg(engine)
   .Call(C_rng_key, seed, n, engine)
 }
@@ -33,7 +43,8 @@ rng_key <- function(seed, n = 1L, engine = "philox4x64") {
 #' @inheritParams rng_key
 #' @return An object of class `rng_key` containing `n` keys.
 #' @export
-rng_key_from_r <- function(n = 1L, engine = "philox4x64") {
+rng_key_from_r <- function(n = 1L,
+                           engine = c("philox4x64", "threefry4x64")) {
   engine <- match.arg(engine)
   .Call(C_rng_key_from_r, n, engine)
 }

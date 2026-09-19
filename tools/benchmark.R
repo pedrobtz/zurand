@@ -14,6 +14,33 @@
 
 library(zurand)
 
+# Results are only comparable across machines if you know which machine
+# produced them. zurand is tuned on Apple Silicon; an x86_64 run differs in
+# cache line size, in whether Philox 64x64->128 is one instruction (x86 mulq)
+# or two (arm64 mul + umulh), and in whether OpenMP is present at all.
+platform <- function() {
+  arch <- R.version$arch
+  cpu <- tryCatch(
+    if (Sys.info()[["sysname"]] == "Darwin")
+      system("sysctl -n machdep.cpu.brand_string", intern = TRUE)
+    else sub("^model name\\s*:\\s*", "",
+             grep("model name", readLines("/proc/cpuinfo"), value = TRUE)[1]),
+    error = function(e) NA_character_, warning = function(e) NA_character_)
+  if (is.na(cpu[1]) || !nzchar(cpu[1]))
+    cpu <- if (arch == "aarch64") "Apple Silicon" else arch
+  cat("--------------------------------------------------------------\n")
+  cat("CPU      : ", cpu[1], "\n", sep = "")
+  cat("arch     : ", arch, " | cores: ", parallel::detectCores(), "\n", sep = "")
+  cat("R        : ", R.version.string, "\n", sep = "")
+  cat("zurand   : ", as.character(utils::packageVersion("zurand")), "\n", sep = "")
+  cat("OpenMP   : ", if (rng_threads() > 1)
+        paste0("yes, up to ", rng_threads(), " threads")
+      else "NO -- single-threaded build, threaded tables below are meaningless",
+      "\n", sep = "")
+  cat("--------------------------------------------------------------\n")
+}
+platform()
+
 required <- c("randompack", "dqrng", "sitmo", "RcppZiggurat", "rTRNG", "bench")
 missing <- required[!vapply(required, requireNamespace, logical(1),
                             quietly = TRUE)]
