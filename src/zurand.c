@@ -47,6 +47,27 @@
  * wide multiply instead of exp(). */
 #include "zigbounds.h"
 
+/* No fused multiply-add in this translation unit.
+ *
+ * The scaling passes are `min + span * x` and `mean + sd * x`. A compiler
+ * with FMA available -- every arm64 target, and x86_64 built with -mfma --
+ * is free to contract each into a single fused instruction that rounds once
+ * instead of twice. The result differs from the unfused form by an ulp.
+ *
+ * That silently breaks the package's central promise. CI caught it: macOS
+ * arm64 disagreed with x86_64 on exactly the two golden expectations that
+ * pass a non-default min/max or mean/sd, and on no others. Reproducibility
+ * is the product here, so the ulp is not an acceptable trade for one fused
+ * instruction in a pass that is memory-bound anyway.
+ *
+ * clang honours this pragma. GCC has only implemented it recently, and
+ * cannot contract on an x86_64 target without FMA enabled in any case; a
+ * GCC build for an FMA-capable target should also pass -ffp-contract=off,
+ * which is what the planned configure script will probe for. */
+#if defined(__clang__) || (defined(__GNUC__) && __GNUC__ >= 14)
+#pragma STDC FP_CONTRACT OFF
+#endif
+
 /* Width of the deferred band on the chord side of the wedge shortcut, in
  * the same 52-bit fixed point as zurand_zig_gap. Must dominate the ~7-unit
  * chord crossing that ki rounding causes at layer edges (measured in
