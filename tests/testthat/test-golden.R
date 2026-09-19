@@ -164,6 +164,18 @@ test_that("the xoshiro256pp engine is bit-stable", {
 
   expect_false(identical(rng_normal(rng_key(42L), 64L),
                          rng_normal(rng_key(42L, engine = "xoshiro256pp"), 64L)))
+
+  # A xoshiro key is a Philox key, so it folds with Philox: the derived key
+  # words must equal what the same seed folds to under the philox engine,
+  # with only the engine attribute differing. A two-way dispatch once sent
+  # these down the threefry path; this pins the fix.
+  fx <- rng_fold(rng_key(42L, engine = "xoshiro256pp"), "layer1")
+  expect_identical(unclass(fx)[1L, ], unclass(rng_fold(rng_key(42L), "layer1"))[1L, ])
+  expect_identical(attr(fx, "engine"), "xoshiro256pp")
+  expect_identical(format(rng_fold(rng_key(42L, engine = "xoshiro256pp"), "layer1")),
+    c(
+      "rng_key[8dbacb9f407ebc3ae10ed1561177db53]"
+    ))
 })
 
 test_that("draw i does not depend on n", {

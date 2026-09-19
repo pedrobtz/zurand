@@ -389,6 +389,10 @@ static int lemire_accept(uint32_t x, uint32_t range, uint32_t threshold,
  */
 #define ZURAND_CHUNK_BLOCKS 128 /* 512 words, 4 KiB per thread */
 #define ZURAND_CHUNK_WORDS (ZURAND_CHUNK_BLOCKS * 4)
+/* The counter-based chunk_words copies whole blocks, so a request for
+ * nwords may write up to 3 words past it. Every chunk buffer is sized
+ * ZURAND_CHUNK_WORDS + ZURAND_CHUNK_SLACK for that reason. */
+#define ZURAND_CHUNK_SLACK 3
 
 #define ZE_SUFFIX philox
 #define ZE_KEY_T  philox4x64_key_t
@@ -608,12 +612,17 @@ SEXP C_rng_fold(SEXP key, SEXP data) {
     SEXP ans = PROTECT(alloc_key_vector(nkey, engine));
     for (R_xlen_t i = 0; i < nkey; i++) {
         zurand_ctr_t out;
-        if (eng == ZURAND_ENG_PHILOX)
-            out = zurand_block_philox(key_from_words(kw, nkey, i), h, domain,
-                                      ZURAND_PURPOSE_FOLD);
-        else
+        /* xoshiro keys are Philox keys -- Philox derives their chunk seeds
+         * and their retry words -- so they fold with Philox too. The earlier
+         * two-way branch sent them down the threefry path with a
+         * threefry-expanded key, which contradicted the documentation and
+         * tied xoshiro's substreams to another engine's key schedule. */
+        if (eng == ZURAND_ENG_THREEFRY)
             out = zurand_block_threefry(key_from_words_threefry(kw, nkey, i), h,
                                         domain, ZURAND_PURPOSE_FOLD);
+        else
+            out = zurand_block_philox(key_from_words(kw, nkey, i), h, domain,
+                                      ZURAND_PURPOSE_FOLD);
         set_key_words(ans, nkey, i, out.v[0], out.v[1]);
     }
     UNPROTECT(1);
@@ -795,22 +804,20 @@ SEXP C_rng_integer(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     return ans;
 }
 
-/* rng_bits() exposes the raw stream, so it must follow whichever engine
- * the key names. xoshiro produces words a chunk at a time, so one block of
- * four is taken from the front of its chunk. */
-static void bits_block(zurand_engine_t eng, philox4x64_key_t kp,
-                       threefry4x64_key_t kt, uint64_t b, zurand_ctr_t *out) {
-    if (eng == ZURAND_ENG_THREEFRY) {
-        *out = zurand_block_threefry(kt, b, 0, ZURAND_PURPOSE_BITS);
-    } else if (eng == ZURAND_ENG_XOSHIRO) {
-        uint64_t buf[ZURAND_CHUNK_WORDS];
-        uint64_t c = b / ZURAND_CHUNK_BLOCKS;
-        int off = (int)((b % ZURAND_CHUNK_BLOCKS) * 4);
-        chunk_words_xoshiro(kp, c, ZURAND_PURPOSE_BITS, buf, off + 4);
-        memcpy(out->v, buf + off, sizeof out->v);
-    } else {
-        *out = zurand_block_philox(kp, b, 0, ZURAND_PURPOSE_BITS);
-    }
+/* rng_bits() exposes the raw stream and must follow whichever engine the
+ * key names, a chunk at a time. The previous version fetched one block per
+ * call, which for xoshiro meant regenerating from the chunk start every
+ * four words -- 9x slower than the other engines, and the statistical
+ * audit's `bits` sampler goes through exactly this path. */
+static void bits_chunk(zurand_engine_t eng, philox4x64_key_t kp,
+                       threefry4x64_key_t kt, uint64_t c, uint64_t *buf,
+                       int nwords) {
+    if (eng == ZURAND_ENG_THREEFRY)
+        chunk_words_threefry(kt, c, ZURAND_PURPOSE_BITS, buf, nwords);
+    else if (eng == ZURAND_ENG_XOSHIRO)
+        chunk_words_xoshiro(kp, c, ZURAND_PURPOSE_BITS, buf, nwords);
+    else
+        chunk_words_philox(kp, c, ZURAND_PURPOSE_BITS, buf, nwords);
 }
 
 SEXP C_rng_bits(SEXP key, SEXP n_, SEXP bits_) {
@@ -829,12 +836,14 @@ SEXP C_rng_bits(SEXP key, SEXP n_, SEXP bits_) {
             philox4x64_key_t kp = key_from_words(kw, nkey, col);
             threefry4x64_key_t kt = key_from_words_threefry(kw, nkey, col);
             double *col_out = out + n * col;
-            for (R_xlen_t i = 0; i < n; i += 4) {
-                zurand_ctr_t block;
-                    bits_block(eng, kp, kt, (uint64_t)(i >> 2), &block);
-                R_xlen_t stop = n - i < 4 ? n - i : 4;
-                for (R_xlen_t w = 0; w < stop; w++)
-                    col_out[i + w] = (double)(uint32_t)block.v[w];
+            R_xlen_t nchunk = (n + ZURAND_CHUNK_WORDS - 1) / ZURAND_CHUNK_WORDS;
+            for (R_xlen_t c = 0; c < nchunk; c++) {
+                uint64_t buf[ZURAND_CHUNK_WORDS + ZURAND_CHUNK_SLACK];
+                R_xlen_t w0 = c * ZURAND_CHUNK_WORDS;
+                int m = (int)(n - w0 < ZURAND_CHUNK_WORDS ? n - w0 : ZURAND_CHUNK_WORDS);
+                bits_chunk(eng, kp, kt, (uint64_t)c, buf, m);
+                for (int j = 0; j < m; j++)
+                    col_out[w0 + j] = (double)(uint32_t)buf[j];
             }
         }
         UNPROTECT(1);
@@ -843,17 +852,19 @@ SEXP C_rng_bits(SEXP key, SEXP n_, SEXP bits_) {
 
     SEXP ans = PROTECT(Rf_allocVector(STRSXP, total));
     set_sample_dim(ans, n, nkey);
-    char buf[17];
+    char hex[17];
     for (R_xlen_t col = 0; col < nkey; col++) {
         philox4x64_key_t kp = key_from_words(kw, nkey, col);
         threefry4x64_key_t kt = key_from_words_threefry(kw, nkey, col);
-        for (R_xlen_t i = 0; i < n; i += 4) {
-            zurand_ctr_t block;
-                bits_block(eng, kp, kt, (uint64_t)(i >> 2), &block);
-            R_xlen_t stop = n - i < 4 ? n - i : 4;
-            for (R_xlen_t w = 0; w < stop; w++) {
-                snprintf(buf, sizeof buf, "%016" PRIx64, block.v[w]);
-                SET_STRING_ELT(ans, i + w + n * col, Rf_mkChar(buf));
+        R_xlen_t nchunk = (n + ZURAND_CHUNK_WORDS - 1) / ZURAND_CHUNK_WORDS;
+        for (R_xlen_t c = 0; c < nchunk; c++) {
+            uint64_t buf[ZURAND_CHUNK_WORDS + ZURAND_CHUNK_SLACK];
+            R_xlen_t w0 = c * ZURAND_CHUNK_WORDS;
+            int m = (int)(n - w0 < ZURAND_CHUNK_WORDS ? n - w0 : ZURAND_CHUNK_WORDS);
+            bits_chunk(eng, kp, kt, (uint64_t)c, buf, m);
+            for (int j = 0; j < m; j++) {
+                snprintf(hex, sizeof hex, "%016" PRIx64, buf[j]);
+                SET_STRING_ELT(ans, w0 + j + n * col, Rf_mkChar(hex));
             }
         }
     }

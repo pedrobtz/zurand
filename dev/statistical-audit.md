@@ -23,6 +23,8 @@ PractRand pre0.95, 256 MB per combination, x86_64, 2026-09-19.
 | normal | threefry4x64 | no anomalies in 168 test results |
 | normal | xoshiro256pp | no anomalies in 180 test results (512 MB) |
 | uniform | xoshiro256pp | no anomalies in 180 test results (512 MB) |
+| normal | xoshiro256pp, after the fold fix | no anomalies in 168 test results (256 MB) |
+| uniform | xoshiro256pp, after the fold fix | no anomalies in 168 test results (256 MB) |
 
 The normal rows are the ones that matter: normals are mapped back through
 `pnorm()` before testing, so a wrong ziggurat -- a mis-set wedge bracket, a
@@ -41,6 +43,12 @@ to drive xoshiro -- far more reseeding than its designers had in mind. If
 that interacted badly with the recurrence, short-range correlation is
 exactly what PractRand's lowest lengths would catch first. It does not, to
 512 MB.
+
+The last two rows exist because `tools/statistical-audit.R` derives one key
+per block with `rng_fold()`, and a review found xoshiro keys were being
+folded by the threefry path. Fixing that changed every block key the audit
+uses for this engine, so the earlier rows no longer describe the stream the
+tool emits; these do.
 
 ## Still to run
 
