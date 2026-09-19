@@ -502,25 +502,38 @@ static void fill_normal_column(double *out, R_xlen_t n,
 
 /* Fills uniforms on (0, 1); C_rng_uniform applies min/span in a separate
  * vectorizable pass so the hot loop stays Philox plus the bit trick.
+ *
+ * Two passes over a stack chunk, for the same reason fill_normal_column
+ * uses them: the fused form makes each iteration's stores wait on that
+ * iteration's 10-round Philox chain, and splitting generation from
+ * transformation lets the generator loop pipeline across independent
+ * blocks. Same counters, same words, same order, same output.
  * `threads` is the thread count for the inner parallel region; callers
  * pass 0 to keep the column serial (e.g. when parallelizing over key
  * columns). */
 static void fill_uniform_column(double *out, R_xlen_t n,
                                 philox4x64_key_t key, int threads) {
     R_xlen_t nblock = n >> 2;
+    R_xlen_t nchunk = (nblock + ZURAND_CHUNK_BLOCKS - 1) / ZURAND_CHUNK_BLOCKS;
 #ifdef ZURAND_OPENMP
 #pragma omp parallel for if(threads > 1) \
     num_threads(threads > 0 ? threads : 1) default(none) \
-    shared(out, nblock, key) schedule(static)
+    shared(out, nblock, nchunk, key) schedule(static)
 #endif
-    for (R_xlen_t b = 0; b < nblock; b++) {
-        philox4x64_ctr_t block = zurand_block(key, (uint64_t)b, 0,
-                                             ZURAND_PURPOSE_UNIFORM);
-        double *o = out + (b << 2);
-        o[0] = u01_open(block.v[0]);
-        o[1] = u01_open(block.v[1]);
-        o[2] = u01_open(block.v[2]);
-        o[3] = u01_open(block.v[3]);
+    for (R_xlen_t c = 0; c < nchunk; c++) {
+        uint64_t buf[ZURAND_CHUNK_BLOCKS * 4];
+        R_xlen_t b0 = c * ZURAND_CHUNK_BLOCKS;
+        int nb = (int)(nblock - b0 < ZURAND_CHUNK_BLOCKS ? nblock - b0
+                                                        : ZURAND_CHUNK_BLOCKS);
+        for (int j = 0; j < nb; j++) {
+            philox4x64_ctr_t block = zurand_block(key, (uint64_t)(b0 + j), 0,
+                                                 ZURAND_PURPOSE_UNIFORM);
+            memcpy(buf + 4 * j, block.v, sizeof block.v);
+        }
+
+        double *o = out + (b0 << 2);
+        for (int j = 0; j < nb * 4; j++)
+            o[j] = u01_open(buf[j]);
     }
 
     R_xlen_t i = nblock << 2;

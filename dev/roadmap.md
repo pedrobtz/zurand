@@ -129,10 +129,10 @@ Each is measured; each is small. Together perhaps +5% Gaussian, +20% uniform.
 
 | # | task | expected | evidence | effort |
 |--:|---|---|---|---|
-| 1.1 | **Two-pass fill for uniform.** `fill_normal_column` buffers a chunk of Philox output then transforms it; `fill_uniform_column` still fuses generate-and-transform. | **~+20% uniform** | uniform costs 5.29 ns/value vs normal's 4.68 despite less arithmetic -- the fused loop cannot pipeline across Philox's 10-round chain | 1 h |
+| 1.1 | ~~Two-pass fill for uniform~~ **DONE** | **+56% uniform** (189 -> 295 M/s); ratio to dqrng 0.67 -> 0.92 | delivered; far exceeded the +20% estimate | done |
 | 1.2 | **Packed ziggurat table.** `ki_double[idx]` and `wi_double[idx]` are separate arrays: two cache lines per draw. Derive a `{uint64_t ki; double wi;}` array from the vendored header at build time (a generated `src/zigtable.h`, like `zigbounds.h`). | **~+4% Gaussian** on x86; re-measure on M1's 128-byte lines | standalone microbenchmark: 1.910 -> 1.737 ns/draw, 1.10x | 2 h |
 | 1.3 | **Fuse `mean`/`sd` into the transform.** `C_rng_normal` fills standard normals then sweeps the whole output again with `mean + sd * x`. The transform already ends in a multiply: `x = s * (wi[idx] * sd) + mean` is one FMA with `wi*sd` hoisted per call. | removes a full memory-bound pass whenever `mean`/`sd` are non-default | code reading; measure with `mean = 1, sd = 2` | 2 h |
-| 1.4 | **`ZURAND_CHUNK_BLOCKS` sweep.** Currently 128 blocks (4 KiB). Try 32, 64, 256, 512 on the M1. | unknown, likely neutral | none yet | 30 min |
+| 1.4 | ~~`ZURAND_CHUNK_BLOCKS` sweep~~ **inconclusive on x86** | none measurable | swept 16/32/64/128/256: uniform ratios 0.93-0.99, normal 0.99-1.31, i.e. pure noise on a loaded machine. Kept 128. Redo on a quiet M1. | done (retry) |
 | 1.5 | **Re-test manual ILP on the M1.** Interleaving 2/4/8 independent Philox blocks was 0.79-0.87x on x86 -- register pressure with 16 GPRs. arm64 has 31. | unknown; do not carry the x86 conclusion across | `/tmp/philox_bench.c` from the baseline work; rerun | 30 min |
 
 **Exit criterion:** baseline re-recorded on the M1 with 1.1-1.3 landed.
