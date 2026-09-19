@@ -59,6 +59,8 @@ jobs:
             any::bench
             any::dqrng
             any::RcppZiggurat
+            any::randompack
+            any::sitmo
           needs: check
 
       - name: Install the package
@@ -73,11 +75,15 @@ jobs:
           ZURAND_ROUNDS: ${{ inputs.rounds }}
         run: |
           suppressMessages({library(zurand); library(bench)
-                            library(dqrng); library(RcppZiggurat)})
+                            library(dqrng); library(RcppZiggurat)
+                            library(randompack); library(sitmo)})
           n      <- as.integer(as.numeric(Sys.getenv("ZURAND_N")))
           rounds <- as.integer(Sys.getenv("ZURAND_ROUNDS"))
           dqset.seed(42L)
           kp <- rng_key(42L); kt <- rng_key(42L, engine = "threefry4x64")
+          kx <- rng_key(42L, engine = "xoshiro256pp")
+          rp <- randompack::randompack_rng("philox")
+          sitmo::setSeed(42L)
           sink <- Sys.getenv("GITHUB_STEP_SUMMARY")
           say <- function(...) { cat(..., sep = "", file = sink, append = TRUE)
                                  cat(..., sep = "") }
@@ -104,22 +110,29 @@ jobs:
 
           threads <- rng_threads()
           say("## Benchmark\n\n", sprintf(
-            "`%s` · n = %s · %d rounds · R %s · OpenMP: %s\n\n",
+            "`%s` · n = %s · %d rounds · R %s · OpenMP: %s · SIMD: %s\n\n",
             Sys.getenv("RUNNER_OS"), format(n, big.mark = ","), rounds,
             getRversion(),
             if (threads > 1) paste0("yes, ", threads, " threads") else
-              "**absent — the all-threads tables below are meaningless**"))
+              "**absent — the all-threads tables below are meaningless**",
+            rng_simd()))
 
           unif <- function() list(
-            zurand_philox   = quote(rng_uniform(kp, n)),
+            zurand_xoshiro  = quote(rng_uniform(kx, n)),
             zurand_threefry = quote(rng_uniform(kt, n)),
+            zurand_philox   = quote(rng_uniform(kp, n)),
             dqrng           = quote(dqrunif(n)),
+            randompack      = quote(rp$unif(len = n)),
+            sitmo           = quote(runif_sitmo(n, 0, 1, 42L)),
             base_R          = quote(runif(n)),
             alloc_only      = quote(numeric(n)))
           gauss <- function() list(
-            zurand_philox   = quote(rng_normal(kp, n)),
+            zurand_xoshiro  = quote(rng_normal(kx, n)),
             zurand_threefry = quote(rng_normal(kt, n)),
+            zurand_philox   = quote(rng_normal(kp, n)),
             RcppZig_MT      = quote(zrnormMT(n)),
+            RcppZig_LZLLV   = quote(zrnorm(n)),
+            randompack      = quote(rp$normal(len = n)),
             dqrng           = quote(dqrnorm(n)),
             base_R          = quote(rnorm(n)),
             alloc_only      = quote(numeric(n)))

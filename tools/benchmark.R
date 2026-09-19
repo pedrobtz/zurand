@@ -60,6 +60,8 @@ TRNG_GRAIN <- 65536L  # rTRNG chunk size; parallelGrain = 0 runs it serially
 
 # seed every generator so runs are reproducible
 key <- rng_key(seed)
+key_tf <- rng_key(seed, engine = "threefry4x64")
+key_xo <- rng_key(seed, engine = "xoshiro256pp")
 rp <- randompack::randompack_rng("philox")
 set.seed(seed)
 dqset.seed(seed)
@@ -91,9 +93,14 @@ restore_threads <- rng_threads()
 on.exit(rng_threads(restore_threads))
 
 cat("zurand effective max threads:", rng_threads(), "\n")
+cat("zurand SIMD path:", rng_simd(), "\n")
+# `zurand` below is the default philox4x64 engine; the other two rows are
+# the opt-in engines, and xoshiro256pp is the fast one.
 
 # ============================ UNIFORM =======================================
 uniform_bench <- function(trng_grain) mark(
+  zurand_xoshiro  = rng_uniform(key_xo, n),
+  zurand_threefry = rng_uniform(key_tf, n),
   zurand      = rng_uniform(key, n),
   randompack = rp$unif(len = n),
   dqrng      = dqrunif(n),
@@ -118,6 +125,8 @@ show("UNIFORM, threading allowed (only zurand & rTRNG scale)",
 #   zrnormQL  - Gretl / QuantLib
 # plus dqrng and randompack, which are ziggurat too.
 normal_bench <- function(trng_grain) mark(
+  zurand_xoshiro  = rng_normal(key_xo, n),
+  zurand_threefry = rng_normal(key_tf, n),
   zurand          = rng_normal(key, n),
   randompack     = rp$normal(len = n),
   dqrng          = dqrnorm(n),
