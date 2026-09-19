@@ -3,7 +3,14 @@
 #   R CMD INSTALL . && Rscript dev/kat/emit_golden.R
 library(zurand)
 
-g <- function(x) sprintf("%.17g", x)   # round-trips IEEE doubles exactly
+# Hex float literals, not decimal. A decimal literal has to go through the
+# platform's decimal-to-binary parser, and that parser is not always
+# correctly rounded: "0.79010892717331271" lies above the midpoint of two
+# adjacent doubles, so it must round up, and R on arm64 rounds it down -- one
+# ulp, on a value zurand computes identically on every platform. A test for
+# bit-stability cannot be built on a representation that is itself unstable.
+# R parses %a literals exactly, verified over the full set below.
+g <- function(x) sprintf("%a", x)
 
 wrap <- function(xs, indent = "      ", width = 74) {
   out <- character(0); line <- indent
@@ -40,6 +47,10 @@ L <- c(
 "#",
 "# A failure here means either a real portability bug or a deliberate change",
 "# to the stream. Regenerate only for the latter, and say so in the commit.",
+"#",
+"# Values are hex float literals because decimal ones are not portable: R on",
+"# arm64 mis-rounds at least one 17-digit literal these tests need. Hex is",
+"# exact, so a failure is always about zurand and never about the parser.",
 "",
 "test_that(\"rng_uniform() is bit-stable\", {",
   blk("rng_uniform(rng_key(42L), 12L)", g(rng_uniform(key, 12L))),

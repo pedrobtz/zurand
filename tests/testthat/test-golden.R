@@ -13,30 +13,34 @@
 #
 # A failure here means either a real portability bug or a deliberate change
 # to the stream. Regenerate only for the latter, and say so in the commit.
+#
+# Values are hex float literals because decimal ones are not portable: R on
+# arm64 mis-rounds at least one 17-digit literal these tests need. Hex is
+# exact, so a failure is always about zurand and never about the parser.
 
 test_that("rng_uniform() is bit-stable", {
   expect_identical(rng_uniform(rng_key(42L), 12L),
     c(
-      0.79010892717331271, 0.72920570482687419, 0.50566360162866231,
-      0.11682107197673053, 0.14492973694561695, 0.56538631299171482,
-      0.53822460224889401, 0.78009069253782115, 0.5238925804916571,
-      0.6585106033500997, 0.88626455609407617, 0.037113829909774743
+      0x1.94892844f95b3p-1, 0x1.755a733c937bdp-1, 0x1.02e656ef8b9c5p-1,
+      0x1.de7fc5b9fac18p-4, 0x1.28d0ec0331c84p-3, 0x1.217a5097cf953p-1,
+      0x1.13922cd11f8b1p-1, 0x1.8f680c18ba557p-1, 0x1.0c3ba5f7a84d5p-1,
+      0x1.51284d42ea72bp-1, 0x1.c5c477c80e57fp-1, 0x1.300957b62323p-5
     ))
 
   expect_identical(rng_uniform(rng_key(42L), 4L, min = -2, max = 5),
     c(
-      3.5307624902131893, 3.104439933788119, 1.5396452114006363,
-      -1.1822524961628864
+      0x1.c3f00678b45fap+1, 0x1.8d5e49aa0218ap+1, 0x1.8a26304668a32p+0,
+      -0x1.2ea8197ea24b6p+0
     ))
 })
 
 test_that("rng_normal() is bit-stable, including the ziggurat slow paths", {
   expect_identical(rng_normal(rng_key(42L), 12L),
     c(
-      0.23972253836408919, 0.6828912204533627, 0.2552503793590209,
-      1.5763295731109792, 0.76539716135408009, -2.3148238357660622,
-      -0.9748996273192887, -1.0435636298325703, 0.86726597717606757,
-      2.503316824984398, 0.051479984904862428, -0.61921826287994775
+      0x1.eaf3a6731a5acp-3, 0x1.5da3eb05253b7p-1, 0x1.05605afe8dea1p-2,
+      0x1.938a55bc3ab33p+0, 0x1.87e22300ef1bdp-1, -0x1.284c25bf4ee9ep+1,
+      -0x1.f3260b407018p-1, -0x1.0b26fc6d6d0a6p+0, 0x1.bc0a4941cf33ep-1,
+      0x1.406caf8b6ad26p+1, 0x1.a5b95a7214226p-5, -0x1.3d0a2d184f845p-1
     ))
 
   # Indices whose |z| >= 3.6542: the fast path cannot produce these, so they
@@ -44,15 +48,15 @@ test_that("rng_normal() is bit-stable, including the ziggurat slow paths", {
   tail_idx <- c(1178L, 2172L, 4062L, 11756L, 13112L, 15279L, 28487L, 31217L)
   expect_identical(rng_normal(rng_key(42L), 200000L)[tail_idx],
     c(
-      -3.7087451467166725, 3.7753052164540724, 3.7602850113513835,
-      3.8270197708707219, -3.9853240184065308, 3.9084649541173038,
-      -4.0130178566779682, -3.6755483506186168
+      -0x1.dab829352c64fp+1, 0x1.e33d338a8b521p+1, 0x1.e15104edb253cp+1,
+      0x1.e9dbc8aa84804p+1, -0x1.fe1f18f1827a2p+1, 0x1.f4489461bf7bap+1,
+      -0x1.00d548d92c897p+2, -0x1.d6785e4c6308ap+1
     ))
 
   expect_identical(rng_normal(rng_key(42L), 4L, mean = 2, sd = 3),
     c(
-      2.7191676150922675, 4.0486736613600876, 2.7657511380770625,
-      6.7289887193329374
+      0x1.5c0daf3594f1p+1, 0x1.031d7821edf64p+2, 0x1.6204221f7537cp+1,
+      0x1.aea7c04d2c066p+2
     ))
 })
 
@@ -86,10 +90,10 @@ test_that("multi-key matrices are bit-stable", {
   # as well as the values.
   expect_identical(as.vector(rng_normal(rng_key(42L, n = 3L), 4L)),
     c(
-      0.23972253836408919, 0.6828912204533627, 0.2552503793590209,
-      1.5763295731109792, -0.91358582876010719, -0.1474977893056342,
-      0.3464715637762158, 1.5097699972484115, -1.7629091433531456,
-      -0.21341240045160342, -0.50814111725771116, 0.44820879051419571
+      0x1.eaf3a6731a5acp-3, 0x1.5da3eb05253b7p-1, 0x1.05605afe8dea1p-2,
+      0x1.938a55bc3ab33p+0, -0x1.d3c185913a391p-1, -0x1.2e13522a66651p-3,
+      0x1.62c9710da6bbap-2, 0x1.8280495aa9f7dp+0, -0x1.c34e037c85693p+0,
+      -0x1.b5118f8401022p-3, -0x1.042b1290bfe1fp-1, 0x1.caf73ec4271a2p-2
     ))
 })
 
