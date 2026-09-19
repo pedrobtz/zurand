@@ -9,8 +9,24 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
-#ifdef _OPENMP
-#include <omp.h>
+/* WRE's idiom is a bare `#ifdef _OPENMP` around <omp.h>, which assumes that a
+ * compiler defining _OPENMP also ships the header. The clang sanitizer
+ * containers disprove that: R's Makeconf there puts -fopenmp in
+ * SHLIB_OPENMP_CFLAGS, so _OPENMP is defined, while libomp-dev is absent and
+ * the include is a fatal error. Gate every OpenMP use on one macro instead,
+ * so that build is simply serial rather than broken. */
+#ifdef __has_include
+#  if __has_include(<omp.h>)
+#    define RNGAT_HAVE_OMP_H 1
+#  endif
+#else
+/* No __has_include: assume the header is present, the previous behaviour. */
+#  define RNGAT_HAVE_OMP_H 1
+#endif
+
+#if defined(_OPENMP) && defined(RNGAT_HAVE_OMP_H)
+#  include <omp.h>
+#  define RNGAT_OPENMP 1
 #endif
 
 #include "Random123/philox.h"
@@ -74,7 +90,7 @@
 static int rngat_thread_cap = 0;
 
 static int rngat_threads(void) {
-#ifdef _OPENMP
+#ifdef RNGAT_OPENMP
     int max = omp_get_max_threads();
     return (rngat_thread_cap > 0 && rngat_thread_cap < max) ? rngat_thread_cap
                                                             : max;
@@ -432,7 +448,7 @@ static void fill_normal_column(double *out, R_xlen_t n,
                                philox4x64_key_t key, int threads) {
     R_xlen_t nblock = n >> 2;
     R_xlen_t nchunk = (nblock + RNGAT_CHUNK_BLOCKS - 1) / RNGAT_CHUNK_BLOCKS;
-#ifdef _OPENMP
+#ifdef RNGAT_OPENMP
 #pragma omp parallel for if(threads > 1) \
     num_threads(threads > 0 ? threads : 1) default(none) \
     shared(out, nblock, nchunk, key) schedule(static)
@@ -471,7 +487,7 @@ static void fill_normal_column(double *out, R_xlen_t n,
 static void fill_uniform_column(double *out, R_xlen_t n,
                                 philox4x64_key_t key, int threads) {
     R_xlen_t nblock = n >> 2;
-#ifdef _OPENMP
+#ifdef RNGAT_OPENMP
 #pragma omp parallel for if(threads > 1) \
     num_threads(threads > 0 ? threads : 1) default(none) \
     shared(out, nblock, key) schedule(static)
@@ -692,7 +708,7 @@ SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     double span = max - min;
     int nt = rngat_threads();
     if (span == 0.0) {
-#ifdef _OPENMP
+#ifdef RNGAT_OPENMP
 #pragma omp parallel for if(nt > 1 && total >= RNGAT_OMP_MIN_VALUES) \
     num_threads(nt) default(none) shared(out, total, min) schedule(static)
 #endif
@@ -703,7 +719,7 @@ SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     }
     int par_cols = nt > 1 && nkey > 1 && total >= RNGAT_OMP_MIN_VALUES;
     int par_rows = !par_cols && n >= RNGAT_OMP_MIN_VALUES ? nt : 0;
-#ifdef _OPENMP
+#ifdef RNGAT_OPENMP
 #pragma omp parallel for if(par_cols) num_threads(nt) default(none) \
     shared(kw, out, n, nkey, par_rows) schedule(static)
 #endif
@@ -712,7 +728,7 @@ SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
         fill_uniform_column(out + n * col, n, k, par_rows);
     }
     if (min != 0.0 || span != 1.0) {
-#ifdef _OPENMP
+#ifdef RNGAT_OPENMP
 #pragma omp parallel for if(nt > 1 && total >= RNGAT_OMP_MIN_VALUES) \
     num_threads(nt) default(none) shared(out, total, min, span) schedule(static)
 #endif
@@ -738,7 +754,7 @@ SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_) {
     double *out = REAL(ans);
     int nt = rngat_threads();
     if (sd == 0.0) {
-#ifdef _OPENMP
+#ifdef RNGAT_OPENMP
 #pragma omp parallel for if(nt > 1 && total >= RNGAT_OMP_MIN_VALUES) \
     num_threads(nt) default(none) shared(out, total, mean) schedule(static)
 #endif
@@ -749,7 +765,7 @@ SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_) {
     }
     int par_cols = nt > 1 && nkey > 1 && total >= RNGAT_OMP_MIN_VALUES;
     int par_rows = !par_cols && n >= RNGAT_OMP_MIN_VALUES ? nt : 0;
-#ifdef _OPENMP
+#ifdef RNGAT_OPENMP
 #pragma omp parallel for if(par_cols) num_threads(nt) default(none) \
     shared(kw, out, n, nkey, par_rows) schedule(static)
 #endif
@@ -758,7 +774,7 @@ SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_) {
         fill_normal_column(out + n * col, n, k, par_rows);
     }
     if (mean != 0.0 || sd != 1.0) {
-#ifdef _OPENMP
+#ifdef RNGAT_OPENMP
 #pragma omp parallel for if(nt > 1 && total >= RNGAT_OMP_MIN_VALUES) \
     num_threads(nt) default(none) shared(out, total, mean, sd) schedule(static)
 #endif
@@ -796,7 +812,7 @@ static void fill_integer_column(int *out, R_xlen_t n, philox4x64_key_t key,
                                 int min, uint32_t range, uint32_t threshold,
                                 int threads) {
     R_xlen_t nblock = n >> 2;
-#ifdef _OPENMP
+#ifdef RNGAT_OPENMP
 #pragma omp parallel for if(threads > 1) \
     num_threads(threads > 0 ? threads : 1) default(none) \
     shared(out, nblock, key, min, range, threshold) schedule(static)
@@ -845,7 +861,7 @@ SEXP C_rng_integer(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     int nt = rngat_threads();
     int par_cols = nt > 1 && nkey > 1 && total >= RNGAT_OMP_MIN_VALUES;
     int par_rows = !par_cols && n >= RNGAT_OMP_MIN_VALUES ? nt : 0;
-#ifdef _OPENMP
+#ifdef RNGAT_OPENMP
 #pragma omp parallel for if(par_cols) num_threads(nt) default(none) \
     shared(kw, out, n, nkey, min, range, threshold, par_rows) schedule(static)
 #endif
