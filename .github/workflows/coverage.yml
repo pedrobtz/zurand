@@ -1,0 +1,18 @@
+on:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - ".github/badges/coverage.svg"
+  pull_request:
+
+name: coverage
+
+jobs:
+  coverage:
+    uses: pedrobtz/r-actions/.github/workflows/coverage.yml@v1
+    permissions:
+      contents: write
+    with:
+      # rngat is ~900 lines of C behind ~250 lines of R wrapper, so the covr
+      # number alone says very little about what the tests actually reach.
+      native: true

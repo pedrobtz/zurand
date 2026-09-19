@@ -1,0 +1,20 @@
+on:
+  schedule:
+    # Weekly. A new upstream release is not urgent, and a daily job that
+    # finds nothing 364 times a year is one people stop reading.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+name: vendor-upstream
+
+jobs:
+  upstream:
+    uses: pedrobtz/r-actions/.github/workflows/vendor-upstream.yml@v1
+    permissions:
+      contents: read
+      issues: write
+    with:
+      upstream-repo: DEShawResearch/random123
+      # Quoted: the ': ' inside the sed expression would otherwise make YAML
+      # read this as a nested mapping.
+      current-version: "sed -n 's/^Version: *//p' inst/COPYRIGHTS"

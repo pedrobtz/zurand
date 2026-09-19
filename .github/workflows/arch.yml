@@ -1,0 +1,15 @@
+on:
+  schedule:
+    # Weekly. Dependencies are built from source in these containers, so this
+    # is not a per-push job.
+    - cron: "0 5 * * 2"
+  workflow_dispatch:
+
+name: arch
+
+jobs:
+  arch:
+    # The 32-bit leg is the only thing that compiles the portable C99
+    # mulhilo64 fallback that src/Makevars defines R123_USE_MULHILO64_C99 for;
+    # every other leg in CI has __uint128_t and takes the fast path.
+    uses: pedrobtz/r-actions/.github/workflows/arch.yml@v1
