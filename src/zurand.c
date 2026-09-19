@@ -613,7 +613,7 @@ SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     int par_rows = !par_cols && n >= ZURAND_OMP_MIN_VALUES ? nt : 0;
 #ifdef ZURAND_OPENMP
 #pragma omp parallel for if(par_cols) num_threads(nt) default(none) \
-    shared(kw, out, n, nkey, par_rows) schedule(static)
+    shared(kw, out, n, nkey, par_rows, eng) schedule(static)
 #endif
     for (R_xlen_t col = 0; col < nkey; col++) {
         if (eng == ZURAND_ENG_PHILOX)
@@ -665,7 +665,7 @@ SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_) {
     int par_rows = !par_cols && n >= ZURAND_OMP_MIN_VALUES ? nt : 0;
 #ifdef ZURAND_OPENMP
 #pragma omp parallel for if(par_cols) num_threads(nt) default(none) \
-    shared(kw, out, n, nkey, par_rows) schedule(static)
+    shared(kw, out, n, nkey, par_rows, eng) schedule(static)
 #endif
     for (R_xlen_t col = 0; col < nkey; col++) {
         if (eng == ZURAND_ENG_PHILOX)
@@ -712,7 +712,8 @@ SEXP C_rng_integer(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     int par_rows = !par_cols && n >= ZURAND_OMP_MIN_VALUES ? nt : 0;
 #ifdef ZURAND_OPENMP
 #pragma omp parallel for if(par_cols) num_threads(nt) default(none) \
-    shared(kw, out, n, nkey, min, range, threshold, par_rows) schedule(static)
+    shared(kw, out, n, nkey, min, range, threshold, par_rows, eng) \
+    schedule(static)
 #endif
     for (R_xlen_t col = 0; col < nkey; col++) {
         if (eng == ZURAND_ENG_PHILOX)
