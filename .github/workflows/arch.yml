@@ -7,6 +7,11 @@ on:
 
 name: arch
 
+# The called workflow declares `permissions: read-all`, and this repository's
+# default_workflow_permissions is "read" — without this the run is rejected at
+# startup. Easy to miss on a scheduled workflow, which fails unwatched.
+permissions: read-all
+
 jobs:
   arch:
     # The 32-bit leg is the only thing that compiles the portable C99

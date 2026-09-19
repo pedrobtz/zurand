@@ -5,6 +5,11 @@ on:
 
 name: native-checks
 
+# Required, not decorative: this repository's default_workflow_permissions is
+# "read", and every called workflow declares `permissions: read-all`. Without
+# this the whole workflow is rejected at startup before any job runs.
+permissions: read-all
+
 jobs:
   sanitizers:
     uses: pedrobtz/r-actions/.github/workflows/sanitizers.yml@v1
