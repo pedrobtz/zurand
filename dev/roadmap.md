@@ -19,11 +19,20 @@ produced by one protocol:
 R CMD INSTALL . && Rscript tools/benchmark.R
 ```
 
-- **Installed build only.** `load_all()` is a debug build and understates
-  zurand by a wide margin.
+- **`-O2` build only.** `devtools::load_all()` defaults to `debug = TRUE`,
+  which compiles `-O0` and measures 11x slower. Use `R CMD INSTALL` or
+  `load_all(debug = FALSE)` -- verified equivalent, agreeing to 0.2% against
+  a fixed in-session reference. `R CMD INSTALL .` builds in-place, so clear
+  `src/*.o` first if a stale object is possible.
 - **Primary machine: the Apple Silicon M1** the package is tuned on. The
   x86_64 Intel machine is a secondary datapoint. The script prints a
   platform header; a result without one is discarded.
+- **Ratios, not absolutes.** This machine's absolute throughput moved 13%
+  across six identical rounds under background load, and the ratio against a
+  competitor moved 12.6% -- both larger than the ~5% effect being chased.
+  Measure zurand and the reference in the *same* `bench::mark` call and
+  report the ratio, repeated over several rounds, never a single median from
+  a run made an hour earlier.
 - **Four metrics**, in priority order:
   1. Gaussian, single thread, n = 1e7 -- algorithm vs algorithm.
   2. Uniform, single thread, n = 1e7.
@@ -33,8 +42,9 @@ R CMD INSTALL . && Rscript tools/benchmark.R
 - **Competitors:** base R, dqrng, RcppZiggurat (MT, LZLLV, GSL, QL),
   randompack, sitmo, rTRNG. Add any package that enters the field.
 
-**Acceptance for a change:** at least +2% on the metric it targets, no
-regression >1% on any other, and `rng_*()` output bit-identical to before
+**Acceptance for a change:** the ratio interval over repeated rounds must
+separate from the baseline's -- a bare +2% median is not evidence at the
+noise levels measured here -- with no regression on any other metric, and `rng_*()` output bit-identical to before
 unless the change is a new opt-in engine (see §3).
 
 ### Targets (proposed, revise after the first M1 run)
