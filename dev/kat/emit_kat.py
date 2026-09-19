@@ -3,6 +3,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 with contextlib.redirect_stdout(io.StringIO()):      # silence the self-validation
     from philox_ref import philox4x64
     from threefry_ref import threefry4x64
+    from xoshiro_ref import zurand_xoshiro_chunk
 def u32(i): return i & 0xffffffff
 CASES = {
   42:   [803958421,-1109970394,-1301876477,686809907],
@@ -91,6 +92,39 @@ for seed, w in CASES.items():
     L.append('    c(')
     L.append(rvec(vals, '      '))
     L.append('    ))')
+L.append('})')
+L.append('')
+L.append('test_that("the xoshiro256pp engine is Philox-seeded xoshiro256++", {')
+L.append('  # dev/kat/xoshiro_ref.py is validated against Vigna\'s own reference C')
+L.append('  # from a fixed state before generating anything. These expectations then')
+L.append('  # run zurand\'s chunk seeding -- Philox at {chunk, 0, purpose, 0}, with the')
+L.append('  # all-zero guard -- through the independent Philox reference, so the seed')
+L.append('  # derivation is covered and not only the recurrence.')
+for seed, w in CASES.items():
+    k = [u32(w[0]) | (u32(w[1]) << 32), u32(w[2]) | (u32(w[3]) << 32)]
+    vals = ['%016x' % x for x in zurand_xoshiro_chunk(philox4x64, k, 0, 0, NW)]
+    L.append('')
+    L.append('  # seed %d, chunk 0' % seed)
+    L.append('  expect_identical(')
+    L.append('    as.character(rng_bits(rng_key(%dL, engine = "xoshiro256pp"), %dL,' % (seed, NW))
+    L.append('                          bits = 64L)),')
+    L.append('    c(')
+    L.append(rvec(vals, '      '))
+    L.append('    ))')
+# the chunk boundary: words 510..515 span the end of chunk 0 and start of 1
+k = [u32(CASES[42][0]) | (u32(CASES[42][1]) << 32), u32(CASES[42][2]) | (u32(CASES[42][3]) << 32)]
+c0 = zurand_xoshiro_chunk(philox4x64, k, 0, 0, 512)
+c1 = zurand_xoshiro_chunk(philox4x64, k, 1, 0, 4)
+vals = ['%016x' % x for x in c0[510:512] + c1[0:4]]
+L.append('')
+L.append('  # seed 42, words 510..515: the last two of chunk 0 and the first four of')
+L.append('  # chunk 1. This is where a reseeding engine can go wrong and nowhere else.')
+L.append('  expect_identical(')
+L.append('    as.character(rng_bits(rng_key(42L, engine = "xoshiro256pp"), 516L,')
+L.append('                          bits = 64L))[511:516],')
+L.append('    c(')
+L.append(rvec(vals, '      '))
+L.append('    ))')
 L.append('})')
 L.append('')
 L.append('test_that("rng_bits(32) is the low half of the 64-bit stream", {')

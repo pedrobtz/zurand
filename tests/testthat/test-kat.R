@@ -109,6 +109,57 @@ test_that("the threefry4x64 engine really is threefry4x64-13", {
     ))
 })
 
+test_that("the xoshiro256pp engine is Philox-seeded xoshiro256++", {
+  # dev/kat/xoshiro_ref.py is validated against Vigna's own reference C
+  # from a fixed state before generating anything. These expectations then
+  # run zurand's chunk seeding -- Philox at {chunk, 0, purpose, 0}, with the
+  # all-zero guard -- through the independent Philox reference, so the seed
+  # derivation is covered and not only the recurrence.
+
+  # seed 42, chunk 0
+  expect_identical(
+    as.character(rng_bits(rng_key(42L, engine = "xoshiro256pp"), 12L,
+                          bits = 64L)),
+    c(
+      "1b56f8cdd2f1eb5e", "6f452a520ec8e62f", "244edfface7c6cd1",
+      "0a1d672e40c991eb", "2f7e7b02530edffc", "87251fef7a1b81a0",
+      "9350556fd960839d", "6910cc1a9333c2e5", "7ccae33979945e2b",
+      "cf8b8b330f5e634c", "6904c471b430bf12", "35bd804babdb3e5f"
+    ))
+
+  # seed 1, chunk 0
+  expect_identical(
+    as.character(rng_bits(rng_key(1L, engine = "xoshiro256pp"), 12L,
+                          bits = 64L)),
+    c(
+      "0236ff70a50671be", "d61d364a1852d903", "5bd04558e85dd67e",
+      "b2e94439eb3695ab", "7885f3906a9875d7", "25891a13e0bbfb9d",
+      "f1f7f4763f1fe9af", "78d029f7a7cd8dee", "f3fb6dbc40ecc4ef",
+      "ccf4319481205b6f", "a8e0aa620e48546f", "f07a3c709def6f2d"
+    ))
+
+  # seed 2026, chunk 0
+  expect_identical(
+    as.character(rng_bits(rng_key(2026L, engine = "xoshiro256pp"), 12L,
+                          bits = 64L)),
+    c(
+      "a2f2b191e10a323c", "c6deecf52ac1c358", "84a7b0924a54e491",
+      "cf4b5e509937cfc8", "666a65533e56d6ec", "82af9b76dfe68722",
+      "2ce72dd5625dfad4", "ccd96825f820cada", "636b89eb3e808b88",
+      "d623c385091c989c", "8935919ee10b24f5", "5315199e72c909cb"
+    ))
+
+  # seed 42, words 510..515: the last two of chunk 0 and the first four of
+  # chunk 1. This is where a reseeding engine can go wrong and nowhere else.
+  expect_identical(
+    as.character(rng_bits(rng_key(42L, engine = "xoshiro256pp"), 516L,
+                          bits = 64L))[511:516],
+    c(
+      "708e364257a88881", "bd62f71b99809463", "8163862abbd492e7",
+      "744fe5e25e614d66", "70dcda492a464480", "069b26a2ebe411e6"
+    ))
+})
+
 test_that("rng_bits(32) is the low half of the 64-bit stream", {
   # The two widths must be views of one stream, not two streams.
   key <- rng_key(42L)

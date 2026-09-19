@@ -194,12 +194,16 @@ R123_STATIC_INLINE double ZE_N(zig_normal_at)(ZE_KEY_T key, uint64_t index,
 #ifndef ZE_CUSTOM_CHUNK
 static void ZE_N(chunk_words)(ZE_KEY_T key, uint64_t c, uint64_t purpose,
                               uint64_t *buf, int nwords) {
+    /* Always copy the whole 32-byte block. A variable-length memcpy here --
+     * trimming the last block to nwords -- cost philox 18% (306 -> 249 M/s):
+     * the size is not a compile-time constant, so every block in the hot
+     * loop became a library call instead of two register moves. The
+     * caller's buffer carries ZURAND_CHUNK_SLACK words for the over-copy. */
     int nb = (nwords + 3) >> 2;
     for (int j = 0; j < nb; j++) {
         zurand_ctr_t block = ZE_N(zurand_block)(
             key, c * ZURAND_CHUNK_BLOCKS + (uint64_t)j, 0, purpose);
-        int have = nwords - 4 * j;
-        memcpy(buf + 4 * j, block.v, (have >= 4 ? 4 : have) * sizeof(uint64_t));
+        memcpy(buf + 4 * j, block.v, sizeof block.v);
     }
 }
 #endif
@@ -213,7 +217,7 @@ static void ZE_N(fill_normal_column)(double *out, R_xlen_t n,
     shared(out, n, nchunk, key) schedule(static)
 #endif
     for (R_xlen_t c = 0; c < nchunk; c++) {
-        uint64_t buf[ZURAND_CHUNK_WORDS];
+        uint64_t buf[ZURAND_CHUNK_WORDS + ZURAND_CHUNK_SLACK];
         R_xlen_t w0 = c * ZURAND_CHUNK_WORDS;
         int m = (int)(n - w0 < ZURAND_CHUNK_WORDS ? n - w0 : ZURAND_CHUNK_WORDS);
         ZE_N(chunk_words)(key, (uint64_t)c, ZURAND_PURPOSE_NORMAL, buf, m);
@@ -244,7 +248,7 @@ static void ZE_N(fill_uniform_column)(double *out, R_xlen_t n,
     shared(out, n, nchunk, key) schedule(static)
 #endif
     for (R_xlen_t c = 0; c < nchunk; c++) {
-        uint64_t buf[ZURAND_CHUNK_WORDS];
+        uint64_t buf[ZURAND_CHUNK_WORDS + ZURAND_CHUNK_SLACK];
         R_xlen_t w0 = c * ZURAND_CHUNK_WORDS;
         int m = (int)(n - w0 < ZURAND_CHUNK_WORDS ? n - w0 : ZURAND_CHUNK_WORDS);
         ZE_N(chunk_words)(key, (uint64_t)c, ZURAND_PURPOSE_UNIFORM, buf, m);
@@ -277,7 +281,7 @@ static void ZE_N(fill_integer_column)(int *out, R_xlen_t n, ZE_KEY_T key,
     shared(out, n, nchunk, key, min, range, threshold) schedule(static)
 #endif
     for (R_xlen_t c = 0; c < nchunk; c++) {
-        uint64_t buf[ZURAND_CHUNK_WORDS];
+        uint64_t buf[ZURAND_CHUNK_WORDS + ZURAND_CHUNK_SLACK];
         R_xlen_t w0 = c * ZURAND_CHUNK_WORDS;
         int m = (int)(n - w0 < ZURAND_CHUNK_WORDS ? n - w0 : ZURAND_CHUNK_WORDS);
         ZE_N(chunk_words)(key, (uint64_t)c, ZURAND_PURPOSE_INTEGER, buf, m);
