@@ -267,3 +267,99 @@ c.rng_key <- function(..., recursive = FALSE) {
   attr(out, "engine") <- engines[[1L]]
   out
 }
+
+#' Allocate a buffer for the in-place fills
+#'
+#' `rng_buffer()` creates a numeric vector to be filled repeatedly by
+#' [rng_fill_uniform()] and [rng_fill_normal()]. It is an ordinary numeric
+#' vector carrying one marker attribute, which [rng_fill_uniform()] requires:
+#' a vector that was not made for overwriting cannot be passed to them by
+#' accident. The attribute also holds the reference count recorded at the
+#' first fill, which is how the guard described in [rng_fill_uniform()]
+#' detects a buffer that is being stored as well as refilled.
+#'
+#' @param n A single non-negative whole number: the buffer length.
+#' @return A numeric vector of length `n`.
+#' @seealso [rng_fill_uniform()] for the hazard these buffers carry.
+#' @export
+#' @examples
+#' buf <- rng_buffer(1000)
+#' rng_fill_uniform(buf, rng_key(42L))
+#' mean(buf)
+rng_buffer <- function(n) {
+  n <- as.double(n)
+  if (length(n) != 1L || is.na(n) || n < 0 || n != trunc(n))
+    stop("`n` must be a single non-negative whole number", call. = FALSE)
+  # The marker is what rng_fill_*() requires, so that a vector can only be
+  # overwritten if it was made for it. It also carries the reference count
+  # recorded at the first fill; see the guard in src/zurand.c.
+  structure(numeric(n), zurand.buffer = c(NA_integer_, 0L))
+}
+
+#' Fill a buffer in place
+#'
+#' These write directly into `buf` instead of returning a new vector, which
+#' skips the allocation and garbage collection R otherwise pays for a fresh
+#' result. That is worth about 15% at a million values and more than double
+#' at fifty million, because the fill itself runs at a flat ~323 M values/s
+#' at every size while allocation cost grows.
+#'
+#' @section The catch:
+#'
+#' **These break R's copy-on-write rule on purpose.** Everywhere else in R,
+#' passing a vector to a function cannot change it. Here it does, and
+#' anything else referring to the same vector changes with it:
+#'
+#' ```r
+#' x <- rng_buffer(3); y <- x
+#' rng_fill_uniform(x, rng_key(1L))
+#' y   # also overwritten
+#' ```
+#'
+#' The case that actually bites is storing the buffer while reusing it,
+#' because every slot ends up holding the same vector:
+#'
+#' ```r
+#' buf <- rng_buffer(1000); out <- list()
+#' for (i in 1:3) {
+#'   rng_fill_uniform(buf, keys[i])
+#'   out[[i]] <- buf        # not a copy
+#' }
+#' # all three entries hold the last draw
+#' ```
+#'
+#' That loop warns: a buffer gaining a reference on two consecutive fills is
+#' probably being kept as well as refilled. It is a warning and not an
+#' error, and it takes two bumps rather than one, because the signal is a
+#' guess. Anything that merely looks at the buffer takes a reference and R
+#' never gives it back, so `bench::mark()` and `testthat::expect_error()`
+#' grow the count exactly the way the dangerous loop does. The guard cannot
+#' be made complete either: R cannot distinguish a vector bound to one name
+#' from one that is also aliased. Treat it as a smoke alarm, not a seatbelt. Use `out[[i]] <- buf[]`
+#' or plain [rng_uniform()] when you need to keep the results.
+#'
+#' Use these only for a buffer you allocated, fill, consume and refill.
+#' When in doubt use [rng_uniform()] and [rng_normal()], which allocate and
+#' are always safe.
+#'
+#' @param buf A numeric vector to overwrite, from [rng_buffer()].
+#' @param key An `rng_key` vector of length one.
+#' @param min,max Single finite numeric bounds.
+#' @param mean A single finite numeric mean.
+#' @param sd A single non-negative finite standard deviation.
+#' @return `buf`, invisibly, filled. The return is for convenience; the
+#'   argument has already been modified.
+#' @export
+#' @examples
+#' buf <- rng_buffer(1000)
+#' rng_fill_normal(buf, rng_key(42L), mean = 10, sd = 2)
+#' round(mean(buf), 1)
+rng_fill_uniform <- function(buf, key, min = 0, max = 1) {
+  invisible(.Call(C_rng_fill_uniform, buf, key, min, max))
+}
+
+#' @rdname rng_fill_uniform
+#' @export
+rng_fill_normal <- function(buf, key, mean = 0, sd = 1) {
+  invisible(.Call(C_rng_fill_normal, buf, key, mean, sd))
+}

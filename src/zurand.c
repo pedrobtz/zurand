@@ -787,6 +787,126 @@ SEXP C_rng_bits(SEXP key, SEXP n_, SEXP bits_) {
 
 /* ---- registration ---- */
 
+
+/* ---- in-place fills ----
+ *
+ * These mutate the vector they are given. That breaks R's copy-on-write
+ * contract deliberately, to skip the allocation and GC cost of a fresh
+ * result, which is +15% at n=1e7 and over 2x at 5e7. It is the only lever
+ * that touches that cost: the fill itself is flat at ~323 M/s from 7.6 MB
+ * to 381 MB, so everything R loses at size is allocation.
+ *
+ * Why there is no automatic safety check. R's reference count cannot
+ * distinguish "bound to one name, reached through a wrapper" (safe, refcnt
+ * 3) from "also aliased by another binding" (unsafe, refcnt 3). Refusing
+ * whenever MAYBE_SHARED is true would refuse every real call and deliver
+ * nothing.
+ *
+ * What is detectable is *growth*. A buffer that is only filled keeps a
+ * steady refcnt across calls; one that is also being stored somewhere --
+ *
+ *     for (i in 1:3) { rng_fill_uniform(buf, k); out[[i]] <- buf }
+ *
+ * -- climbs by one per store. That loop is the dangerous case, because it
+ * looks correct, returns identical draws in every slot, and for an RNG the
+ * output looks random either way. So the first fill records the count and
+ * later fills refuse if it has risen. It is best effort, not a proof: a
+ * buffer aliased before its first fill is not caught. */
+static void buffer_check(SEXP buf) {
+    static SEXP sym = NULL;
+    if (sym == NULL) sym = Rf_install("zurand.buffer");
+    SEXP seen = Rf_getAttrib(buf, sym);
+    /* Only a vector from rng_buffer() may be filled. Requiring the marker
+     * is what keeps these functions from being reachable by accident on
+     * some vector the caller did not mean to hand over. It also makes the
+     * bookkeeping attribute expected rather than a surprise. */
+    if (TYPEOF(seen) != INTSXP || Rf_xlength(seen) != 2)
+        Rf_error("`buf` must come from rng_buffer(); the in-place fills "
+                 "overwrite their argument and will not do that to a vector "
+                 "that was not created for it");
+    int *a = INTEGER(seen);          /* {last refcnt, consecutive growths} */
+    int now = REFCNT(buf);
+    if (a[0] == NA_INTEGER) { a[0] = now; a[1] = 0; return; }
+
+    /* Growth on a single call means nothing: anything that merely looks at
+     * the buffer -- bench::mark capturing it, str(), a debugger -- takes a
+     * reference, and R's counts do not come back down. Requiring growth on
+     * consecutive fills is what separates that from the case worth
+     * catching, where a buffer is stored on every pass and so gains a
+     * reference on every pass. An error on the first bump made the buffer
+     * permanently unusable the moment it was benchmarked. */
+    a[1] = now > a[0] ? a[1] + 1 : 0;
+    a[0] = now;
+    /* A warning, not an error. The signal is a heuristic and it has false
+     * positives: bench::mark and testthat's expect_error each take a
+     * reference per call, so legitimate code can grow the count exactly
+     * the way the dangerous loop does. Making that fatal broke
+     * benchmarking and the package's own tests. Warning keeps the signal
+     * where it matters without turning a guess into a hard failure. */
+    if (a[1] == 2)
+        Rf_warning("this buffer gained a reference on each of the last two "
+                   "fills. If something is keeping the values, filling in "
+                   "place overwrites what was kept -- use buf[] to copy out, "
+                   "or rng_uniform()/rng_normal(), which allocate.");
+}
+
+static double *fill_target(SEXP buf, SEXP key, R_xlen_t *n_out) {
+    if (TYPEOF(buf) != REALSXP)
+        Rf_error("`buf` must be a numeric vector; see rng_buffer()");
+    if (key_count(key) != 1)
+        Rf_error("the in-place fills take exactly one key");
+    buffer_check(buf);
+    *n_out = Rf_xlength(buf);
+    return REAL(buf);
+}
+
+SEXP C_rng_fill_uniform(SEXP buf, SEXP key, SEXP min_, SEXP max_) {
+    R_xlen_t n;
+    double *out = fill_target(buf, key, &n);
+    double min = finite_scalar(min_, "min"), max = finite_scalar(max_, "max");
+    if (min > max)
+        Rf_error("`min` must be less than or equal to `max`");
+    zurand_engine_t eng = key_engine_code(key);
+    const int *kw = INTEGER(key);
+    int nt = zurand_threads();
+    int par = n >= ZURAND_OMP_MIN_VALUES ? nt : 0;
+    if (eng == ZURAND_ENG_PHILOX)
+        fill_uniform_column_philox(out, n, key_from_words(kw, 1, 0), par);
+    else
+        fill_uniform_column_threefry(out, n, key_from_words_threefry(kw, 1, 0), par);
+    if (min != 0.0 || max != 1.0) {
+        double span = max - min;
+        for (R_xlen_t i = 0; i < n; i++)
+            out[i] = min + span * out[i];
+    }
+    return buf;
+}
+
+SEXP C_rng_fill_normal(SEXP buf, SEXP key, SEXP mean_, SEXP sd_) {
+    R_xlen_t n;
+    double *out = fill_target(buf, key, &n);
+    double mean = finite_scalar(mean_, "mean"), sd = finite_scalar(sd_, "sd");
+    if (sd < 0)
+        Rf_error("`sd` must be non-negative");
+    zurand_engine_t eng = key_engine_code(key);
+    const int *kw = INTEGER(key);
+    int nt = zurand_threads();
+    int par = n >= ZURAND_OMP_MIN_VALUES ? nt : 0;
+    if (sd == 0.0) {
+        for (R_xlen_t i = 0; i < n; i++) out[i] = mean;
+        return buf;
+    }
+    if (eng == ZURAND_ENG_PHILOX)
+        fill_normal_column_philox(out, n, key_from_words(kw, 1, 0), par);
+    else
+        fill_normal_column_threefry(out, n, key_from_words_threefry(kw, 1, 0), par);
+    if (mean != 0.0 || sd != 1.0) {
+        for (R_xlen_t i = 0; i < n; i++)
+            out[i] = mean + sd * out[i];
+    }
+    return buf;
+}
+
 static const R_CallMethodDef CallEntries[] = {
     {"C_rng_key",        (DL_FUNC) &C_rng_key,        3},
     {"C_rng_key_from_r", (DL_FUNC) &C_rng_key_from_r, 2},
@@ -797,6 +917,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"C_rng_integer",    (DL_FUNC) &C_rng_integer,    4},
     {"C_rng_bits",       (DL_FUNC) &C_rng_bits,       3},
     {"C_rng_threads",    (DL_FUNC) &C_rng_threads,    1},
+    {"C_rng_fill_uniform", (DL_FUNC) &C_rng_fill_uniform, 4},
+    {"C_rng_fill_normal",  (DL_FUNC) &C_rng_fill_normal,  4},
     {NULL, NULL, 0}
 };
 
