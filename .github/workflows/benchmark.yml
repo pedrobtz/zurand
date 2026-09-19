@@ -7,6 +7,18 @@
 # spread. An absolute M/s from a runner means very little; a ratio measured
 # side by side in the same process survives the runner being busy.
 #
+# Two regimes, because they answer different questions. Single-threaded is
+# algorithm against algorithm. All-threads is what a user actually gets,
+# and it is not a like-for-like: dqrng, RcppZiggurat and base R have no
+# threaded entry point at R level -- dqrng ships parallel_generate.h for
+# C++ callers to use themselves, and exports nothing threaded -- while
+# zurand parallelises above its size gate whenever it was built with
+# OpenMP. Both numbers are published rather than whichever flatters.
+#
+# numeric(n) is included as a floor. It allocates and zero-fills, so no
+# R function returning a fresh vector can go faster, and it shows how much
+# of every row is allocation rather than generation.
+#
 # It is also not the tuning platform -- zurand is tuned on Apple Silicon and
 # GitHub's Linux runners are x86_64. Treat this as a second datapoint that
 # is at least reproducible by anyone, not as the reference.
@@ -64,53 +76,66 @@ jobs:
                             library(dqrng); library(RcppZiggurat)})
           n      <- as.integer(as.numeric(Sys.getenv("ZURAND_N")))
           rounds <- as.integer(Sys.getenv("ZURAND_ROUNDS"))
-          rng_threads(1L); dqset.seed(42L)
+          dqset.seed(42L)
           kp <- rng_key(42L); kt <- rng_key(42L, engine = "threefry4x64")
+          sink <- Sys.getenv("GITHUB_STEP_SUMMARY")
+          say <- function(...) { cat(..., sep = "", file = sink, append = TRUE)
+                                 cat(..., sep = "") }
 
-          # Ratios, not absolutes: everything in one call, repeated.
           run <- function(exprs) {
             m <- vapply(seq_len(rounds), function(i)
               as.numeric(bench::mark(exprs = exprs, check = FALSE,
-                                     min_iterations = 10)$median), numeric(length(exprs)))
-            # vapply drops names; the rows are the methods, in order.
-            rownames(m) <- names(exprs)
-            n / m / 1e6                       # M values/s, one column per round
+                                     min_iterations = 10)$median),
+              numeric(length(exprs)))
+            rownames(m) <- names(exprs)       # vapply drops them
+            n / m / 1e6
           }
-          fmt <- function(v) sprintf("%.0f", stats::median(v))
-          row <- function(label, s, ref) {
-            r <- s / ref                      # per-round ratio vs the reference
-            sprintf("| %s | %s | %.2f | %.2f-%.2f |", label, fmt(s),
-                    stats::median(r), min(r), max(r))
-          }
-
-          cat("## Benchmark\n\n",
-              sprintf("`%s` · n = %s · %d rounds · R %s\n\n",
-                      Sys.getenv("RUNNER_OS"), format(n, big.mark = ","),
-                      rounds, getRversion()),
-              "Ratios are measured within each round against the reference,\n",
-              "so a busy runner moves both sides together.\n\n", sep = "",
-              file = Sys.getenv("GITHUB_STEP_SUMMARY"), append = TRUE)
-
-          u <- run(list(zurand_philox   = quote(rng_uniform(kp, n)),
-                        zurand_threefry = quote(rng_uniform(kt, n)),
-                        dqrng           = quote(dqrunif(n)),
-                        base_R          = quote(runif(n))))
-          g <- run(list(zurand_philox   = quote(rng_normal(kp, n)),
-                        zurand_threefry = quote(rng_normal(kt, n)),
-                        RcppZig_MT      = quote(zrnormMT(n)),
-                        dqrng           = quote(dqrnorm(n)),
-                        base_R          = quote(rnorm(n))))
-
           emit <- function(title, s, refname) {
             ref <- s[refname, , drop = TRUE]
-            lines <- c(sprintf("### %s", title), "",
-                       sprintf("| method | M/s | vs %s | range |", refname),
-                       "|---|---:|---:|---|",
-                       vapply(rownames(s), function(k)
-                         row(k, s[k, , drop = TRUE], ref), character(1)), "")
-            cat(paste(lines, collapse = "\n"), "\n",
-                file = Sys.getenv("GITHUB_STEP_SUMMARY"), append = TRUE)
-            cat(paste(lines, collapse = "\n"), "\n")
+            say("### ", title, "\n\n",
+                "| method | M/s | vs ", refname, " | range |\n|---|---:|---:|---|\n")
+            for (k in rownames(s)) {
+              v <- s[k, , drop = TRUE]; r <- v / ref
+              say(sprintf("| %s | %.0f | %.2f | %.2f-%.2f |\n", k,
+                          stats::median(v), stats::median(r), min(r), max(r)))
+            }
+            say("\n")
           }
-          emit("Uniform", u, "dqrng")
-          emit("Gaussian", g, "RcppZig_MT")
+
+          threads <- rng_threads()
+          say("## Benchmark\n\n", sprintf(
+            "`%s` · n = %s · %d rounds · R %s · OpenMP: %s\n\n",
+            Sys.getenv("RUNNER_OS"), format(n, big.mark = ","), rounds,
+            getRversion(),
+            if (threads > 1) paste0("yes, ", threads, " threads") else
+              "**absent — the all-threads tables below are meaningless**"))
+
+          unif <- function() list(
+            zurand_philox   = quote(rng_uniform(kp, n)),
+            zurand_threefry = quote(rng_uniform(kt, n)),
+            dqrng           = quote(dqrunif(n)),
+            base_R          = quote(runif(n)),
+            alloc_only      = quote(numeric(n)))
+          gauss <- function() list(
+            zurand_philox   = quote(rng_normal(kp, n)),
+            zurand_threefry = quote(rng_normal(kt, n)),
+            RcppZig_MT      = quote(zrnormMT(n)),
+            dqrng           = quote(dqrnorm(n)),
+            base_R          = quote(rnorm(n)),
+            alloc_only      = quote(numeric(n)))
+
+          rng_threads(1L)
+          say("## Single thread — algorithm against algorithm\n\n")
+          emit("Uniform", run(unif()), "dqrng")
+          emit("Gaussian", run(gauss()), "RcppZig_MT")
+
+          rng_threads(0L)
+          say("## All threads — what a user gets\n\n",
+              "Only zurand has a threaded entry point at R level. dqrng ships\n",
+              "parallel_generate.h for C++ callers but exports nothing threaded,\n",
+              "and RcppZiggurat and base R are serial. Not a like-for-like.\n\n")
+          emit("Uniform", run(unif()), "dqrng")
+          emit("Gaussian", run(gauss()), "RcppZig_MT")
+
+          say("`alloc_only` is numeric(n): allocate and zero-fill, nothing\n",
+              "generated. No R function returning a fresh vector beats it.\n")
