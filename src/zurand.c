@@ -816,38 +816,21 @@ static void buffer_check(SEXP buf) {
     static SEXP sym = NULL;
     if (sym == NULL) sym = Rf_install("zurand.buffer");
     SEXP seen = Rf_getAttrib(buf, sym);
-    /* Only a vector from rng_buffer() may be filled. Requiring the marker
-     * is what keeps these functions from being reachable by accident on
-     * some vector the caller did not mean to hand over. It also makes the
-     * bookkeeping attribute expected rather than a surprise. */
-    if (TYPEOF(seen) != INTSXP || Rf_xlength(seen) != 2)
+    /* Only a vector from rng_buffer() may be filled. This is the whole of
+     * the defence, and it is weak: it stops these functions being reached
+     * by accident, and does nothing about a buffer that is deliberately
+     * handed over while something else still refers to it.
+     *
+     * An earlier version watched the reference count for growth, which
+     * caught the loop that stores the buffer while refilling it. REFCNT is
+     * not part of R's API -- R CMD check reports "Found non-API call to R"
+     * and CRAN does not allow it -- so that guard is gone. MAYBE_SHARED is
+     * API but is true for every realistic call, so it cannot stand in.
+     * There is no API-legal way to tell a safe call from an unsafe one. */
+    if (TYPEOF(seen) != LGLSXP || Rf_xlength(seen) != 1)
         Rf_error("`buf` must come from rng_buffer(); the in-place fills "
                  "overwrite their argument and will not do that to a vector "
                  "that was not created for it");
-    int *a = INTEGER(seen);          /* {last refcnt, consecutive growths} */
-    int now = REFCNT(buf);
-    if (a[0] == NA_INTEGER) { a[0] = now; a[1] = 0; return; }
-
-    /* Growth on a single call means nothing: anything that merely looks at
-     * the buffer -- bench::mark capturing it, str(), a debugger -- takes a
-     * reference, and R's counts do not come back down. Requiring growth on
-     * consecutive fills is what separates that from the case worth
-     * catching, where a buffer is stored on every pass and so gains a
-     * reference on every pass. An error on the first bump made the buffer
-     * permanently unusable the moment it was benchmarked. */
-    a[1] = now > a[0] ? a[1] + 1 : 0;
-    a[0] = now;
-    /* A warning, not an error. The signal is a heuristic and it has false
-     * positives: bench::mark and testthat's expect_error each take a
-     * reference per call, so legitimate code can grow the count exactly
-     * the way the dangerous loop does. Making that fatal broke
-     * benchmarking and the package's own tests. Warning keeps the signal
-     * where it matters without turning a guess into a hard failure. */
-    if (a[1] == 2)
-        Rf_warning("this buffer gained a reference on each of the last two "
-                   "fills. If something is keeping the values, filling in "
-                   "place overwrites what was kept -- use buf[] to copy out, "
-                   "or rng_uniform()/rng_normal(), which allocate.");
 }
 
 static double *fill_target(SEXP buf, SEXP key, R_xlen_t *n_out) {
@@ -858,6 +841,19 @@ static double *fill_target(SEXP buf, SEXP key, R_xlen_t *n_out) {
     buffer_check(buf);
     *n_out = Rf_xlength(buf);
     return REAL(buf);
+}
+
+/* Rf_allocVector leaves REALSXP uninitialised. numeric(n) on the R side
+ * zero-fills, which is a second full pass over memory that the fill then
+ * immediately overwrites -- pure waste for a buffer. */
+SEXP C_rng_buffer(SEXP n_) {
+    double nd = numeric_scalar(n_, "n");
+    if (nd < 0 || nd != trunc(nd) || nd > ZURAND_MAX_EXACT_INT)
+        Rf_error("`n` must be a single non-negative whole number");
+    SEXP ans = PROTECT(Rf_allocVector(REALSXP, (R_xlen_t)nd));
+    Rf_setAttrib(ans, Rf_install("zurand.buffer"), Rf_ScalarLogical(TRUE));
+    UNPROTECT(1);
+    return ans;
 }
 
 SEXP C_rng_fill_uniform(SEXP buf, SEXP key, SEXP min_, SEXP max_) {
@@ -917,6 +913,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"C_rng_integer",    (DL_FUNC) &C_rng_integer,    4},
     {"C_rng_bits",       (DL_FUNC) &C_rng_bits,       3},
     {"C_rng_threads",    (DL_FUNC) &C_rng_threads,    1},
+    {"C_rng_buffer",      (DL_FUNC) &C_rng_buffer,      1},
     {"C_rng_fill_uniform", (DL_FUNC) &C_rng_fill_uniform, 4},
     {"C_rng_fill_normal",  (DL_FUNC) &C_rng_fill_normal,  4},
     {NULL, NULL, 0}

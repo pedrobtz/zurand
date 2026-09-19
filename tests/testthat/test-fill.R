@@ -57,15 +57,15 @@ test_that("refilling the same buffer many times is allowed", {
   expect_identical(as.vector(b), rng_uniform(key, 64L))
 })
 
-test_that("a buffer that is kept as well as refilled is refused", {
-  # The dangerous pattern: every slot would end up holding the same vector,
-  # silently, with output that looks random either way.
+test_that("keeping a buffer while refilling it silently aliases -- documented", {
+  # This is the hazard the API carries and cannot detect: REFCNT is non-API
+  # so the reference-growth guard had to be removed. Pinned as a test so the
+  # behaviour is recorded rather than discovered.
   key <- rng_key(42L)
-  buf <- rng_buffer(64L)
+  buf <- rng_buffer(8L)
   out <- list()
-  expect_warning(
-    for (i in 1:4) { rng_fill_uniform(buf, key); out[[i]] <- buf },
-    "gained a reference")
+  for (i in 1:3) { rng_fill_uniform(buf, rng_key(i)); out[[i]] <- buf }
+  expect_true(all(vapply(out, function(e) identical(e, out[[1]]), logical(1))))
 
   # copying out is the supported way to keep results, and must stay allowed
   buf2 <- rng_buffer(64L)

@@ -17,9 +17,8 @@ A numeric vector of length \code{n}.
 \code{\link[=rng_fill_uniform]{rng_fill_uniform()}} and \code{\link[=rng_fill_normal]{rng_fill_normal()}}. It is an ordinary numeric
 vector carrying one marker attribute, which \code{\link[=rng_fill_uniform]{rng_fill_uniform()}} requires:
 a vector that was not made for overwriting cannot be passed to them by
-accident. The attribute also holds the reference count recorded at the
-first fill, which is how the guard described in \code{\link[=rng_fill_uniform]{rng_fill_uniform()}}
-detects a buffer that is being stored as well as refilled.
+accident. Unlike \code{numeric(n)} it is not zero-filled, since the fill
+overwrites it immediately.
 }
 \examples{
 buf <- rng_buffer(1000)

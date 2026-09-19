@@ -274,9 +274,8 @@ c.rng_key <- function(..., recursive = FALSE) {
 #' [rng_fill_uniform()] and [rng_fill_normal()]. It is an ordinary numeric
 #' vector carrying one marker attribute, which [rng_fill_uniform()] requires:
 #' a vector that was not made for overwriting cannot be passed to them by
-#' accident. The attribute also holds the reference count recorded at the
-#' first fill, which is how the guard described in [rng_fill_uniform()]
-#' detects a buffer that is being stored as well as refilled.
+#' accident. Unlike `numeric(n)` it is not zero-filled, since the fill
+#' overwrites it immediately.
 #'
 #' @param n A single non-negative whole number: the buffer length.
 #' @return A numeric vector of length `n`.
@@ -287,13 +286,10 @@ c.rng_key <- function(..., recursive = FALSE) {
 #' rng_fill_uniform(buf, rng_key(42L))
 #' mean(buf)
 rng_buffer <- function(n) {
-  n <- as.double(n)
-  if (length(n) != 1L || is.na(n) || n < 0 || n != trunc(n))
-    stop("`n` must be a single non-negative whole number", call. = FALSE)
-  # The marker is what rng_fill_*() requires, so that a vector can only be
-  # overwritten if it was made for it. It also carries the reference count
-  # recorded at the first fill; see the guard in src/zurand.c.
-  structure(numeric(n), zurand.buffer = c(NA_integer_, 0L))
+  # Allocated in C: Rf_allocVector leaves the memory uninitialised, where
+  # numeric(n) would zero-fill it first -- a second pass over memory that
+  # the fill immediately overwrites.
+  .Call(C_rng_buffer, n)
 }
 
 #' Fill a buffer in place
@@ -328,14 +324,16 @@ rng_buffer <- function(n) {
 #' # all three entries hold the last draw
 #' ```
 #'
-#' That loop warns: a buffer gaining a reference on two consecutive fills is
-#' probably being kept as well as refilled. It is a warning and not an
-#' error, and it takes two bumps rather than one, because the signal is a
-#' guess. Anything that merely looks at the buffer takes a reference and R
-#' never gives it back, so `bench::mark()` and `testthat::expect_error()`
-#' grow the count exactly the way the dangerous loop does. The guard cannot
-#' be made complete either: R cannot distinguish a vector bound to one name
-#' from one that is also aliased. Treat it as a smoke alarm, not a seatbelt. Use `out[[i]] <- buf[]`
+#' **Nothing detects that loop.** An earlier version watched the buffer's
+#' reference count for growth, which caught it; `REFCNT` is not part of R's
+#' API, `R CMD check` reports it as a non-API call and CRAN does not permit
+#' it. `MAYBE_SHARED` is permitted but is true for every realistic call, so
+#' it cannot stand in. There is no API-legal way to tell a safe call from
+#' an unsafe one, so requiring a buffer from [rng_buffer()] is the only
+#' defence: it stops these functions being reached by accident, and does
+#' nothing once you hand a buffer over deliberately.
+#'
+#' Use `out[[i]] <- buf[]` to copy results out, or [rng_uniform()]. Use `out[[i]] <- buf[]`
 #' or plain [rng_uniform()] when you need to keep the results.
 #'
 #' Use these only for a buffer you allocated, fill, consume and refill.

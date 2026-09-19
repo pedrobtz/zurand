@@ -54,14 +54,16 @@ for (i in 1:3) \{
 # all three entries hold the last draw
 }\if{html}{\out{</div>}}
 
-That loop warns: a buffer gaining a reference on two consecutive fills is
-probably being kept as well as refilled. It is a warning and not an
-error, and it takes two bumps rather than one, because the signal is a
-guess. Anything that merely looks at the buffer takes a reference and R
-never gives it back, so \code{bench::mark()} and \code{testthat::expect_error()}
-grow the count exactly the way the dangerous loop does. The guard cannot
-be made complete either: R cannot distinguish a vector bound to one name
-from one that is also aliased. Treat it as a smoke alarm, not a seatbelt. Use \code{out[[i]] <- buf[]}
+\strong{Nothing detects that loop.} An earlier version watched the buffer's
+reference count for growth, which caught it; \code{REFCNT} is not part of R's
+API, \verb{R CMD check} reports it as a non-API call and CRAN does not permit
+it. \code{MAYBE_SHARED} is permitted but is true for every realistic call, so
+it cannot stand in. There is no API-legal way to tell a safe call from
+an unsafe one, so requiring a buffer from \code{\link[=rng_buffer]{rng_buffer()}} is the only
+defence: it stops these functions being reached by accident, and does
+nothing once you hand a buffer over deliberately.
+
+Use \code{out[[i]] <- buf[]} to copy results out, or \code{\link[=rng_uniform]{rng_uniform()}}. Use \code{out[[i]] <- buf[]}
 or plain \code{\link[=rng_uniform]{rng_uniform()}} when you need to keep the results.
 
 Use these only for a buffer you allocated, fill, consume and refill.
