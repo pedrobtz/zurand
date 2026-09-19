@@ -97,11 +97,41 @@ test_that("multi-key matrices are bit-stable", {
     ))
 })
 
+test_that("the threefry4x64 engine is bit-stable", {
+  # A second engine must be as reproducible as the first, and must produce a
+  # different stream from the same seed -- a key records its engine.
+  expect_identical(rng_uniform(rng_key(42L, engine = "threefry4x64"), 8L),
+    c(
+      0x1.5897a6b8bdd9cp-3, 0x1.4673851d43bccp-3, 0x1.d970ecb43db98p-4,
+      0x1.7d92d9532840fp-1, 0x1.a645b682d7436p-2, 0x1.818fbe5879e7p-5,
+      0x1.32c62654eca26p-2, 0x1.daf5d18731dc4p-3
+    ))
+
+  expect_identical(rng_normal(rng_key(42L, engine = "threefry4x64"), 8L),
+    c(
+      0x1.73fa9e85e3404p-2, -0x1.e2f195a626ee6p+0, -0x1.471f0b60d07e2p+1,
+      0x1.9086f0d2cc325p-3, -0x1.7b3f06b84fd85p+0, -0x1.71054b72ccbdbp-1,
+      -0x1.3eb001b919aa3p-3, -0x1.fa9e05411b387p-1
+    ))
+
+  expect_identical(rng_integer(rng_key(42L, engine = "threefry4x64"), 8L, min = 1L, max = 6L),
+    c(
+      3L, 4L, 6L, 3L, 3L, 6L, 3L, 6L
+    ))
+
+  expect_false(identical(rng_normal(rng_key(42L), 64L),
+                         rng_normal(rng_key(42L, engine = "threefry4x64"), 64L)))
+  expect_identical(attr(rng_key(1L, engine = "threefry4x64"), "engine"),
+                   "threefry4x64")
+})
+
 test_that("draw i does not depend on n", {
   # The core counter-mode invariant, stated directly rather than implied.
-  key <- rng_key(99L)
-  for (nn in c(3L, 17L, 64L, 257L, 1000L)) {
-    expect_identical(rng_uniform(key, nn), rng_uniform(key, 1000L)[seq_len(nn)])
-    expect_identical(rng_normal(key, nn), rng_normal(key, 1000L)[seq_len(nn)])
+  for (eng in c("philox4x64", "threefry4x64")) {
+    key <- rng_key(99L, engine = eng)
+    for (nn in c(3L, 17L, 64L, 257L, 1000L)) {
+      expect_identical(rng_uniform(key, nn), rng_uniform(key, 1000L)[seq_len(nn)])
+      expect_identical(rng_normal(key, nn), rng_normal(key, 1000L)[seq_len(nn)])
+    }
   }
 })

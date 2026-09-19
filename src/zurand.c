@@ -30,6 +30,7 @@
 #endif
 
 #include "Random123/philox.h"
+#include "Random123/threefry.h"
 
 /* NumPy's ziggurat tables (BSD 3-clause, see src/numpyzig/LICENSE). The
  * header is vendored verbatim and also carries float/exponential tables
@@ -94,7 +95,18 @@
  */
 
 #define ZURAND_KEY_WORDS 4
-#define ZURAND_ENGINE "philox4x64"
+/* Engine names, as stored on every key's `engine` attribute. Adding one is
+ * additive by design: an existing key keeps its name and therefore its
+ * stream forever, and a caller opts into a new engine explicitly. */
+#define ZURAND_ENGINE_PHILOX   "philox4x64"
+#define ZURAND_ENGINE_THREEFRY "threefry4x64"
+#define ZURAND_ENGINE ZURAND_ENGINE_PHILOX  /* the default */
+
+/* Both engines produce the same 256-bit block type; only their key types
+ * differ. The sampler core is written against this. */
+typedef philox4x64_ctr_t zurand_ctr_t;
+
+typedef enum { ZURAND_ENG_PHILOX = 0, ZURAND_ENG_THREEFRY = 1 } zurand_engine_t;
 #define ZURAND_MAX_EXACT_INT 9007199254740991.0
 
 #define ZURAND_PURPOSE_BITS    ((uint64_t)0)
@@ -126,10 +138,28 @@ static SEXP engine_symbol(void) {
     return Rf_install("engine");
 }
 
+static int engine_code(SEXP engine) {
+    if (TYPEOF(engine) == STRSXP && Rf_xlength(engine) == 1) {
+        const char *s = CHAR(STRING_ELT(engine, 0));
+        if (strcmp(s, ZURAND_ENGINE_PHILOX) == 0)   return ZURAND_ENG_PHILOX;
+        if (strcmp(s, ZURAND_ENGINE_THREEFRY) == 0) return ZURAND_ENG_THREEFRY;
+    }
+    return -1;
+}
+
 static void check_engine(SEXP engine) {
-    if (TYPEOF(engine) != STRSXP || Rf_xlength(engine) != 1 ||
-        strcmp(CHAR(STRING_ELT(engine, 0)), ZURAND_ENGINE) != 0)
-        Rf_error("`engine` must be \"%s\"", ZURAND_ENGINE);
+    if (engine_code(engine) < 0)
+        Rf_error("`engine` must be \"%s\" or \"%s\"",
+                 ZURAND_ENGINE_PHILOX, ZURAND_ENGINE_THREEFRY);
+}
+
+/* The engine a key was created with; every sampler dispatches on this. */
+static zurand_engine_t key_engine_code(SEXP key) {
+    SEXP e = Rf_getAttrib(key, engine_symbol());
+    int c = engine_code(e);
+    if (c < 0)
+        Rf_error("<rng_key> has an unrecognised engine");
+    return (zurand_engine_t)c;
 }
 
 /* `words` is INTEGER(key), hoisted by the caller so that no R API is
@@ -174,6 +204,25 @@ static philox4x64_key_t key_from_words(const int *words, R_xlen_t nkey, R_xlen_t
     uint64_t w3 = (uint64_t)load_word_at(words, nkey, i, 3);
     k.v[0] = w0 | (w1 << 32);
     k.v[1] = w2 | (w3 << 32);
+    return k;
+}
+
+/* Threefry takes a 256-bit key; a zurand key stores 128. The upper half is
+ * derived from the lower by xor with the same two constants Threefry itself
+ * uses as its Weyl increments, so all four key words depend on the stored
+ * key rather than two of them being fixed for every user.
+ *
+ * This does not invent entropy: the key space stays 128 bits, which is
+ * exactly what rng_key(seed) produces for philox too. It only avoids handing
+ * Threefry's schedule two constant words. */
+static threefry4x64_key_t key_from_words_threefry(const int *words,
+                                                  R_xlen_t nkey, R_xlen_t i) {
+    philox4x64_key_t p = key_from_words(words, nkey, i);
+    threefry4x64_key_t k;
+    k.v[0] = p.v[0];
+    k.v[1] = p.v[1];
+    k.v[2] = p.v[0] ^ UINT64_C(0x9e3779b97f4a7c15);
+    k.v[3] = p.v[1] ^ UINT64_C(0xbb67ae8584caa73b);
     return k;
 }
 
@@ -295,22 +344,6 @@ static uint64_t splitmix64_next(uint64_t *state) {
     return z ^ (z >> 31);
 }
 
-R123_STATIC_INLINE R123_FORCE_INLINE(philox4x64_ctr_t zurand_block(
-    philox4x64_key_t key, uint64_t index, uint64_t domain, uint64_t purpose));
-R123_STATIC_INLINE philox4x64_ctr_t zurand_block(philox4x64_key_t key,
-                                                uint64_t index,
-                                                uint64_t domain,
-                                                uint64_t purpose) {
-    philox4x64_ctr_t ctr = {{index, domain, purpose, 0}};
-    return philox4x64(ctr, key);
-}
-
-static uint64_t zurand_word(philox4x64_key_t key, uint64_t index,
-                           uint64_t domain, uint64_t purpose) {
-    philox4x64_ctr_t block = zurand_block(key, index >> 2, domain, purpose);
-    return block.v[index & 3u];
-}
-
 /* Top 52 random bits, centered in their bucket -> exactly (m + 0.5) *
  * 2^-52, strictly inside (0, 1): stuff the bits into the mantissa of a
  * double in [1, 2), then shift the interval; the subtraction is exact.
@@ -327,223 +360,41 @@ static double u01_open(uint64_t bits) {
 /* 53-bit uniform in [0, 1), numpy's next_double mapping. */
 #define ZURAND_U64_TO_DOUBLE(u) (((u) >> 11) * 0x1.0p-53)
 
-/* Retry-word stream for the slow path: group g >= 1 is one Philox block
- * at counter {index, g, purpose}, consumed word by word, so all four
- * words of each retry block are used and draw `index` stays a pure
- * function of (key, index). Distinct from the fast-path counters, whose
- * second word is always 0. (The former one-word-per-attempt scheme paid
- * a full Philox call per retry word and discarded the other three;
- * batching measured ~3% faster on bulk rnorm overall.) */
-typedef struct {
-    philox4x64_ctr_t blk;
-    uint64_t group;
-    unsigned w;
-} zig_stream;
-
-R123_STATIC_INLINE uint64_t zig_next(zig_stream *s, philox4x64_key_t key,
-                                     uint64_t index) {
-    if (s->w == 4) {
-        s->blk = zurand_block(key, index, ++s->group, ZURAND_PURPOSE_NORMAL);
-        s->w = 0;
-    }
-    return s->blk.v[s->w++];
+static int lemire_accept(uint32_t x, uint32_t range, uint32_t threshold,
+                         uint32_t *offset) {
+    uint64_t product = (uint64_t)x * (uint64_t)range;
+    if ((uint32_t)product < threshold)
+        return 0;
+    *offset = (uint32_t)(product >> 32);
+    return 1;
 }
 
-/* Cold continuation of zig_normal_at once the one-word fast path has
- * rejected: wedge acceptance and the layer-0 tail, redrawing words from
- * the zig_stream retry blocks. Most wedge decisions resolve in fixed
- * point against the Dnorm bracket; only the narrow ambiguous band pays
- * exp(). Kept out of line so the fast path inlines into the sampler
- * loops. */
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((noinline, cold))
-#endif
-static double zig_normal_slow(philox4x64_key_t key, uint64_t index, uint64_t r) {
-    zig_stream s = {.group = 0, .w = 4};
-    int idx = (int)(r & 0xff);
-    int sign = (int)((r >> 8) & 0x1);
-    uint64_t rabs = (r >> 9) & UINT64_C(0x000fffffffffffff);
-    double x = (double)rabs * wi_double[idx];
-    if (sign)
-        x = -x;
-    /* the caller established rabs >= ki_double[idx] for the entry word */
-
-    for (;;) {
-        uint64_t Y = zig_next(&s, key, index);
-
-        if (idx == 0) {
-            /* layer-0 tail; the first ordinate reuses Y */
-            double yy = -log1p(-ZURAND_U64_TO_DOUBLE(Y));
-            for (;;) {
-                double xx = -ziggurat_nor_inv_r *
-                    log1p(-ZURAND_U64_TO_DOUBLE(zig_next(&s, key, index)));
-                if (yy + yy > xx * xx)
-                    return sign ? -(ziggurat_nor_r + xx)
-                                : ziggurat_nor_r + xx;
-                yy = -log1p(-ZURAND_U64_TO_DOUBLE(zig_next(&s, key, index)));
-            }
-        }
-
-        /* wedge: compare Y * (width of layer idx) against the position in
-         * the layer, with zurand_zig_gap bracketing the exp curve around its
-         * chord; f is concave below the inflection layer (x < 1, curve
-         * above the chord) and convex above it. ZURAND_ZIG_GUARD widens the
-         * ambiguous band on the chord side: ki rounding lets the true curve
-         * cross the chord by a few fixed-point units, and the fallback's
-         * own double rounding lives there too, so the hairline band defers
-         * to the exp() test instead of deciding. With the guard, shortcut
-         * decisions never contradict the fallback. */
-        uint64_t L = (UINT64_C(1) << 52) - ki_double[idx];
-        uint64_t R = (UINT64_C(1) << 52) - rabs;
-        uint64_t YL;
-        (void)mulhilo64(Y, L, &YL);
-        int accept, reject;
-        if (idx > ZURAND_ZIG_INFLECTION) {
-            reject = YL > R + ZURAND_ZIG_GUARD;
-            accept = !reject && YL + zurand_zig_gap[idx] < R;
-        } else if (idx < ZURAND_ZIG_INFLECTION) {
-            accept = YL + ZURAND_ZIG_GUARD < R;
-            reject = !accept && YL > R + zurand_zig_gap[idx];
-        } else {
-            reject = YL > R + zurand_zig_gap_hi52;
-            accept = !reject && YL + zurand_zig_gap[idx] < R;
-        }
-        if (accept)
-            return x;
-        if (!reject) {
-            double u = ZURAND_U64_TO_DOUBLE(Y);
-            if ((fi_double[idx - 1] - fi_double[idx]) * u + fi_double[idx] <
-                exp(-0.5 * x * x))
-                return x;
-        }
-
-        r = zig_next(&s, key, index);
-        idx = (int)(r & 0xff);
-        sign = (int)((r >> 8) & 0x1);
-        rabs = (r >> 9) & UINT64_C(0x000fffffffffffff);
-        x = (double)rabs * wi_double[idx];
-        if (sign)
-            x = -x;
-        if (rabs < ki_double[idx])
-            return x;
-    }
-}
-
-/* One standard normal deviate for output position `index`, following
- * numpy's random_standard_normal: 8 bits of layer index, 1 sign bit and a
- * 52-bit magnitude from a single word decide ~99% of draws with one table
- * compare. `r` is the attempt-0 word from the shared Philox block. */
-R123_STATIC_INLINE double zig_normal_at(philox4x64_key_t key, uint64_t index,
-                                        uint64_t r) {
-    int idx = (int)(r & 0xff);
-    uint64_t rabs = (r >> 9) & UINT64_C(0x000fffffffffffff);
-    /* Negate before the int->double convert: (-rabs) * wi and
-     * -(rabs * wi) are bit-identical, and the signed form costs one
-     * cneg instead of a second multiply feeding a select. Computed
-     * unconditionally so the convert/multiply chain starts before the
-     * acceptance compare resolves. */
-    int64_t s = (r >> 8) & 0x1 ? -(int64_t)rabs : (int64_t)rabs;
-    double x = (double)s * wi_double[idx];
-    if (R123_BUILTIN_EXPECT(rabs < ki_double[idx], 1))
-        return x;
-    return zig_normal_slow(key, index, r);
-}
-
-/* Each Philox block yields four outputs and depends only on its counter,
- * so the block loops below parallelize with bit-identical results.
- * `threads` gates the inner parallel region; callers pass 0 when they
- * already parallelize over key columns. */
-/* Fills standard normals; C_rng_normal applies mean/sd in a separate
- * vectorizable pass so the hot loop stays load/compare/multiply only.
+/* ---- engine-parameterised sampler cores ----
  *
- * Works in two passes over a small stack chunk: a tight Philox-only loop
- * (independent iterations the compiler can pipeline across the 10-round
- * dependency chain), then the ziggurat transform over the buffered words.
- * Same words, same decisions, same output as a fused loop. (Transforming
- * in place over the output slice instead — randompack's layout — measured
- * ~12% slower here: it turns the output stream's write-once pattern into
- * write-read-write.) */
+ * Both engines are Random123 generators, so both give counter-based random
+ * access: a value is a pure function of (key, counter) and any index can be
+ * reached directly without iterating. That property is zurand's whole point
+ * and is preserved whichever engine a key names.
+ *
+ * Round counts are the lowest that Random123's authors report passing
+ * BigCrush, not the library defaults, which carry an extra safety margin:
+ * philox4x64 defaults to 10 and threefry4x64 to 20. philox stays at 10
+ * because it is the shipped default stream and must never change; threefry
+ * is new, so it takes 13. Both round counts have published KAT vectors,
+ * which tests/testthat/test-kat.R checks against.
+ */
 #define ZURAND_CHUNK_BLOCKS 128 /* 512 words, 4 KiB per thread */
 
-static void fill_normal_column(double *out, R_xlen_t n,
-                               philox4x64_key_t key, int threads) {
-    R_xlen_t nblock = n >> 2;
-    R_xlen_t nchunk = (nblock + ZURAND_CHUNK_BLOCKS - 1) / ZURAND_CHUNK_BLOCKS;
-#ifdef ZURAND_OPENMP
-#pragma omp parallel for if(threads > 1) \
-    num_threads(threads > 0 ? threads : 1) default(none) \
-    shared(out, nblock, nchunk, key) schedule(static)
-#endif
-    for (R_xlen_t c = 0; c < nchunk; c++) {
-        uint64_t buf[ZURAND_CHUNK_BLOCKS * 4];
-        R_xlen_t b0 = c * ZURAND_CHUNK_BLOCKS;
-        int nb = (int)(nblock - b0 < ZURAND_CHUNK_BLOCKS ? nblock - b0
-                                                        : ZURAND_CHUNK_BLOCKS);
-        for (int j = 0; j < nb; j++) {
-            philox4x64_ctr_t block = zurand_block(key, (uint64_t)(b0 + j), 0,
-                                                 ZURAND_PURPOSE_NORMAL);
-            memcpy(buf + 4 * j, block.v, sizeof block.v);
-        }
+#define ZE_SUFFIX philox
+#define ZE_KEY_T  philox4x64_key_t
+#define ZE_GEN(c, k) philox4x64_R(10, (c), (k))
+#include "zurand_engine.h"
 
-        double *o = out + (b0 << 2);
-        uint64_t base = (uint64_t)(b0 << 2);
-        for (int j = 0; j < nb * 4; j++)
-            o[j] = zig_normal_at(key, base + (uint64_t)j, buf[j]);
-    }
+#define ZE_SUFFIX threefry
+#define ZE_KEY_T  threefry4x64_key_t
+#define ZE_GEN(c, k) threefry4x64_R(13, (c), (k))
+#include "zurand_engine.h"
 
-    R_xlen_t i = nblock << 2;
-    if (i < n) {
-        philox4x64_ctr_t block = zurand_block(key, (uint64_t)nblock, 0,
-                                             ZURAND_PURPOSE_NORMAL);
-        for (unsigned w = 0; i < n; w++, i++)
-            out[i] = zig_normal_at(key, (uint64_t)i, block.v[w]);
-    }
-}
-
-/* Fills uniforms on (0, 1); C_rng_uniform applies min/span in a separate
- * vectorizable pass so the hot loop stays Philox plus the bit trick.
- *
- * Two passes over a stack chunk, for the same reason fill_normal_column
- * uses them: the fused form makes each iteration's stores wait on that
- * iteration's 10-round Philox chain, and splitting generation from
- * transformation lets the generator loop pipeline across independent
- * blocks. Same counters, same words, same order, same output.
- * `threads` is the thread count for the inner parallel region; callers
- * pass 0 to keep the column serial (e.g. when parallelizing over key
- * columns). */
-static void fill_uniform_column(double *out, R_xlen_t n,
-                                philox4x64_key_t key, int threads) {
-    R_xlen_t nblock = n >> 2;
-    R_xlen_t nchunk = (nblock + ZURAND_CHUNK_BLOCKS - 1) / ZURAND_CHUNK_BLOCKS;
-#ifdef ZURAND_OPENMP
-#pragma omp parallel for if(threads > 1) \
-    num_threads(threads > 0 ? threads : 1) default(none) \
-    shared(out, nblock, nchunk, key) schedule(static)
-#endif
-    for (R_xlen_t c = 0; c < nchunk; c++) {
-        uint64_t buf[ZURAND_CHUNK_BLOCKS * 4];
-        R_xlen_t b0 = c * ZURAND_CHUNK_BLOCKS;
-        int nb = (int)(nblock - b0 < ZURAND_CHUNK_BLOCKS ? nblock - b0
-                                                        : ZURAND_CHUNK_BLOCKS);
-        for (int j = 0; j < nb; j++) {
-            philox4x64_ctr_t block = zurand_block(key, (uint64_t)(b0 + j), 0,
-                                                 ZURAND_PURPOSE_UNIFORM);
-            memcpy(buf + 4 * j, block.v, sizeof block.v);
-        }
-
-        double *o = out + (b0 << 2);
-        for (int j = 0; j < nb * 4; j++)
-            o[j] = u01_open(buf[j]);
-    }
-
-    R_xlen_t i = nblock << 2;
-    if (i < n) {
-        philox4x64_ctr_t block = zurand_block(key, (uint64_t)nblock, 0,
-                                             ZURAND_PURPOSE_UNIFORM);
-        for (unsigned w = 0; i < n; w++, i++)
-            out[i] = u01_open(block.v[w]);
-    }
-}
 
 /* ---- stable fold hashing ---- */
 
@@ -692,6 +543,7 @@ SEXP C_rng_key_from_r(SEXP n_, SEXP engine) {
 
 SEXP C_rng_fold(SEXP key, SEXP data) {
     R_xlen_t nkey = key_count(key);
+    zurand_engine_t eng = key_engine_code(key);
     uint64_t h = hash_data(data);
     uint64_t domain = h ^ UINT64_C(0x9e3779b97f4a7c15);
     SEXP engine = key_engine(key);
@@ -699,8 +551,13 @@ SEXP C_rng_fold(SEXP key, SEXP data) {
     const int *kw = INTEGER(key);
     SEXP ans = PROTECT(alloc_key_vector(nkey, engine));
     for (R_xlen_t i = 0; i < nkey; i++) {
-        philox4x64_key_t k = key_from_words(kw, nkey, i);
-        philox4x64_ctr_t out = zurand_block(k, h, domain, ZURAND_PURPOSE_FOLD);
+        zurand_ctr_t out;
+        if (eng == ZURAND_ENG_PHILOX)
+            out = zurand_block_philox(key_from_words(kw, nkey, i), h, domain,
+                                      ZURAND_PURPOSE_FOLD);
+        else
+            out = zurand_block_threefry(key_from_words_threefry(kw, nkey, i), h,
+                                        domain, ZURAND_PURPOSE_FOLD);
         set_key_words(ans, nkey, i, out.v[0], out.v[1]);
     }
     UNPROTECT(1);
@@ -728,6 +585,7 @@ SEXP C_rng_threads(SEXP threads_) {
 
 SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     R_xlen_t nkey = key_count(key);
+    zurand_engine_t eng = key_engine_code(key);
     R_xlen_t n = length_scalar(n_, "n");
     R_xlen_t total = checked_product(n, nkey, "sample");
     double min = finite_scalar(min_, "min");
@@ -758,8 +616,13 @@ SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     shared(kw, out, n, nkey, par_rows) schedule(static)
 #endif
     for (R_xlen_t col = 0; col < nkey; col++) {
-        philox4x64_key_t k = key_from_words(kw, nkey, col);
-        fill_uniform_column(out + n * col, n, k, par_rows);
+        if (eng == ZURAND_ENG_PHILOX)
+            fill_uniform_column_philox(out + n * col, n,
+                                       key_from_words(kw, nkey, col), par_rows);
+        else
+            fill_uniform_column_threefry(out + n * col, n,
+                                         key_from_words_threefry(kw, nkey, col),
+                                         par_rows);
     }
     if (min != 0.0 || span != 1.0) {
 #ifdef ZURAND_OPENMP
@@ -775,6 +638,7 @@ SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
 
 SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_) {
     R_xlen_t nkey = key_count(key);
+    zurand_engine_t eng = key_engine_code(key);
     R_xlen_t n = length_scalar(n_, "n");
     R_xlen_t total = checked_product(n, nkey, "sample");
     double mean = finite_scalar(mean_, "mean");
@@ -804,8 +668,13 @@ SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_) {
     shared(kw, out, n, nkey, par_rows) schedule(static)
 #endif
     for (R_xlen_t col = 0; col < nkey; col++) {
-        philox4x64_key_t k = key_from_words(kw, nkey, col);
-        fill_normal_column(out + n * col, n, k, par_rows);
+        if (eng == ZURAND_ENG_PHILOX)
+            fill_normal_column_philox(out + n * col, n,
+                                      key_from_words(kw, nkey, col), par_rows);
+        else
+            fill_normal_column_threefry(out + n * col, n,
+                                        key_from_words_threefry(kw, nkey, col),
+                                        par_rows);
     }
     if (mean != 0.0 || sd != 1.0) {
 #ifdef ZURAND_OPENMP
@@ -821,64 +690,10 @@ SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_) {
 
 /* Lemire bounded sampling: accept unless the low half of x * range falls
  * below the bias threshold, which the caller computes once per range. */
-static int lemire_accept(uint32_t x, uint32_t range, uint32_t threshold,
-                         uint32_t *offset) {
-    uint64_t product = (uint64_t)x * (uint64_t)range;
-    if ((uint32_t)product < threshold)
-        return 0;
-    *offset = (uint32_t)(product >> 32);
-    return 1;
-}
-
-/* Rejection continuation for one index; attempt 0 was consumed from the
- * shared block by fill_integer_column. */
-static uint32_t bounded_u32_retry(philox4x64_key_t k, uint64_t index,
-                                  uint32_t range, uint32_t threshold) {
-    for (uint64_t attempt = 1; ; attempt++) {
-        uint32_t x = (uint32_t)zurand_word(k, index, attempt, ZURAND_PURPOSE_INTEGER);
-        uint32_t offset;
-        if (lemire_accept(x, range, threshold, &offset))
-            return offset;
-    }
-}
-
-static void fill_integer_column(int *out, R_xlen_t n, philox4x64_key_t key,
-                                int min, uint32_t range, uint32_t threshold,
-                                int threads) {
-    R_xlen_t nblock = n >> 2;
-#ifdef ZURAND_OPENMP
-#pragma omp parallel for if(threads > 1) \
-    num_threads(threads > 0 ? threads : 1) default(none) \
-    shared(out, nblock, key, min, range, threshold) schedule(static)
-#endif
-    for (R_xlen_t b = 0; b < nblock; b++) {
-        philox4x64_ctr_t block = zurand_block(key, (uint64_t)b, 0,
-                                             ZURAND_PURPOSE_INTEGER);
-        int *o = out + (b << 2);
-        for (unsigned w = 0; w < 4; w++) {
-            uint32_t offset;
-            if (!lemire_accept((uint32_t)block.v[w], range, threshold, &offset))
-                offset = bounded_u32_retry(key, (uint64_t)((b << 2) + w),
-                                           range, threshold);
-            o[w] = min + (int)offset;
-        }
-    }
-
-    R_xlen_t i = nblock << 2;
-    if (i < n) {
-        philox4x64_ctr_t block = zurand_block(key, (uint64_t)nblock, 0,
-                                             ZURAND_PURPOSE_INTEGER);
-        for (unsigned w = 0; i < n; w++, i++) {
-            uint32_t offset;
-            if (!lemire_accept((uint32_t)block.v[w], range, threshold, &offset))
-                offset = bounded_u32_retry(key, (uint64_t)i, range, threshold);
-            out[i] = min + (int)offset;
-        }
-    }
-}
 
 SEXP C_rng_integer(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     R_xlen_t nkey = key_count(key);
+    zurand_engine_t eng = key_engine_code(key);
     R_xlen_t n = length_scalar(n_, "n");
     R_xlen_t total = checked_product(n, nkey, "sample");
     int min = integer_bound(min_, "min");
@@ -900,8 +715,14 @@ SEXP C_rng_integer(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     shared(kw, out, n, nkey, min, range, threshold, par_rows) schedule(static)
 #endif
     for (R_xlen_t col = 0; col < nkey; col++) {
-        philox4x64_key_t k = key_from_words(kw, nkey, col);
-        fill_integer_column(out + n * col, n, k, min, range, threshold, par_rows);
+        if (eng == ZURAND_ENG_PHILOX)
+            fill_integer_column_philox(out + n * col, n,
+                                       key_from_words(kw, nkey, col),
+                                       min, range, threshold, par_rows);
+        else
+            fill_integer_column_threefry(out + n * col, n,
+                                         key_from_words_threefry(kw, nkey, col),
+                                         min, range, threshold, par_rows);
     }
     UNPROTECT(1);
     return ans;
@@ -909,6 +730,7 @@ SEXP C_rng_integer(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
 
 SEXP C_rng_bits(SEXP key, SEXP n_, SEXP bits_) {
     R_xlen_t nkey = key_count(key);
+    zurand_engine_t eng = key_engine_code(key);
     R_xlen_t n = length_scalar(n_, "n");
     R_xlen_t total = checked_product(n, nkey, "sample");
     int bits = bits_scalar(bits_);
@@ -919,11 +741,16 @@ SEXP C_rng_bits(SEXP key, SEXP n_, SEXP bits_) {
         set_sample_dim(ans, n, nkey);
         double *out = REAL(ans);
         for (R_xlen_t col = 0; col < nkey; col++) {
-            philox4x64_key_t k = key_from_words(kw, nkey, col);
+            philox4x64_key_t kp = key_from_words(kw, nkey, col);
+            threefry4x64_key_t kt = key_from_words_threefry(kw, nkey, col);
             double *col_out = out + n * col;
             for (R_xlen_t i = 0; i < n; i += 4) {
-                philox4x64_ctr_t block = zurand_block(k, (uint64_t)(i >> 2), 0,
-                                                     ZURAND_PURPOSE_BITS);
+                zurand_ctr_t block =
+                    eng == ZURAND_ENG_PHILOX
+                        ? zurand_block_philox(kp, (uint64_t)(i >> 2), 0,
+                                              ZURAND_PURPOSE_BITS)
+                        : zurand_block_threefry(kt, (uint64_t)(i >> 2), 0,
+                                                ZURAND_PURPOSE_BITS);
                 R_xlen_t stop = n - i < 4 ? n - i : 4;
                 for (R_xlen_t w = 0; w < stop; w++)
                     col_out[i + w] = (double)(uint32_t)block.v[w];
@@ -937,10 +764,15 @@ SEXP C_rng_bits(SEXP key, SEXP n_, SEXP bits_) {
     set_sample_dim(ans, n, nkey);
     char buf[17];
     for (R_xlen_t col = 0; col < nkey; col++) {
-        philox4x64_key_t k = key_from_words(kw, nkey, col);
+        philox4x64_key_t kp = key_from_words(kw, nkey, col);
+        threefry4x64_key_t kt = key_from_words_threefry(kw, nkey, col);
         for (R_xlen_t i = 0; i < n; i += 4) {
-            philox4x64_ctr_t block = zurand_block(k, (uint64_t)(i >> 2), 0,
-                                                 ZURAND_PURPOSE_BITS);
+            zurand_ctr_t block =
+                eng == ZURAND_ENG_PHILOX
+                    ? zurand_block_philox(kp, (uint64_t)(i >> 2), 0,
+                                          ZURAND_PURPOSE_BITS)
+                    : zurand_block_threefry(kt, (uint64_t)(i >> 2), 0,
+                                            ZURAND_PURPOSE_BITS);
             R_xlen_t stop = n - i < 4 ? n - i : 4;
             for (R_xlen_t w = 0; w < stop; w++) {
                 snprintf(buf, sizeof buf, "%016" PRIx64, block.v[w]);

@@ -28,6 +28,7 @@ blk <- function(call, vals, quote = FALSE) {
 
 key <- rng_key(42L)
 keys <- rng_key(42L, n = 3L)
+tkey <- rng_key(42L, engine = "threefry4x64")
 z <- rng_normal(key, 200000L)
 tail_i <- which(abs(z) >= 3.6542)[1:8]
 
@@ -94,12 +95,32 @@ L <- c(
       g(as.vector(rng_normal(keys, 4L)))),
 "})",
 "",
+"test_that(\"the threefry4x64 engine is bit-stable\", {",
+"  # A second engine must be as reproducible as the first, and must produce a",
+"  # different stream from the same seed -- a key records its engine.",
+  blk("rng_uniform(rng_key(42L, engine = \"threefry4x64\"), 8L)",
+      g(rng_uniform(tkey, 8L))),
+"",
+  blk("rng_normal(rng_key(42L, engine = \"threefry4x64\"), 8L)",
+      g(rng_normal(tkey, 8L))),
+"",
+  blk("rng_integer(rng_key(42L, engine = \"threefry4x64\"), 8L, min = 1L, max = 6L)",
+      paste0(rng_integer(tkey, 8L, min = 1L, max = 6L), "L")),
+"",
+"  expect_false(identical(rng_normal(rng_key(42L), 64L),",
+"                         rng_normal(rng_key(42L, engine = \"threefry4x64\"), 64L)))",
+"  expect_identical(attr(rng_key(1L, engine = \"threefry4x64\"), \"engine\"),",
+"                   \"threefry4x64\")",
+"})",
+"",
 "test_that(\"draw i does not depend on n\", {",
 "  # The core counter-mode invariant, stated directly rather than implied.",
-"  key <- rng_key(99L)",
-"  for (nn in c(3L, 17L, 64L, 257L, 1000L)) {",
-"    expect_identical(rng_uniform(key, nn), rng_uniform(key, 1000L)[seq_len(nn)])",
-"    expect_identical(rng_normal(key, nn), rng_normal(key, 1000L)[seq_len(nn)])",
+"  for (eng in c(\"philox4x64\", \"threefry4x64\")) {",
+"    key <- rng_key(99L, engine = eng)",
+"    for (nn in c(3L, 17L, 64L, 257L, 1000L)) {",
+"      expect_identical(rng_uniform(key, nn), rng_uniform(key, 1000L)[seq_len(nn)])",
+"      expect_identical(rng_normal(key, nn), rng_normal(key, 1000L)[seq_len(nn)])",
+"    }",
 "  }",
 "})")
 

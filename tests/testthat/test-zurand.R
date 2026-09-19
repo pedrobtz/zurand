@@ -287,7 +287,7 @@ test_that("invalid inputs error cleanly", {
   expect_error(rng_key(2^53), "2\\^53")
   expect_error(rng_key(NA_integer_), "missing")
   expect_error(rng_key(1L, n = c(1L, 2L)), "single value")
-  expect_error(rng_key(1L, engine = "threefry"), "philox4x64")
+  expect_error(rng_key(1L, engine = "mersenne"), "should be one of")
 
   expect_error(rng_uniform(key, c(1L, 2L)), "single value")
   expect_error(rng_uniform(key, "2"), "integer or double")
