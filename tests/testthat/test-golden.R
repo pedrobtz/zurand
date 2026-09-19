@@ -125,11 +125,53 @@ test_that("the threefry4x64 engine is bit-stable", {
                    "threefry4x64")
 })
 
+test_that("the xoshiro256pp engine is bit-stable", {
+  # Values either side of a 512-word chunk boundary, since that is where
+  # this engine reseeds and the only place its indexing could go wrong.
+  expect_identical(rng_uniform(rng_key(42L, engine = "xoshiro256pp"), 8L),
+    c(
+      0x1.2a581f80c437p-5, 0x1.ab2018f5da24dp-1, 0x1.e4334cceac67ap-2,
+      0x1.6a7784e81a88p-8, 0x1.be3ba9c4dcadbp-1, 0x1.a3ed6b35e7622p-2,
+      0x1.910a74a0ac7b6p-2, 0x1.7d5150edfa817p-1
+    ))
+
+  expect_identical(rng_normal(rng_key(42L, engine = "xoshiro256pp"), 8L),
+    c(
+      -0x1.36e7186c4f557p+0, 0x1.9b7c19da02f9fp+0, -0x1.3e745a307bf21p-1,
+      0x1.905276bc6b61ap-1, 0x1.6c338450b9db6p-1, 0x1.56dac9dfb8d1p+0,
+      -0x1.b9b8c577125f8p-1, 0x1.9a051051413f4p-2
+    ))
+
+  expect_identical(rng_uniform(rng_key(42L, engine = "xoshiro256pp"), 1030L)[508:520],
+    c(
+      0x1.173d0de51886fp-1, 0x1.7923105527bbdp-1, 0x1.44b43d9e80b66p-2,
+      0x1.b078f6407c3afp-1, 0x1.f399030c36676p-2, 0x1.d6f79ebed95edp-1,
+      0x1.8d2909b26a29bp-1, 0x1.1c6e147599dbcp-3, 0x1.c6e3e615d6fd7p-1,
+      0x1.4e51bf05f26ep-6, 0x1.46f3b6de802cfp-1, 0x1.e3020d45b0c6ep-2,
+      0x1.e05aec585b2e7p-1
+    ))
+
+  expect_identical(rng_integer(rng_key(42L, engine = "xoshiro256pp"), 8L, min = 1L, max = 6L),
+    c(
+      1L, 5L, 3L, 5L, 2L, 1L, 4L, 5L
+    ))
+
+  expect_identical(as.character(rng_bits(rng_key(42L, engine = "xoshiro256pp"), 6L, bits = 64L)),
+    c(
+      "1b56f8cdd2f1eb5e", "6f452a520ec8e62f", "244edfface7c6cd1",
+      "0a1d672e40c991eb", "2f7e7b02530edffc", "87251fef7a1b81a0"
+    ))
+
+  expect_false(identical(rng_normal(rng_key(42L), 64L),
+                         rng_normal(rng_key(42L, engine = "xoshiro256pp"), 64L)))
+})
+
 test_that("draw i does not depend on n", {
   # The core counter-mode invariant, stated directly rather than implied.
-  for (eng in c("philox4x64", "threefry4x64")) {
+  for (eng in c("philox4x64", "threefry4x64", "xoshiro256pp")) {
     key <- rng_key(99L, engine = eng)
-    for (nn in c(3L, 17L, 64L, 257L, 1000L)) {
+    # 511/512/513 straddle the xoshiro chunk boundary.
+    for (nn in c(3L, 17L, 64L, 257L, 511L, 512L, 513L, 1000L)) {
       expect_identical(rng_uniform(key, nn), rng_uniform(key, 1000L)[seq_len(nn)])
       expect_identical(rng_normal(key, nn), rng_normal(key, 1000L)[seq_len(nn)])
     }

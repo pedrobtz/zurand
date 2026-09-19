@@ -10,7 +10,7 @@
 \alias{c.rng_key}
 \title{Create a stateless RNG key}
 \usage{
-rng_key(seed, n = 1L, engine = c("philox4x64", "threefry4x64"))
+rng_key(seed, n = 1L, engine = c("philox4x64", "threefry4x64", "xoshiro256pp"))
 
 \method{format}{rng_key}(x, ...)
 
@@ -36,7 +36,18 @@ They differ only in speed and in the stream they produce.
 \itemize{
 \item \code{"philox4x64"} (default) -- Philox4x64-10. The original engine; its
 stream is fixed and will not change.
-\item \code{"threefry4x64"} -- Threefry4x64-13, roughly 1.8x faster per word.
+\item \code{"threefry4x64"} -- Threefry4x64-13. About 1.1x faster than the
+default in practice, though 1.8x faster per word in isolation: past
+L1 the fill is limited by memory, not by the generator.
+\item \code{"xoshiro256pp"} -- the fastest, roughly \strong{2x} the default on
+uniform and \strong{1.7x} on normal. Philox derives a fresh 256-bit
+xoshiro256++ state for each 512-value chunk, then a cheap
+recurrence produces the chunk. Reproducibility is unaffected: a
+chunk depends only on the key and its index, so the same key gives
+the same values, draw \code{i} still does not depend on \code{n}, and a
+threaded fill is bit-identical to a serial one. What it gives up is
+the ability to reach an arbitrary index in constant time, which no
+exported function offers; \code{"philox4x64"} keeps that property open.
 }
 
 A key records its engine, so a key made with one never produces the

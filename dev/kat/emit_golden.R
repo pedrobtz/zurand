@@ -29,6 +29,7 @@ blk <- function(call, vals, quote = FALSE) {
 key <- rng_key(42L)
 keys <- rng_key(42L, n = 3L)
 tkey <- rng_key(42L, engine = "threefry4x64")
+xkey <- rng_key(42L, engine = "xoshiro256pp")
 z <- rng_normal(key, 200000L)
 tail_i <- which(abs(z) >= 3.6542)[1:8]
 
@@ -113,11 +114,34 @@ L <- c(
 "                   \"threefry4x64\")",
 "})",
 "",
+"test_that(\"the xoshiro256pp engine is bit-stable\", {",
+"  # Values either side of a 512-word chunk boundary, since that is where",
+"  # this engine reseeds and the only place its indexing could go wrong.",
+  blk("rng_uniform(rng_key(42L, engine = \"xoshiro256pp\"), 8L)",
+      g(rng_uniform(xkey, 8L))),
+"",
+  blk("rng_normal(rng_key(42L, engine = \"xoshiro256pp\"), 8L)",
+      g(rng_normal(xkey, 8L))),
+"",
+  blk("rng_uniform(rng_key(42L, engine = \"xoshiro256pp\"), 1030L)[508:520]",
+      g(rng_uniform(xkey, 1030L)[508:520])),
+"",
+  blk("rng_integer(rng_key(42L, engine = \"xoshiro256pp\"), 8L, min = 1L, max = 6L)",
+      paste0(rng_integer(xkey, 8L, min = 1L, max = 6L), "L")),
+"",
+  blk("as.character(rng_bits(rng_key(42L, engine = \"xoshiro256pp\"), 6L, bits = 64L))",
+      as.character(rng_bits(xkey, 6L, bits = 64L)), quote = TRUE),
+"",
+"  expect_false(identical(rng_normal(rng_key(42L), 64L),",
+"                         rng_normal(rng_key(42L, engine = \"xoshiro256pp\"), 64L)))",
+"})",
+"",
 "test_that(\"draw i does not depend on n\", {",
 "  # The core counter-mode invariant, stated directly rather than implied.",
-"  for (eng in c(\"philox4x64\", \"threefry4x64\")) {",
+"  for (eng in c(\"philox4x64\", \"threefry4x64\", \"xoshiro256pp\")) {",
 "    key <- rng_key(99L, engine = eng)",
-"    for (nn in c(3L, 17L, 64L, 257L, 1000L)) {",
+"    # 511/512/513 straddle the xoshiro chunk boundary.",
+"    for (nn in c(3L, 17L, 64L, 257L, 511L, 512L, 513L, 1000L)) {",
 "      expect_identical(rng_uniform(key, nn), rng_uniform(key, 1000L)[seq_len(nn)])",
 "      expect_identical(rng_normal(key, nn), rng_normal(key, 1000L)[seq_len(nn)])",
 "    }",
