@@ -17,7 +17,18 @@
 #'
 #'   * `"philox4x64"` (default) -- Philox4x64-10. The original engine; its
 #'     stream is fixed and will not change.
-#'   * `"threefry4x64"` -- Threefry4x64-13, roughly 1.8x faster per word.
+#'   * `"threefry4x64"` -- Threefry4x64-13. About 1.1x faster than the
+#'     default in practice, though 1.8x faster per word in isolation: past
+#'     L1 the fill is limited by memory, not by the generator.
+#'   * `"xoshiro256pp"` -- the fastest, roughly **2x** the default on
+#'     uniform and **1.7x** on normal. Philox derives a fresh 256-bit
+#'     xoshiro256++ state for each 512-value chunk, then a cheap
+#'     recurrence produces the chunk. Reproducibility is unaffected: a
+#'     chunk depends only on the key and its index, so the same key gives
+#'     the same values, draw `i` still does not depend on `n`, and a
+#'     threaded fill is bit-identical to a serial one. What it gives up is
+#'     the ability to reach an arbitrary index in constant time, which no
+#'     exported function offers; `"philox4x64"` keeps that property open.
 #'
 #'   A key records its engine, so a key made with one never produces the
 #'   other's values. Changing engine changes every number you get.
@@ -28,7 +39,8 @@
 #' keys <- rng_key(42L, n = 4L)
 #' key
 rng_key <- function(seed, n = 1L,
-                    engine = c("philox4x64", "threefry4x64")) {
+                    engine = c("philox4x64", "threefry4x64",
+                               "xoshiro256pp")) {
   engine <- match.arg(engine)
   .Call(C_rng_key, seed, n, engine)
 }
@@ -44,7 +56,8 @@ rng_key <- function(seed, n = 1L,
 #' @return An object of class `rng_key` containing `n` keys.
 #' @export
 rng_key_from_r <- function(n = 1L,
-                           engine = c("philox4x64", "threefry4x64")) {
+                           engine = c("philox4x64", "threefry4x64",
+                               "xoshiro256pp")) {
   engine <- match.arg(engine)
   .Call(C_rng_key_from_r, n, engine)
 }

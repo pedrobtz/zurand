@@ -178,38 +178,49 @@ R123_STATIC_INLINE double ZE_N(zig_normal_at)(ZE_KEY_T key, uint64_t index,
  * ~12% slower here: it turns the output stream's write-once pattern into
  * write-read-write.) */
 
+/* Fill `nwords` words for chunk `c`. This is the one place an engine
+ * decides how bits are produced in bulk, and it is a *chunk* rather than a
+ * block because that is the granularity an engine can amortise over: the
+ * xoshiro engine pays one Philox call here to seed a chunk and then runs a
+ * cheap recurrence, which a per-block hook could not express.
+ *
+ * `nwords` rather than always the full chunk, so that rng_uniform(key, 1)
+ * still costs one block instead of a whole chunk.
+ *
+ * Word w of a column is chunk w / ZURAND_CHUNK_WORDS at offset
+ * w % ZURAND_CHUNK_WORDS, which for the counter-based engines is exactly
+ * block w / 4 word w % 4 -- the mapping they had before this indirection
+ * existed, so their output is unchanged. */
+#ifndef ZE_CUSTOM_CHUNK
+static void ZE_N(chunk_words)(ZE_KEY_T key, uint64_t c, uint64_t purpose,
+                              uint64_t *buf, int nwords) {
+    int nb = (nwords + 3) >> 2;
+    for (int j = 0; j < nb; j++) {
+        zurand_ctr_t block = ZE_N(zurand_block)(
+            key, c * ZURAND_CHUNK_BLOCKS + (uint64_t)j, 0, purpose);
+        int have = nwords - 4 * j;
+        memcpy(buf + 4 * j, block.v, (have >= 4 ? 4 : have) * sizeof(uint64_t));
+    }
+}
+#endif
+
 static void ZE_N(fill_normal_column)(double *out, R_xlen_t n,
                                ZE_KEY_T key, int threads) {
-    R_xlen_t nblock = n >> 2;
-    R_xlen_t nchunk = (nblock + ZURAND_CHUNK_BLOCKS - 1) / ZURAND_CHUNK_BLOCKS;
+    R_xlen_t nchunk = (n + ZURAND_CHUNK_WORDS - 1) / ZURAND_CHUNK_WORDS;
 #ifdef ZURAND_OPENMP
 #pragma omp parallel for if(threads > 1) \
     num_threads(threads > 0 ? threads : 1) default(none) \
-    shared(out, nblock, nchunk, key) schedule(static)
+    shared(out, n, nchunk, key) schedule(static)
 #endif
     for (R_xlen_t c = 0; c < nchunk; c++) {
-        uint64_t buf[ZURAND_CHUNK_BLOCKS * 4];
-        R_xlen_t b0 = c * ZURAND_CHUNK_BLOCKS;
-        int nb = (int)(nblock - b0 < ZURAND_CHUNK_BLOCKS ? nblock - b0
-                                                        : ZURAND_CHUNK_BLOCKS);
-        for (int j = 0; j < nb; j++) {
-            zurand_ctr_t block = ZE_N(zurand_block)(key, (uint64_t)(b0 + j), 0,
-                                                 ZURAND_PURPOSE_NORMAL);
-            memcpy(buf + 4 * j, block.v, sizeof block.v);
-        }
+        uint64_t buf[ZURAND_CHUNK_WORDS];
+        R_xlen_t w0 = c * ZURAND_CHUNK_WORDS;
+        int m = (int)(n - w0 < ZURAND_CHUNK_WORDS ? n - w0 : ZURAND_CHUNK_WORDS);
+        ZE_N(chunk_words)(key, (uint64_t)c, ZURAND_PURPOSE_NORMAL, buf, m);
 
-        double *o = out + (b0 << 2);
-        uint64_t base = (uint64_t)(b0 << 2);
-        for (int j = 0; j < nb * 4; j++)
-            o[j] = ZE_N(zig_normal_at)(key, base + (uint64_t)j, buf[j]);
-    }
-
-    R_xlen_t i = nblock << 2;
-    if (i < n) {
-        zurand_ctr_t block = ZE_N(zurand_block)(key, (uint64_t)nblock, 0,
-                                             ZURAND_PURPOSE_NORMAL);
-        for (unsigned w = 0; i < n; w++, i++)
-            out[i] = ZE_N(zig_normal_at)(key, (uint64_t)i, block.v[w]);
+        double *o = out + w0;
+        for (int j = 0; j < m; j++)
+            o[j] = ZE_N(zig_normal_at)(key, (uint64_t)(w0 + j), buf[j]);
     }
 }
 
@@ -226,35 +237,21 @@ static void ZE_N(fill_normal_column)(double *out, R_xlen_t n,
  * columns). */
 static void ZE_N(fill_uniform_column)(double *out, R_xlen_t n,
                                 ZE_KEY_T key, int threads) {
-    R_xlen_t nblock = n >> 2;
-    R_xlen_t nchunk = (nblock + ZURAND_CHUNK_BLOCKS - 1) / ZURAND_CHUNK_BLOCKS;
+    R_xlen_t nchunk = (n + ZURAND_CHUNK_WORDS - 1) / ZURAND_CHUNK_WORDS;
 #ifdef ZURAND_OPENMP
 #pragma omp parallel for if(threads > 1) \
     num_threads(threads > 0 ? threads : 1) default(none) \
-    shared(out, nblock, nchunk, key) schedule(static)
+    shared(out, n, nchunk, key) schedule(static)
 #endif
     for (R_xlen_t c = 0; c < nchunk; c++) {
-        uint64_t buf[ZURAND_CHUNK_BLOCKS * 4];
-        R_xlen_t b0 = c * ZURAND_CHUNK_BLOCKS;
-        int nb = (int)(nblock - b0 < ZURAND_CHUNK_BLOCKS ? nblock - b0
-                                                        : ZURAND_CHUNK_BLOCKS);
-        for (int j = 0; j < nb; j++) {
-            zurand_ctr_t block = ZE_N(zurand_block)(key, (uint64_t)(b0 + j), 0,
-                                                 ZURAND_PURPOSE_UNIFORM);
-            memcpy(buf + 4 * j, block.v, sizeof block.v);
-        }
+        uint64_t buf[ZURAND_CHUNK_WORDS];
+        R_xlen_t w0 = c * ZURAND_CHUNK_WORDS;
+        int m = (int)(n - w0 < ZURAND_CHUNK_WORDS ? n - w0 : ZURAND_CHUNK_WORDS);
+        ZE_N(chunk_words)(key, (uint64_t)c, ZURAND_PURPOSE_UNIFORM, buf, m);
 
-        double *o = out + (b0 << 2);
-        for (int j = 0; j < nb * 4; j++)
+        double *o = out + w0;
+        for (int j = 0; j < m; j++)
             o[j] = u01_open(buf[j]);
-    }
-
-    R_xlen_t i = nblock << 2;
-    if (i < n) {
-        zurand_ctr_t block = ZE_N(zurand_block)(key, (uint64_t)nblock, 0,
-                                             ZURAND_PURPOSE_UNIFORM);
-        for (unsigned w = 0; i < n; w++, i++)
-            out[i] = u01_open(block.v[w]);
     }
 }
 
@@ -273,34 +270,25 @@ static uint32_t ZE_N(bounded_u32_retry)(ZE_KEY_T k, uint64_t index,
 static void ZE_N(fill_integer_column)(int *out, R_xlen_t n, ZE_KEY_T key,
                                 int min, uint32_t range, uint32_t threshold,
                                 int threads) {
-    R_xlen_t nblock = n >> 2;
+    R_xlen_t nchunk = (n + ZURAND_CHUNK_WORDS - 1) / ZURAND_CHUNK_WORDS;
 #ifdef ZURAND_OPENMP
 #pragma omp parallel for if(threads > 1) \
     num_threads(threads > 0 ? threads : 1) default(none) \
-    shared(out, nblock, key, min, range, threshold) schedule(static)
+    shared(out, n, nchunk, key, min, range, threshold) schedule(static)
 #endif
-    for (R_xlen_t b = 0; b < nblock; b++) {
-        zurand_ctr_t block = ZE_N(zurand_block)(key, (uint64_t)b, 0,
-                                             ZURAND_PURPOSE_INTEGER);
-        int *o = out + (b << 2);
-        for (unsigned w = 0; w < 4; w++) {
-            uint32_t offset;
-            if (!lemire_accept((uint32_t)block.v[w], range, threshold, &offset))
-                offset = ZE_N(bounded_u32_retry)(key, (uint64_t)((b << 2) + w),
-                                           range, threshold);
-            o[w] = min + (int)offset;
-        }
-    }
+    for (R_xlen_t c = 0; c < nchunk; c++) {
+        uint64_t buf[ZURAND_CHUNK_WORDS];
+        R_xlen_t w0 = c * ZURAND_CHUNK_WORDS;
+        int m = (int)(n - w0 < ZURAND_CHUNK_WORDS ? n - w0 : ZURAND_CHUNK_WORDS);
+        ZE_N(chunk_words)(key, (uint64_t)c, ZURAND_PURPOSE_INTEGER, buf, m);
 
-    R_xlen_t i = nblock << 2;
-    if (i < n) {
-        zurand_ctr_t block = ZE_N(zurand_block)(key, (uint64_t)nblock, 0,
-                                             ZURAND_PURPOSE_INTEGER);
-        for (unsigned w = 0; i < n; w++, i++) {
+        int *o = out + w0;
+        for (int j = 0; j < m; j++) {
             uint32_t offset;
-            if (!lemire_accept((uint32_t)block.v[w], range, threshold, &offset))
-                offset = ZE_N(bounded_u32_retry)(key, (uint64_t)i, range, threshold);
-            out[i] = min + (int)offset;
+            if (!lemire_accept((uint32_t)buf[j], range, threshold, &offset))
+                offset = ZE_N(bounded_u32_retry)(key, (uint64_t)(w0 + j),
+                                                 range, threshold);
+            o[j] = min + (int)offset;
         }
     }
 }
@@ -311,3 +299,4 @@ static void ZE_N(fill_integer_column)(int *out, R_xlen_t n, ZE_KEY_T key,
 #undef ZE_SUFFIX
 #undef ZE_KEY_T
 #undef ZE_GEN
+#undef ZE_CUSTOM_CHUNK

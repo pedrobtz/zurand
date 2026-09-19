@@ -31,7 +31,7 @@ getarg <- function(name, default) {
 }
 
 sampler <- match.arg(getarg("sampler", "normal"), c("normal", "uniform", "bits"))
-engine  <- match.arg(getarg("engine", "philox4x64"), c("philox4x64", "threefry4x64"))
+engine  <- match.arg(getarg("engine", "philox4x64"), c("philox4x64", "threefry4x64", "xoshiro256pp"))
 gb      <- as.numeric(getarg("gb", "1"))
 seed    <- as.integer(getarg("seed", "20260919"))
 chunk   <- 1e7                                   # values per block, ~80 MB

@@ -21,6 +21,8 @@ PractRand pre0.95, 256 MB per combination, x86_64, 2026-09-19.
 |---|---|---|
 | normal | philox4x64 | no anomalies in 168 test results |
 | normal | threefry4x64 | no anomalies in 168 test results |
+| normal | xoshiro256pp | no anomalies in 180 test results (512 MB) |
+| uniform | xoshiro256pp | no anomalies in 180 test results (512 MB) |
 
 The normal rows are the ones that matter: normals are mapped back through
 `pnorm()` before testing, so a wrong ziggurat -- a mis-set wedge bracket, a
@@ -32,6 +34,13 @@ going: a generator that is clean at 256 MB and fails at 256 GB is
 ordinary. The workflow takes a `gb` input for that reason, and a real run
 before any release should be several hundred GB on the normal sampler for
 both engines.
+
+The xoshiro256pp rows matter for a second reason. That engine reseeds a
+256-bit xoshiro state from Philox every 512 words, which is an unusual way
+to drive xoshiro -- far more reseeding than its designers had in mind. If
+that interacted badly with the recurrence, short-range correlation is
+exactly what PractRand's lowest lengths would catch first. It does not, to
+512 MB.
 
 ## Still to run
 

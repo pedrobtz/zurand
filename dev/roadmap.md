@@ -303,3 +303,34 @@ a caller who aliased the vector gets correct results instead of corruption.
 
 Still unbuilt, and still a permanent public API commitment, so it wants an
 explicit decision rather than being taken as implied by the numbers.
+
+## Amendment 2: the counter-based constraint was self-imposed (2026-09-19)
+
+The roadmap assumed every engine had to be a Random123 counter-based
+generator, and concluded from measurement that uniform could not beat
+dqrng. The measurement was right and the conclusion was too broad: it held
+only under that assumption, and the assumption was never required.
+
+`value = f(key, index)` for an arbitrary index is not something the API
+exposes -- there is no `rng_at(key, i)`. What the API promises is that a
+key reproduces its stream, that draw i does not depend on n, and that a
+threaded fill matches a serial one. All three survive seeding a cheap
+recurrence per chunk.
+
+`xoshiro256pp` does that: one Philox call per 512 values derives an
+xoshiro256++ state, which then costs about five operations per word
+instead of the 2.5-3 ns a counter-based engine needs to recompute from its
+counter. Measured through the R API at n=1e7, single-threaded:
+
+  uniform    249 -> 581 M/s    1.79x dqrng   (philox was 0.88x)
+  normal     183 -> 316 M/s    1.61x RcppZiggurat MT (philox was 0.97x)
+
+philox4x64 remains the default and keeps the indexed-access property open
+for anyone who needs it.
+
+Remaining headroom, roughly: SIMD xoshiro (4-8 lanes) could approach the
+~1200 M/s memory write floor on uniform, but CRAN cannot ship -march and
+it needs runtime dispatch. The Gaussian path is separately bounded by the
+scalar ziggurat at about 1.9 ns/draw, so beating ~400 M/s there needs a
+SIMD-friendly transform, which is a research problem rather than an
+optimisation.
