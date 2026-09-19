@@ -1,4 +1,4 @@
-Package: rngat
+Package: zurand
 Title: Stateless Random Numbers via Counter-Based Generation
 Version: 0.0.0.9000
 Authors@R: c(
@@ -17,7 +17,7 @@ Description: Stateless deterministic random number generation using the Philox
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 8.0.0
 Suggests: 
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
+Config/roxygen2/version: 8.1.0

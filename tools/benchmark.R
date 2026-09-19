@@ -1,18 +1,18 @@
-# Comprehensive RNG benchmark: rngat against the popular R generators.
+# Comprehensive RNG benchmark: zurand against the popular R generators.
 #
 # Run against the INSTALLED package (R CMD INSTALL, -O2); a
-# pkgload::load_all() debug build understates rngat -- see CLAUDE.md.
+# pkgload::load_all() debug build understates zurand -- see CLAUDE.md.
 #
 #   R CMD INSTALL . && Rscript tools/benchmark.R
 #
 # Most competitors are single-threaded at the R level (base R, randompack,
 # dqrng, sitmo, RcppZiggurat); rTRNG also parallelizes, via its parallelGrain
 # argument. Each metric is shown twice: first with the threading generators
-# (rngat, rTRNG) held to one thread -- algorithm vs algorithm -- then with
+# (zurand, rTRNG) held to one thread -- algorithm vs algorithm -- then with
 # threading allowed. The purely single-threaded packages are repeated in both
 # tables unchanged, as a fixed yardstick.
 
-library(rngat)
+library(zurand)
 
 required <- c("randompack", "dqrng", "sitmo", "RcppZiggurat", "rTRNG", "bench")
 missing <- required[!vapply(required, requireNamespace, logical(1),
@@ -63,11 +63,11 @@ mark <- function(...)
 restore_threads <- rng_threads()
 on.exit(rng_threads(restore_threads))
 
-cat("rngat effective max threads:", rng_threads(), "\n")
+cat("zurand effective max threads:", rng_threads(), "\n")
 
 # ============================ UNIFORM =======================================
 uniform_bench <- function(trng_grain) mark(
-  rngat      = rng_uniform(key, n),
+  zurand      = rng_uniform(key, n),
   randompack = rp$unif(len = n),
   dqrng      = dqrunif(n),
   base_R     = runif(n),
@@ -79,7 +79,7 @@ rng_threads(1L)
 show("UNIFORM, single thread", uniform_bench(0L))
 
 rng_threads(0L)
-show("UNIFORM, threading allowed (only rngat & rTRNG scale)",
+show("UNIFORM, threading allowed (only zurand & rTRNG scale)",
      uniform_bench(TRNG_GRAIN))
 
 # ============================ NORMAL ========================================
@@ -91,7 +91,7 @@ show("UNIFORM, threading allowed (only rngat & rTRNG scale)",
 #   zrnormQL  - Gretl / QuantLib
 # plus dqrng and randompack, which are ziggurat too.
 normal_bench <- function(trng_grain) mark(
-  rngat          = rng_normal(key, n),
+  zurand          = rng_normal(key, n),
   randompack     = rp$normal(len = n),
   dqrng          = dqrnorm(n),
   base_inversion = rnorm(n),
@@ -106,5 +106,5 @@ rng_threads(1L)
 show("NORMAL, single thread", normal_bench(0L))
 
 rng_threads(0L)
-show("NORMAL, threading allowed (only rngat & rTRNG scale)",
+show("NORMAL, threading allowed (only zurand & rTRNG scale)",
      normal_bench(TRNG_GRAIN))

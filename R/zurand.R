@@ -137,11 +137,11 @@ rng_bits <- function(key, n = 1L, bits = 32L) {
   .Call(C_rng_bits, key, n, bits)
 }
 
-#' Control rngat's thread usage
+#' Control zurand's thread usage
 #'
 #' `rng_threads()` reports the maximum number of OpenMP threads the samplers
 #' may use; `rng_threads(threads)` caps it for the rest of the session. The
-#' cap applies only to rngat's own parallel fills, not to other OpenMP code
+#' cap applies only to zurand's own parallel fills, not to other OpenMP code
 #' in the process. Results never depend on the thread count, so this is a
 #' performance control, not a reproducibility one. In builds without OpenMP
 #' the value is always 1 and setting a cap has no effect.
@@ -149,7 +149,7 @@ rng_bits <- function(key, n = 1L, bits = 32L) {
 #' Draws below an internal size threshold always run single-threaded.
 #'
 #' @param threads `NULL` to query the effective maximum, a single whole
-#'   number of at least 1 to cap rngat's thread use, or `0` to remove the
+#'   number of at least 1 to cap zurand's thread use, or `0` to remove the
 #'   cap. Values above the machine's thread count are allowed and
 #'   equivalent to no cap.
 #' @return Querying returns the effective maximum thread count as an

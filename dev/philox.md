@@ -42,7 +42,7 @@ A variant name like `philox4x64` reads as: the counter is **4 words of 64 bits**
 ² Philox4x32 with 7 rounds once showed suspicious p-values in very long statistical tests; 8+ is considered clean.
 ³ See [Portability of the 64-bit variants](#portability-of-the-64-bit-variants).
 
-rngat uses **`philox4x64`** with the default 10 rounds ("Philox4x64-10").
+zurand uses **`philox4x64`** with the default 10 rounds ("Philox4x64-10").
 
 ## C API
 
@@ -112,9 +112,9 @@ The heart of each Philox round is a "mulhilo": multiply two W-bit numbers and ke
 2. the GCC/Clang extension type `__uint128_t` (available on all 64-bit x86 and ARM — every platform CRAN currently builds for), or
 3. a portable pure-C fallback that emulates the wide multiply with four 32-bit multiplies (`R123_USE_MULHILO64_C99`) — slower, but works anywhere.
 
-If none of these is enabled, the `x64` variants simply don't exist (the flag `R123_USE_PHILOX_64BIT` ends up 0 and their types/functions are not compiled). **rngat force-enables the fallback** in [src/Makevars](../src/Makevars) (`-DR123_USE_MULHILO64_C99=1`) so `philox4x64` builds even on unusual 32-bit targets; on normal machines the faster `__uint128_t` path still wins because it is earlier in the preference order.
+If none of these is enabled, the `x64` variants simply don't exist (the flag `R123_USE_PHILOX_64BIT` ends up 0 and their types/functions are not compiled). **zurand force-enables the fallback** in [src/Makevars](../src/Makevars) (`-DR123_USE_MULHILO64_C99=1`) so `philox4x64` builds even on unusual 32-bit targets; on normal machines the faster `__uint128_t` path still wins because it is earlier in the preference order.
 
-## C++ API (not used by rngat)
+## C++ API (not used by zurand)
 
 The header also contains a C++ layer, compiled only when included from C++. It wraps the same functions in small function-object classes:
 
@@ -123,7 +123,7 @@ r123::PhiloxNxW_R<ROUNDS>   // rng(ctr, key) via operator()
 r123::PhiloxNxW             // = PhiloxNxW_R<10>
 ```
 
-These exist to plug into Random123's C++ adapter headers (`MicroURNG.hpp`, `uniform.hpp`, …), none of which are vendored into rngat.
+These exist to plug into Random123's C++ adapter headers (`MicroURNG.hpp`, `uniform.hpp`, …), none of which are vendored into zurand.
 
 ## Minimal C example, line by line
 
@@ -136,7 +136,7 @@ philox4x64_ctr_t r = philox4x64(c, k);           /* 10 rounds; r is a fresh stru
 /* r.v[0], r.v[1], r.v[2], r.v[3] are 4 independent uniform uint64s */
 ```
 
-This is essentially the construction rngat uses (see `rngat_block()` in [src/rngat.c](../src/rngat.c)); the one refinement is that rngat packs **four** logical output positions into each block instead of using only `r.v[0]` (see below). The R-facing consequences:
+This is essentially the construction zurand uses (see `zurand_block()` in [src/zurand.c](../src/zurand.c)); the one refinement is that zurand packs **four** logical output positions into each block instead of using only `r.v[0]` (see below). The R-facing consequences:
 
 - `rng_uniform(key, n)` evaluates output positions `0:(n - 1)` under the uniform purpose, picks word `position & 3`, and turns the top 53 bits into a double in (0, 1) — 53 because that is the precision of an R double's mantissa.
 - `rng_uniform()`, `rng_normal()` and `rng_integer()` can optionally fill different key columns in parallel with OpenMP. Threaded loops do not call R API; they only read validated key words and write primitive output.
@@ -145,9 +145,9 @@ This is essentially the construction rngat uses (see `rngat_block()` in [src/rng
 - `rng_fold(key, data)` hashes typed data to a 64-bit value, evaluates a fold-purpose block, and uses `r.v[0]`, `r.v[1]` as the derived key.
 - An `rng_key` in R is an opaque integer matrix with one key per row and four 32-bit words per key: `{k0 low, k0 high, k1 low, k1 high}`. The C code copies these by bit pattern because R's integer type is signed and reserves one bit pattern for `NA`.
 
-## How rngat lays out the counter
+## How zurand lays out the counter
 
-Philox itself attaches no meaning to the counter — it is just 256 bits of input, and flipping *any* bit of it yields a statistically unrelated output block. rngat assigns one role to each 64-bit word:
+Philox itself attaches no meaning to the counter — it is just 256 bits of input, and flipping *any* bit of it yields a statistically unrelated output block. zurand assigns one role to each 64-bit word:
 
 | Word | Name | Set by | Meaning |
 |---|---|---|---|
@@ -160,7 +160,7 @@ The public API no longer exposes arbitrary counters. Users pass immutable key ve
 
 ### Four values per block
 
-A `philox4x64` call produces 256 bits — four `uint64` words — but a single uniform or ziggurat normal draw needs only one word. Using just `r.v[0]` and discarding the other three words would waste 3/4 of the generator's work. Instead rngat maps four consecutive logical positions onto one block:
+A `philox4x64` call produces 256 bits — four `uint64` words — but a single uniform or ziggurat normal draw needs only one word. Using just `r.v[0]` and discarding the other three words would waste 3/4 of the generator's work. Instead zurand maps four consecutive logical positions onto one block:
 
 ```
 word_at(position, purpose) =
@@ -171,15 +171,15 @@ So `position` is split into a **block number** (`position >> 2`, i.e. `position 
 
 ### The `purpose` word: domain separation
 
-`purpose` (constants `RNGAT_PURPOSE_*` in [src/rngat.c](../src/rngat.c)) partitions the counter space by use:
+`purpose` (constants `ZURAND_PURPOSE_*` in [src/zurand.c](../src/zurand.c)) partitions the counter space by use:
 
 | Value | Constant | Used by |
 |---|---|---|
-| 0 | `RNGAT_PURPOSE_BITS` | `rng_bits()` |
-| 1 | `RNGAT_PURPOSE_UNIFORM` | `rng_uniform()` |
-| 2 | `RNGAT_PURPOSE_NORMAL` | `rng_normal()` |
-| 3 | `RNGAT_PURPOSE_INTEGER` | `rng_integer()` |
-| 4 | `RNGAT_PURPOSE_FOLD` | `rng_fold()` |
+| 0 | `ZURAND_PURPOSE_BITS` | `rng_bits()` |
+| 1 | `ZURAND_PURPOSE_UNIFORM` | `rng_uniform()` |
+| 2 | `ZURAND_PURPOSE_NORMAL` | `rng_normal()` |
+| 3 | `ZURAND_PURPOSE_INTEGER` | `rng_integer()` |
+| 4 | `ZURAND_PURPOSE_FOLD` | `rng_fold()` |
 
 **The bug it prevents.** Suppose `rng_fold()` simply evaluated Philox in the same purpose region that value draws use. Folded keys would be made from output words that a sampler could also expose through `rng_bits()` or transform through `rng_uniform()`. Anything downstream of the derived key would then be correlated with visible draws from the parent key — a subtle, hard-to-detect statistical defect. With a distinct fold purpose, key derivation reads from a disjoint region of counter space.
 
@@ -187,4 +187,4 @@ The same logic applies to distribution families. Domain-separated purposes make 
 
 **Extensibility.** The word also leaves room to grow: a future feature that needs its own dedicated bit-stream — say, a distribution that consumes more than 64 bits per variate, or an internal shuffling primitive — can claim a fresh `purpose` value and is automatically independent of everything already defined. The fixed `v[3] = 0` word is the same idea held in reserve: one entire spare 64-bit dimension, at zero cost.
 
-**Rule for contributors:** any new use of `rngat_block()` must use a purpose value that matches its operation. A new operation gets a fresh purpose.
+**Rule for contributors:** any new use of `zurand_block()` must use a purpose value that matches its operation. A new operation gets a fresh purpose.

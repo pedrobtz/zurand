@@ -2,6 +2,6 @@
 "_PACKAGE"
 
 ## usethis namespace: start
-#' @useDynLib rngat, .registration = TRUE
+#' @useDynLib zurand, .registration = TRUE
 ## usethis namespace: end
 NULL
