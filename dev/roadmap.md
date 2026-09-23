@@ -8,6 +8,11 @@ across thread counts, platforms and call order.
 This document is the plan. `dev/benchmark-baseline.md` holds the numbers it
 is measured against; `tools/benchmark.R` regenerates them.
 
+Two documents feed the next revision of this plan: `dev/review-2026-09-23.md`
+reviews the package and this roadmap against the goal, and
+`dev/ecosystem-survey.md` records what other RNG ecosystems do that zurand
+does not. The proposed reshaping is summarised at the end of this file.
+
 ---
 
 ## 0. What "fastest" means here
@@ -407,3 +412,31 @@ so each chunk gets contiguous vector stores instead of a 4 KiB scatter.
 5.3  Gaussian gains least, as predicted -- it is bounded by the scalar
      ziggurat, not by word generation. A SIMD-friendly transform remains a
      research problem rather than an optimisation.
+
+## Proposed revision (2026-09-23, from the review and the survey)
+
+Not yet adopted; recorded here so the plan and its critique live together.
+Details and evidence are in `dev/review-2026-09-23.md` (§3-4) and
+`dev/ecosystem-survey.md` (§2-3).
+
+**Reframe around one stream-freeze milestone.** Every output-affecting
+change lands before it, the golden files are regenerated once with a
+commit that says so, and after it the "default stream never changes"
+principle applies for good.
+
+| milestone | contents |
+|---|---|
+| **A. Stream freeze** | fix the `rng_integer()` signed overflow; domain-separate the xoshiro seed from the philox stream (reserved counter word); `-ffp-contract=off` plus an aarch64 Linux CI leg; packed ziggurat table (1.2); fused `mean`/`sd` (1.3) designed for vector parameters; `offset` argument on every sampler; vector `mean`/`sd`/`min`/`max`; stream-format version on keys; whole-stream digest test for `rng_normal()`; add `xoshiro256pp` to the audit workflow and run the long PractRand audit on it; microbenchmark squares64 as a counter-based alternative; then decide the default engine (recommendation: `xoshiro256pp` unless squares64 is within 10% of it) |
+| **B. v0.1.0** | C API with `R_RegisterCCallable()` and a `LinkingTo` header; vignettes "why stateless" and "performance"; README benchmark table with platform header, single- and all-threads, randompack run on its fastest engine; NEWS; pkgdown; CRAN two-core compliance check; version bump; `cran-comments.md` |
+| **C. After release** (output-neutral or new purpose values) | NEON path and an M-series baseline from CI; AVX2 ziggurat fast-path prototype; `rng_normal(method = "inversion")`; `rng_exponential()`; `rng_permutation()` / `rng_sample()`; user-supplied-RNG bridge; SIMD Box-Muller only if the ziggurat prototype loses; ARS engine only if squares64 disappoints |
+
+**Retire from this document:** Phase 2 items 2.3 and 2.4 (moot after
+Amendment 2), the open question on `philox4x64-7` (rejected), and 3.1 as
+an R-level API (PR #4 was closed for the copy-on-write hazard; the C API
+in milestone B is its replacement). Record both in the decisions log.
+
+**Two caveats the plan should carry.** CRAN macOS binaries are built
+without OpenMP, so the threading headline applies to Linux and Windows and
+the NEON path matters more for Mac users. The primary machine in §0 has
+never produced a baseline; GitHub's `macos-14`+ runners are Apple Silicon
+and the benchmark workflow can produce those numbers today.
