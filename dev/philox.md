@@ -138,7 +138,7 @@ philox4x64_ctr_t r = philox4x64(c, k);           /* 10 rounds; r is a fresh stru
 
 This is essentially the construction zurand uses (see `zurand_block()` in [src/zurand.c](../src/zurand.c)); the one refinement is that zurand packs **four** logical output positions into each block instead of using only `r.v[0]` (see below). The R-facing consequences:
 
-- `rng_uniform(key, n)` evaluates output positions `0:(n - 1)` under the uniform purpose, picks word `position & 3`, and turns the top 53 bits into a double in (0, 1) — 53 because that is the precision of an R double's mantissa.
+- `rng_uniform(key, n)` evaluates output positions `0:(n - 1)` under the uniform purpose, picks word `position & 3`, and turns the top 52 bits into a double strictly inside (0, 1): the 52 bits fill the mantissa of a double in [1, 2), and subtracting `1 - 2^-53` gives exactly `(m + 0.5) * 2^-52`, so neither endpoint is reachable.
 - `rng_uniform()`, `rng_normal()` and `rng_integer()` can optionally fill different key columns in parallel with OpenMP. Threaded loops do not call R API; they only read validated key words and write primitive output.
 - `rng_normal()` uses a ziggurat sampler (NumPy's tables, vendored in `src/numpyzig/`): each of the block's four words decides one draw on the fast path, and the rare wedge/tail rejections draw extra words at `(index, attempt >= 1)` in the domain slot, so draw `i` remains a pure function of `(key, i)`. It uses a separate purpose value, so accidental key reuse does not read the identical counter slice used by other sampler families.
 - `rng_integer()` and `rng_bits()` use the same position layout as `rng_uniform()` but separate purpose values.
