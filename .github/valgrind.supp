@@ -1,0 +1,18 @@
+# libgomp keeps its worker threads alive for the life of the process and never
+# joins them, so glibc's per-thread TLS block (allocated in pthread_create)
+# is still referenced only from the thread's own stack when R exits. Valgrind
+# reports each one as "possibly lost": 368 bytes per worker, one per core
+# beyond the first. Not a zurand leak and not fixable from here.
+#
+# Needed since r-actions turned on --leak-check=full by default, which counts
+# possibly-lost blocks in ERROR SUMMARY.
+{
+   libgomp-thread-pool-tls
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:calloc
+   ...
+   fun:_dl_allocate_tls
+   ...
+   fun:GOMP_parallel
+}

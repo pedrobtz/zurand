@@ -18,3 +18,13 @@ jobs:
     # mulhilo64 fallback that src/Makevars defines R123_USE_MULHILO64_C99 for;
     # every other leg in CI has __uint128_t and takes the fast path.
     uses: pedrobtz/r-actions/.github/workflows/arch.yml@v1
+    with:
+      # The default resolves dependencies with
+      # tools::package_dependencies(".", db = installed.packages()), and "."
+      # is never a row of that db, so it installs nothing and the tests die
+      # on library(testthat). Read DESCRIPTION directly instead.
+      install-dependencies: >-
+        Rscript -e 'd <- read.dcf("DESCRIPTION", c("Depends", "Imports", "LinkingTo", "Suggests"));
+        p <- trimws(sub("[(].*", "", unlist(strsplit(d[!is.na(d)], ","))));
+        p <- setdiff(p[nzchar(p)], c("R", rownames(installed.packages())));
+        if (length(p)) install.packages(p, repos = "https://cloud.r-project.org")'
