@@ -18,3 +18,23 @@ jobs:
     # mulhilo64 fallback that src/Makevars defines R123_USE_MULHILO64_C99 for;
     # every other leg in CI has __uint128_t and takes the fast path.
     uses: pedrobtz/r-actions/.github/workflows/arch.yml@v1
+    with:
+      # The default targets, plus the system libraries testthat's dependency
+      # tree needs when built from source: fs links libuv, and ps includes
+      # <linux/types.h>, which Alpine ships separately from musl-dev.
+      targets: >-
+        [{"name": "i386", "platform": "linux/386",
+          "image": "i386/debian:bookworm",
+          "setup": "apt-get update && apt-get install -y --no-install-recommends r-base-dev libuv1-dev"},
+         {"name": "musl", "platform": "linux/amd64",
+          "image": "alpine:3.21",
+          "setup": "apk add --no-cache R R-dev R-doc build-base libuv-dev linux-headers"}]
+      # The default resolves dependencies with
+      # tools::package_dependencies(".", db = installed.packages()), and "."
+      # is never a row of that db, so it installs nothing and the tests die
+      # on library(testthat). Read DESCRIPTION directly instead.
+      install-dependencies: >-
+        Rscript -e 'd <- read.dcf("DESCRIPTION", c("Depends", "Imports", "LinkingTo", "Suggests"));
+        p <- trimws(sub("[(].*", "", unlist(strsplit(d[!is.na(d)], ","))));
+        p <- setdiff(p[nzchar(p)], c("R", rownames(installed.packages())));
+        if (length(p)) install.packages(p, repos = "https://cloud.r-project.org")'
