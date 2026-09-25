@@ -18,6 +18,10 @@ jobs:
 
   valgrind:
     uses: pedrobtz/r-actions/.github/workflows/valgrind.yml@v1
+    with:
+      # libgomp's pooled worker threads keep their TLS until exit, which
+      # --leak-check=full reports as "possibly lost". See the file.
+      suppressions: .github/valgrind.supp
 
   lto:
     uses: pedrobtz/r-actions/.github/workflows/lto.yml@v1
