@@ -161,6 +161,16 @@ typedef enum { ZURAND_ENG_PHILOX = 0, ZURAND_ENG_THREEFRY = 1,
 #define ZURAND_PURPOSE_INTEGER ((uint64_t)3)
 #define ZURAND_PURPOSE_FOLD    ((uint64_t)4)
 
+/* Counter word 3: which engine a Philox evaluation is made on behalf of.
+ * The xoshiro engine is keyed by Philox keys and draws its sub-chunk
+ * seeds and its retry words from Philox; without its own tag those were
+ * the philox engine's own blocks, so for any key the xoshiro stream was a
+ * function of the philox stream (xoshiro's first word for rng_key(42) was
+ * rotl(s0 + s3, 23) + s0 of philox's first block). Threefry is a
+ * different permutation and needs no tag. See dev/design.md, section 3.2. */
+#define ZURAND_TAG_PHILOX      ((uint64_t)0)
+#define ZURAND_TAG_XOSHIRO     ((uint64_t)1)
+
 #define ZURAND_OMP_MIN_VALUES ((R_xlen_t)32768)
 
 /* Package-local OpenMP thread cap set by rng_threads(); 0 means "no cap"
@@ -494,7 +504,7 @@ R123_STATIC_INLINE uint64_t zurand_rotl64(uint64_t x, int k) {
 
 R123_STATIC_INLINE void xoshiro_seed(philox4x64_key_t key, uint64_t sub,
                                      uint64_t purpose, uint64_t *st) {
-    philox4x64_ctr_t ctr = {{sub, 0, purpose, 0}};
+    philox4x64_ctr_t ctr = {{sub, 0, purpose, ZURAND_TAG_XOSHIRO}};
     philox4x64_ctr_t r = philox4x64_R(10, ctr, key);
     st[0] = r.v[0]; st[1] = r.v[1]; st[2] = r.v[2]; st[3] = r.v[3];
     /* xoshiro cannot leave the all-zero state; Philox reaching it has
@@ -642,6 +652,7 @@ static void chunk_words_xoshiro(philox4x64_key_t key, uint64_t c,
 #define ZE_KEY_T  philox4x64_key_t
 #define ZE_CHUNK_WORDS (ZURAND_CHUNK_WORDS * ZURAND_XOSHIRO_LANES)
 #define ZE_GEN(c, k) philox4x64_R(10, (c), (k))
+#define ZE_TAG ZURAND_TAG_XOSHIRO
 #define ZE_CUSTOM_CHUNK 1
 #include "zurand_engine.h"
 

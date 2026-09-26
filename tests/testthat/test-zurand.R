@@ -322,3 +322,16 @@ test_that("invalid inputs error cleanly", {
   expect_error(rng_fold(key, 1.5), "whole numbers")
   expect_error(rng_fold(key, list("x")), "character, integer, double")
 })
+
+test_that("the xoshiro engine's stream is not a function of philox's", {
+  # Before the engine tag in counter word 3, xoshiro seeded sub-chunk s from
+  # the philox engine's own block s, so its first word for rng_key(42) was
+  # exactly rotl(s0 + s3, 23) + s0 of philox's first block:
+  # 1b56f8cdd2f1eb5e. Pin that it no longer is, and that the philox stream
+  # itself did not move.
+  expect_identical(rng_bits(rng_key(42L), 4L, bits = 64L),
+                   c("c0e6592123d7a06c", "0c89edc8a3ba5356",
+                     "6eb27f65d390675b", "73af8b93bd67b8f2"))
+  x <- rng_bits(rng_key(42L, engine = "xoshiro256pp"), 1L, bits = 64L)
+  expect_false(identical(x, "1b56f8cdd2f1eb5e"))
+})

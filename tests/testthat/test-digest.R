@@ -33,16 +33,18 @@ stream_md5 <- function(x) {
   unname(tools::md5sum(f))
 }
 
-# Computed 2026-09-26 on macOS x86_64 with the fdlibm port. They equal what
-# every glibc and musl leg produced with the system libm before the port.
+# Computed 2026-09-26 on macOS x86_64 with the fdlibm port. The philox and
+# threefry digests equal what every glibc and musl leg produced with the
+# system libm before the port; the xoshiro-keyed ones were regenerated when
+# the xoshiro engine got its own counter tag (dev/design.md, section 3.2).
 digest_normal <- c(
-  xoshiro256pp = "9eccc23f9c7d988a196d112536bc4005",
+  xoshiro256pp = "47dbe72c26c885915260b168f01bae0a",
   philox4x64   = "de08c301e6229eb344d9c570dcf23535",
   threefry4x64 = "257bbe55425f91e66d2302cd6b3660fe"
 )
-digest_normal_scaled  <- "ffbbbb67a063ad94af2180cc5425cc3b"
-digest_uniform_scaled <- "5a74357222df42c83f569102ead0c79e"
-digest_integer        <- "0c68ddc22108c826117675ace3faa71c"
+digest_normal_scaled  <- "3db5888105cfe7d7d34d1c01491dd4fc"
+digest_uniform_scaled <- "685b24f007ecea32b544a1cb9495699f"
+digest_integer        <- "e76d991a8fbdce2645b8f69bf06f6852"
 
 test_that("rng_normal() streams agree bit for bit, libm paths included", {
   skip_if_x87()

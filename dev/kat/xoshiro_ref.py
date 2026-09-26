@@ -15,10 +15,12 @@ def xoshiro256pp(state, n):
         out.append(r)
     return out
 
-# zurand's chunk seeding: Philox at {chunk, 0, purpose, 0} gives the state,
-# with the all-zero guard.
+# zurand's chunk seeding: Philox at {chunk, 0, purpose, 1} gives the state,
+# with the all-zero guard. The final 1 is the xoshiro engine tag in counter
+# word 3, which keeps these seeds apart from the philox engine's own blocks.
+XOSHIRO_TAG = 1
 def zurand_xoshiro_chunk(philox4x64, key, chunk, purpose, nwords):
-    st = philox4x64([chunk, 0, purpose, 0], key, 10)
+    st = philox4x64([chunk, 0, purpose, XOSHIRO_TAG], key, 10)
     if (st[0] | st[1] | st[2] | st[3]) == 0: st[0] = 1
     return xoshiro256pp(st, nwords)
 
