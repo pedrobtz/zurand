@@ -301,7 +301,9 @@ static void ZE_N(fill_integer_column)(int *out, R_xlen_t n, ZE_KEY_T key,
             if (!lemire_accept((uint32_t)buf[j], range, threshold, &offset))
                 offset = ZE_N(bounded_u32_retry)(key, (uint64_t)(w0 + j),
                                                  range, threshold);
-            o[j] = min + (int)offset;
+            /* offset can exceed INT_MAX when max - min >= 2^31; the sum
+             * itself lies in [min, max], so widen, add, then narrow. */
+            o[j] = (int)((int64_t)min + (int64_t)offset);
         }
     }
 }
