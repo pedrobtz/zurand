@@ -25,3 +25,27 @@ equality with the scalar engine before timing anything.
 Parse the output on the field before `M/s`, not on `$3` -- labels contain
 spaces, and both earlier attempts to summarise these runs with `awk`
 silently read the wrong column.
+
+## Second pass, x86 (2026-09-26)
+
+The harnesses behind the roadmap's "x86 analysis, second pass". All
+self-contained C except the two R scripts; build lines are in each header.
+
+- `fuse_normal.c`: where a normal fill's time goes and whether fusing the
+  AVX2 generator with the ziggurat transform helps (it does not), plus
+  non-temporal stores on fresh memory (slower). Reused buffer and fresh
+  `malloc()` per repetition, as R allocates.
+- `pagefault.c`: what a fresh 80 MB vector costs on this kernel, with and
+  without huge pages (`MADV_HUGEPAGE`, `MADV_NOHUGEPAGE`,
+  `MADV_POPULATE_WRITE`). The 4 KiB-page row is what a `madvise`-mode
+  system pays without the hint that #42 added.
+- `avx512.c`: 8-lane AVX-512 xoshiro with `vprolq` and an 8x8 transpose,
+  asserted word-equal to the AVX2 path, round robin against it. Runs only
+  where the CPU has avx512f and avx512dq.
+- `zig_slow.c`: the slow path taken apart -- how often a rejected draw
+  reaches `exp()` (about 6% of wedge tests), and `zurand_exp`/`log1p`
+  against libm.
+- `norm_ab.R`: normal-only same-machine A/B of two installed builds
+  (`lib-a`, `lib-b`), one thread, ten alternating rounds.
+- `ab_thp.R`: the huge-page experiment at the R level, one build run with
+  `ZURAND_THP=off|no|huge` (the switch existed only on that branch).
