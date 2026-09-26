@@ -11,8 +11,9 @@ rng_simd(enable = NULL)
 \code{TRUE} to go back to using whatever the CPU supports.}
 }
 \value{
-A string: \code{"avx2"} if the vectorised path is active, otherwise
-\code{"none"}. When setting, the previous value, invisibly.
+A string: \code{"avx2"} (x86_64 with AVX2) or \code{"neon"} (arm64) if the
+vectorised path is active, otherwise \code{"none"}. When setting, the
+previous value, invisibly.
 }
 \description{
 \code{rng_simd()} reports which instruction path the \code{"xoshiro256pp"} engine
@@ -20,8 +21,9 @@ is using; \code{rng_simd(FALSE)} forces the portable one.
 }
 \details{
 This is a performance control and nothing else. Both paths emit the same
-values: the vectorised one runs four independent 512-value sub-chunks in
-four lanes, each executing the same recurrence as the scalar path, so
+values: the vectorised one runs several independent 512-value sub-chunks
+side by side -- four per AVX2 register on x86_64, two per NEON register
+on arm64 -- each executing the same recurrence as the scalar path, so
 output does not depend on the instruction set, the CPU, or this setting.
 It is exposed because that claim is worth being able to check, and the
 package's own tests check it by running both and comparing.
@@ -33,5 +35,5 @@ are unaffected, as is every other function.
 rng_simd()
 old <- rng_simd(FALSE)
 identical(rng_uniform(rng_key(1L, engine = "xoshiro256pp"), 4L),
-          { rng_simd(old == "avx2"); rng_uniform(rng_key(1L, engine = "xoshiro256pp"), 4L) })
+          { rng_simd(old != "none"); rng_uniform(rng_key(1L, engine = "xoshiro256pp"), 4L) })
 }
