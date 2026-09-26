@@ -8,7 +8,7 @@ test_that("rng_key() is deterministic and opaque", {
   expect_equal(dim(unclass(keys)), c(4L, 4L))
   expect_identical(length(key), 1L)
   expect_identical(length(keys), 4L)
-  expect_identical(attr(key, "engine"), "philox4x64")
+  expect_identical(attr(key, "engine"), "xoshiro256pp")
   expect_identical(key, rng_key(42L))
   expect_identical(keys[1L], key)
   expect_s3_class(keys[[2L]], "rng_key")
@@ -329,7 +329,7 @@ test_that("the xoshiro engine's stream is not a function of philox's", {
   # exactly rotl(s0 + s3, 23) + s0 of philox's first block:
   # 1b56f8cdd2f1eb5e. Pin that it no longer is, and that the philox stream
   # itself did not move.
-  expect_identical(rng_bits(rng_key(42L), 4L, bits = 64L),
+  expect_identical(rng_bits(rng_key(42L, engine = "philox4x64"), 4L, bits = 64L),
                    c("c0e6592123d7a06c", "0c89edc8a3ba5356",
                      "6eb27f65d390675b", "73af8b93bd67b8f2"))
   x <- rng_bits(rng_key(42L, engine = "xoshiro256pp"), 1L, bits = 64L)

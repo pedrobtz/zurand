@@ -59,7 +59,7 @@ seed <- 42L
 TRNG_GRAIN <- 65536L  # rTRNG chunk size; parallelGrain = 0 runs it serially
 
 # seed every generator so runs are reproducible
-key <- rng_key(seed)
+key <- rng_key(seed, engine = "philox4x64")
 key_tf <- rng_key(seed, engine = "threefry4x64")
 key_xo <- rng_key(seed, engine = "xoshiro256pp")
 rp <- randompack::randompack_rng("philox")

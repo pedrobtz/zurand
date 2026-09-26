@@ -36,7 +36,7 @@ test_that("rng_bits() matches an independent Philox across keys and blocks", {
 
   # seed 42  ->  k0 = bdd732262feb6e95, k1 = 28efe333b266f103
   expect_identical(
-    as.character(rng_bits(rng_key(42L), 12L, bits = 64L)),
+    as.character(rng_bits(rng_key(42L, engine = "philox4x64"), 12L, bits = 64L)),
     c(
       "c0e6592123d7a06c", "0c89edc8a3ba5356", "6eb27f65d390675b",
       "73af8b93bd67b8f2", "ef5187b4d040f49c", "aa17f09827274d47",
@@ -46,7 +46,7 @@ test_that("rng_bits() matches an independent Philox across keys and blocks", {
 
   # seed 1  ->  k0 = 910a2dec89025cc1, k1 = beeb8da1658eec67
   expect_identical(
-    as.character(rng_bits(rng_key(1L), 12L, bits = 64L)),
+    as.character(rng_bits(rng_key(1L, engine = "philox4x64"), 12L, bits = 64L)),
     c(
       "19078d6eed2ba664", "0af0eeb0cc695abb", "2f3332a64d618318",
       "9c8f286371b85d0b", "ace918e832800829", "01b0dbae3278fa01",
@@ -56,7 +56,7 @@ test_that("rng_bits() matches an independent Philox across keys and blocks", {
 
   # seed 2026  ->  k0 = db9c559891948d23, k1 = 78bc927ded35455d
   expect_identical(
-    as.character(rng_bits(rng_key(2026L), 12L, bits = 64L)),
+    as.character(rng_bits(rng_key(2026L, engine = "philox4x64"), 12L, bits = 64L)),
     c(
       "b2fd63df6e08d008", "27ec210dbef4c866", "aef1b7a014abcaf6",
       "4fc706007c9294de", "c2c036d9dc9703f3", "bf3638e775d28826",

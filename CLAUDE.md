@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What zurand is
 
-`zurand` provides stateless random numbers for R, built on the vendored **Random123** library. Three engines: `philox4x64` (Philox4x64-10, the default), `threefry4x64` (Threefry4x64-13), and `xoshiro256pp`, a hybrid in which Philox derives a fresh xoshiro256++ state for each 512-value sub-chunk. Every value is a pure function of an immutable key plus sampler arguments; ordinary samplers never read or mutate `.Random.seed`.
+`zurand` provides stateless random numbers for R, built on the vendored **Random123** library. Three engines: `xoshiro256pp` (the default since the stream freeze), a hybrid in which Philox derives a fresh xoshiro256++ state for each 512-value sub-chunk; `philox4x64` (Philox4x64-10); and `threefry4x64` (Threefry4x64-13). Tests and generators that pin values must name their engine: a bare `rng_key(seed)` means whatever the default is. Every value is a pure function of an immutable key plus sampler arguments; ordinary samplers never read or mutate `.Random.seed`.
 
 Exported API:
 
-- `rng_key(seed, n = 1, engine = c("philox4x64", "threefry4x64", "xoshiro256pp"))` creates an opaque S3 vector of keys; a key records its engine.
+- `rng_key(seed, n = 1, engine = c("xoshiro256pp", "philox4x64", "threefry4x64"))` creates an opaque S3 vector of keys; a key records its engine.
 - `rng_fold(key, data)` derives one key per input key from typed data such as strings or whole-number counters.
 - `rng_uniform()`, `rng_normal()`, `rng_integer()` and `rng_bits()` are pure samplers.
 - `rng_key_from_r()` is the one convenience function that intentionally consumes R's global RNG state.
