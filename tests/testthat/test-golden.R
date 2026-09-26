@@ -72,6 +72,14 @@ test_that("rng_integer() is bit-stable, including the rejection path", {
       352578979L, 449361876L, 108978621L, 1398085695L, 1538485321L,
       638067389L, 977655369L, 980169362L
     ))
+
+  # A range wider than 2^31: the offset above min no longer fits an int, so
+  # this is the case that must not be computed as min + (int)offset.
+  expect_identical(rng_integer(rng_key(42L), 8L, min = -2000000000L, max = 2000000000L),
+    c(
+      -1294842043L, -1101276249L, -1782042759L, 796171389L, 1076970642L,
+      -723865223L, -44689263L, -39661276L
+    ))
 })
 
 test_that("rng_fold() derives stable keys", {
