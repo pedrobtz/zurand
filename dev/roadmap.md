@@ -77,11 +77,11 @@ the golden files.
 
 | # | task | why / evidence | verify |
 |--:|---|---|---|
-| A1 | **Add an `ubuntu-24.04-arm` leg to R-CMD-check** | GCC contracts `a + b * c` into an FMA by default on aarch64 and ignores the `FP_CONTRACT` pragma, so the golden tests are expected to **fail** there today. No leg covers GCC on aarch64 | the leg runs and its failure (or pass) is recorded |
-| A2 | **Forbid contraction on GCC** (design §3.4 item 4), by whichever mechanism passes `R CMD check --as-cran` without a non-portable-flag note | a bug fix: it restores the contract on builds that break it today | A1 green |
-| A3 | **Whole-stream digest test**: a hash of `rng_normal(key, 1e7)` (and uniform, integer) bit patterns, checked on every CI leg | the tail calls libm `log1p()` and the wedge fallback calls `exp()`; eight pinned tail values do not show that glibc, musl, macOS and UCRT agree on the ~thousands of libm calls in a 1e7 fill | digest identical on every leg, i386 included |
-| A4 | **If A3 disagrees anywhere**: vendor musl's `exp`/`log1p` (MIT) under `src/` | deterministic C under the no-contraction rule, so identical everywhere | A3 green |
-| A5 | **`rng_integer()` signed overflow**: `(int)((int64_t)min + offset)`, plus a golden case at `min = -2e9, max = 2e9` | UB for ranges above 2^31 (UBSan-verified in the review); output-neutral | sanitizer leg covers the new case |
+| A1 | ~~Add an `ubuntu-24.04-arm` leg to R-CMD-check~~ **DONE** #19 | GCC contracts `a + b * c` into an FMA by default on aarch64 and ignores the `FP_CONTRACT` pragma, so the golden tests are expected to **fail** there today. No leg covers GCC on aarch64 | the leg runs and its failure (or pass) is recorded |
+| A2 | ~~Forbid contraction on GCC~~ **DONE** #19, with a code-level barrier (design §3.4 item 4) | a bug fix: it restores the contract on builds that break it today | A1 green |
+| A3 | ~~Whole-stream digest test~~ **DONE** #20: a hash of `rng_normal(key, 1e7)` (and uniform, integer) bit patterns, checked on every CI leg | the tail calls libm `log1p()` and the wedge fallback calls `exp()`; eight pinned tail values do not show that glibc, musl, macOS and UCRT agree on the ~thousands of libm calls in a 1e7 fill | digest identical on every leg, i386 included |
+| A4 | ~~Deterministic `exp`/`log1p`~~ **DONE** #20: A3 found Apple/Windows against glibc/musl; fdlibm port in `src/zurand_fdlibm.h` | deterministic C under the no-contraction rule, so identical everywhere | A3 green |
+| A5 | ~~`rng_integer()` signed overflow~~ **DONE** #21: `(int)((int64_t)min + offset)`, plus a golden case at `min = -2e9, max = 2e9` | UB for ranges above 2^31 (UBSan-verified in the review); output-neutral | sanitizer leg covers the new case |
 | A6 | **Engine tag in counter word 3** for every Philox call made on behalf of `xoshiro256pp` (design §3.2) | today xoshiro's stream for a seed is a function of philox's (verified: first word = `rotl(s0+s3,23)+s0` of philox block 0) | new xoshiro KAT; philox and threefry KATs unchanged |
 | A7 | **`stream = 1L` attribute on keys**; samplers reject unknown versions; a missing attribute means 1 | makes a post-release fix possible without breaking saved keys | tests for missing, 1, and 2 (error) |
 | A8 | **Audit `xoshiro256pp`**: add it to `statistical-audit.yml`'s engine choice, add the two cross-key modes (interleaved `rng_key(s, 64)` and interleaved `rng_fold(key, 1:64)`), and run at least 1 TB of bits and 256 GB of `pnorm(rng_normal())` through PractRand | reseeding xoshiro from Philox every 512 words is a novel construction, and 512 MB is a smoke test; the package is used as many short keyed streams, so cross-key correlation is the likeliest weakness | results recorded in `dev/statistical-audit.md`; nothing worse than "unusual" |
@@ -155,15 +155,13 @@ or claims a new argument, purpose value or engine name.
 | 2026-09-19 | SIMD vectorises across sub-chunks, never within one | same bits as scalar, so no stream depends on the ISA |
 | 2026-09-25 | **"the default stream never changes" replaced by one output-changing window, closing at v0.1.0** | the principle predated any users and cost the default its speed; design §2 |
 | 2026-09-25 | squares64 not adopted | 0.62x scalar xoshiro in the two-pass fill; no AVX2 path |
+| 2026-09-26 | no fused multiply-add, enforced in code, not by compiler flag | flags can be overridden by user `CFLAGS` and draw CRAN notes; #19 |
+| 2026-09-26 | fdlibm `exp`/`log1p` instead of the platform libm | platforms disagreed; deterministic beats correctly rounded here; #20 |
+| 2026-09-26 | 32-bit x87 outside the reproducibility contract | double rounding on every add; no CRAN platform since R 4.2.0 |
 | 2026-09-25 | **proposed:** default engine becomes `xoshiro256pp` | 2.4x dqrng on uniform versus 0.96x today; conditional on A6 and A8 |
 
 ## Open questions
 
-- Which A2 mechanism passes `--as-cran` cleanly: a `configure`-emitted
-  `-ffp-contract=off`, a GCC `optimize` attribute, or code-level barriers?
-  Try in that order.
-- Does the i386 (x87) leg agree on the A3 digest, or only on the pinned
-  values it matches today?
 - C API shape: static-inline shims in the header over `R_GetCCallable()`
   (dqrng's pattern) or a struct of function pointers behind one
   `zurand_api()` call? The latter versions more cleanly.

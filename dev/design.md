@@ -128,31 +128,26 @@ These change existing output, so they happen before v0.1.0 or never:
    lost: xoshiro reaches position `p` by seeding sub-chunk `p / 512` and
    stepping at most 511 times, about a microsecond. `offset` (§4) works
    for every engine.
-3. **libm independence of `rng_normal()`.** The tail calls `log1p()` and
-   the wedge fallback calls `exp()` from the platform's libm, and glibc,
-   musl, macOS and UCRT are not all correctly rounded. A disagreement in
-   one ulp changes a draw's accept or reject decision, and so the draw.
-   First measure: a digest of `rng_normal(key, 1e7)` bit patterns on every
-   CI leg. If any leg disagrees, vendor musl's `exp` and `log1p` (MIT,
-   pure C99), which are deterministic under §3.3's arithmetic rules. That
-   changes output on the platforms whose libm differed, so it must land
-   before the freeze.
-4. **Contraction is forbidden on every compiler.** The
-   `#pragma STDC FP_CONTRACT OFF` guard is honoured by clang and ignored
-   by GCC 13 (verified in the review). On aarch64, GCC contracts by
-   default, so rocker images on Apple Silicon and Graviton builds would
-   break the golden tests. This is a bug fix: it restores the contract on
-   builds that currently violate it. The mechanism must also pass
-   `R CMD check --as-cran`, which reports non-portable `-f` flags in
-   `src/Makevars`. The candidates, in order of preference:
-   - `-ffp-contract=off` emitted by a `configure` probe (roadmap 3.3).
-   - A GCC `optimize("fp-contract=off")` attribute on the scaling and
-     ziggurat functions.
-   - Evaluating each affine step through a named temporary with a
-     compiler barrier.
-
-   The gate is an `ubuntu-24.04-arm` R-CMD-check leg, where GCC contracts
-   by default and the golden tests would fail if contraction survived.
+3. **libm independence of `rng_normal()`.** *Done (#20).* Whole-stream
+   digests split CI in two, Apple and Windows against glibc and musl,
+   because a one-ulp difference in the tail's `log1p()` or the wedge's
+   `exp()` flips accept/reject decisions. Neither side is correctly
+   rounded: Apple's `log1p` is off by one ulp on 6% of the calls tested.
+   The ziggurat now uses its own port of fdlibm's `exp` and `log1p`
+   (`src/zurand_fdlibm.h`), a fixed sequence of IEEE operations and the
+   same choice Java's StrictMath made. The resulting stream equals what
+   glibc and musl already produced, so only macOS and Windows output
+   moved.
+4. **Contraction is forbidden on every compiler.** *Done (#19).* GCC
+   ignores `#pragma STDC FP_CONTRACT OFF` and fuses by default on arm64;
+   the new `ubuntu-24.04-arm` leg failed the golden tests by one ulp
+   before the fix. A compiler flag was rejected: R appends the user's
+   `CFLAGS` after the package's, so `-ffp-contract=fast` in a
+   `~/.R/Makevars` would undo it, and `R CMD check` flags any `-f` flag
+   in `src/Makevars`. Instead every product that feeds an addition goes
+   through `zurand_rounded()`, an empty `asm` no compiler sees through,
+   two lanes at a time in the scaling passes so they stay SIMD. No
+   measurable cost. `-ffast-math` stays outside the contract.
 5. **The `stream` attribute on keys** (§3.1). Strictly additive, but cheap
    now and awkward to explain later.
 
@@ -231,9 +226,9 @@ samplers run, since the R entry points become thin wrappers over them.
 | KAT against Random123 vectors, both counter engines | yes | -- |
 | golden values, hex floats, all samplers | yes | regenerate once at the freeze |
 | SIMD = scalar, threads = serial | yes | -- |
-| whole-stream digest, `rng_normal(key, 1e7)` on every CI leg | no | §3.4 item 3 |
+| whole-stream digests, 1e6 draws per case, on every CI leg | **yes** (#20) | -- |
 | golden tests on i386 and musl | **pass**, first run 2026-09-25 (PR #17; before it, the `arch` legs died at `library(testthat)` and the tests had never run there) | keep the weekly leg green |
-| golden tests on GCC + aarch64 | no | §3.4 item 4 |
+| golden tests on GCC + aarch64 | **yes** (#19) | -- |
 | long audit, `xoshiro256pp` | 512 MB smoke run only | at least 1 TB of `rng_bits` and 256 GB of `pnorm(rng_normal())` through PractRand, plus the two cross-key tests below |
 
 The audit must also test **across keys**, because that is how the package
@@ -249,15 +244,14 @@ Bit-identical output for the same key, sampler, arguments and positions:
 - across thread counts, SIMD on or off, `n`, and call order: **guaranteed
   and tested**.
 - across x86_64 and aarch64 on Linux (glibc and musl), macOS and Windows:
-  **guaranteed once §3.4 items 3-4 land**, and tested on every CI leg.
-- on 32-bit x86 with x87 arithmetic: **tested, not yet guaranteed**.
-  Debian's i386 R compiles with `-ffloat-store`, which rounds stores but
-  not intermediates, so rare double-rounding differences in the scaling
-  multiplies remain possible. The pinned golden values, tail draws
-  included, match there (first green `arch` run, 2026-09-25). But pinned
-  values sample a few hundred positions, so the §6 digest test is what
-  upgrades this to guaranteed. If the digest disagrees, force `-msse2
-  -mfpmath=sse` from `configure` on i386, or document the exclusion.
+  **guaranteed**, and tested on every CI leg by golden values and
+  whole-stream digests.
+- on 32-bit x86 with x87 arithmetic: **not guaranteed**. x87 rounds
+  each addition to 64 bits and then to 53 on store, and the digests
+  confirmed the difference (scaled uniform, which uses no libm). No CRAN
+  platform has been 32-bit since R 4.2.0, and Debian's i386 R is the last
+  common source. The `arch` leg still runs there for crashes and
+  undefined behaviour; the digest tests skip.
 - across zurand versions: guaranteed per `(engine, stream)` from v0.1.0.
   Output before v0.1.0 is not preserved.
 
