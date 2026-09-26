@@ -15,9 +15,9 @@
 #'   same values on every platform and thread count, and draw `i` does not
 #'   depend on `n`. They differ in speed and in the stream they produce.
 #'
-#'   * `"xoshiro256pp"` (default) -- the fastest: about **2.4x** dqrng on
-#'     uniform and **1.9x** RcppZiggurat on normal (single thread, x86_64,
-#'     with AVX2). Philox derives a fresh 256-bit xoshiro256++ state for each
+#'   * `"xoshiro256pp"` (default) -- the fastest of the three, and on one
+#'     thread about 1.6-2.5x dqrng on uniform and 1.9-2.7x RcppZiggurat on
+#'     normal (x86_64 and Apple Silicon; see the performance article). Philox derives a fresh 256-bit xoshiro256++ state for each
 #'     512-value chunk, then a cheap recurrence produces the chunk, so a
 #'     chunk depends only on the key and its index. Reaching an arbitrary
 #'     index costs at most 511 recurrence steps. Audited with PractRand to
@@ -93,6 +93,12 @@ rng_fold <- function(key, data) {
 #'
 #' Stateless uniform sampling. `rng_uniform(key, n, min, max)` is a pure
 #' function of its arguments and returns ordinary numeric vectors or matrices.
+#'
+#' With the default bounds every value lies strictly inside \eqn{(0, 1)}: it
+#' is \eqn{(m + 1/2) 2^{-52}} for a 52-bit integer \eqn{m}, so neither
+#' endpoint can occur. Other bounds are applied as `min + (max - min) * u`,
+#' which, as with [stats::runif()], will not return either extreme value
+#' unless `max = min` or `max - min` is small compared with `min`.
 #'
 #' @param key An `rng_key` vector.
 #' @param n A single non-negative whole number. Defaults to one draw per key.

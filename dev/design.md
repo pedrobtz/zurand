@@ -13,7 +13,7 @@ says in what order it gets built.
 
 ## 1. Position
 
-**The fastest uniform and Gaussian vectors in R, where every value is a pure
+**Fast uniform and Gaussian vectors in R, where every value is a pure
 function of `(key, position)`.** That one property is what the speed is
 spent on and what no competitor offers together with it: output is
 bit-identical across thread counts, SIMD paths, platforms, call order and
@@ -25,9 +25,12 @@ What zurand competes on, in order:
    C API is reentrant, so other packages can draw from their own worker
    threads. dqrng and base R cannot offer the second; randompack's streams
    are stateful.
-2. **Throughput.** Today (x86_64, one thread, n = 1e7) `xoshiro256pp` with
-   AVX2 is 776 M/s uniform (2.4x dqrng) and 376 M/s Gaussian (1.9x
-   RcppZiggurat). The default engine gets 314 and 215.
+2. **Throughput.** On one thread `xoshiro256pp` is 1.6-2.5x dqrng on
+   uniform and 1.9-2.7x RcppZiggurat on Gaussian, and 4 threads on Linux
+   give 1370 and 822 M/s, bit-identical to one thread. It is not the
+   fastest single-threaded generator everywhere: randompack's 8-lane SIMD
+   xoshiro256++ ties it on x86_64 and is about 2x on Apple Silicon, where
+   zurand has no vector path (2026-09-26 CI benchmark; roadmap C4).
 3. **A small, stable surface.** Uniform, normal, integer, bits, and an
    exponential. Fourteen distributions is randompack's niche, not this one.
 

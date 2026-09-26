@@ -27,3 +27,4 @@ articles:
   - title: Articles
     contents:
       - zurand
+      - performance
