@@ -2,7 +2,9 @@
 # the candidate into lib-b in one directory, then run this from there. It
 # alternates processes, each timing zurand against RcppZiggurat (normals)
 # and dqrng (uniforms) in the same bench::mark() call. Runner-to-runner
-# comparisons are not enough: GitHub hands out Intel and AMD CPUs at random.args <- commandArgs(TRUE)
+# comparisons are not enough: GitHub hands out Intel and AMD CPUs at random.
+
+args <- commandArgs(TRUE)
 if (length(args) && args[1] == "child") {
   suppressMessages({library(zurand); library(bench); library(RcppZiggurat); library(dqrng)})
   for (eng in c("xoshiro256pp", "philox4x64")) {
