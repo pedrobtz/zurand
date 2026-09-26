@@ -21,6 +21,24 @@
 #
 # Output is little-endian uint32. Chunked, so memory stays bounded however
 # large --gb is.
+#
+# --mode picks what the stream is made of:
+#
+#   stream   (default) one key, re-keyed every 1e7 values with
+#            rng_fold(key, block). Tests a sampler's output.
+#   keys     cross-key: each block takes the next 64 consecutive sibling
+#            keys of one rng_key(seed, n) vector and interleaves their first
+#            --words values (position 0 of all 64, then position 1, ...).
+#            A correlation between sibling keys -- the splitmix64 key
+#            derivation, or an engine's seeding -- is invisible in any
+#            single stream and shows up here.
+#   folds    cross-key: the same, with the 64 keys rng_fold(key, i) for
+#            consecutive integers i. Tests the fold.
+#
+# The cross-key modes use rng_bits(), the raw words, and interleave short
+# streams because that is how the package is used: many keys, each drawing
+# a modest number of values. At the default --words = 1e5, each key spans
+# about 200 of xoshiro256pp's 512-word sub-chunk seedings.
 
 suppressMessages(library(zurand))
 
@@ -31,6 +49,9 @@ getarg <- function(name, default) {
 }
 
 sampler <- match.arg(getarg("sampler", "normal"), c("normal", "uniform", "bits"))
+mode    <- match.arg(getarg("mode", "stream"), c("stream", "keys", "folds"))
+words   <- as.integer(getarg("words", "100000"))  # per key, cross-key modes
+nkeys   <- 64L
 engine  <- match.arg(getarg("engine", "philox4x64"), c("philox4x64", "threefry4x64", "xoshiro256pp"))
 gb      <- as.numeric(getarg("gb", "1"))
 seed    <- as.integer(getarg("seed", "20260919"))
@@ -52,9 +73,34 @@ con <- if (out == "-") pipe("cat", "wb") else file(out, "wb")
 # unchanged, which is all the test battery sees.
 as_u32 <- function(x) as.integer(x - 4294967296 * (x >= 2147483648))
 
+# Cross-key modes: one block = nkeys keys x `words` positions, interleaved
+# by position. Returns the block's uint32 values, or NULL when done.
+cross_block <- function(block) {
+  ids <- block * nkeys + seq_len(nkeys) - 1L          # 0-based, consecutive
+  keys <- if (mode == "keys") {
+    all_keys[ids + 1L]
+  } else {
+    do.call(c, lapply(ids, function(i) rng_fold(key, i)))
+  }
+  m <- rng_bits(keys, words, bits = 32L)             # words x nkeys
+  as.vector(t(m))                                    # interleave by position
+}
+if (mode == "keys") {
+  # Every sibling key the run will use, from one seed, generated once.
+  nblocks <- ceiling(total_words / (as.numeric(nkeys) * words))
+  all_keys <- rng_key(seed, n = nblocks * nkeys, engine = engine)
+}
+
 done <- 0
 block <- 0
-while (done < total_words) {
+while (mode != "stream" && done < total_words) {
+  w <- cross_block(block)
+  w <- w[seq_len(min(length(w), total_words - done))]
+  writeBin(as_u32(w), con, size = 4L, endian = "little")
+  done <- done + length(w)
+  block <- block + 1
+}
+while (mode == "stream" && done < total_words) {
   n <- as.integer(min(chunk, total_words - done))
   # A fresh key per block via rng_fold keeps memory flat while still
   # producing one continuous stream: folding by block index is exactly the
