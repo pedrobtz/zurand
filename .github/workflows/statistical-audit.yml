@@ -6,25 +6,43 @@
 # Threefry, and test-golden.R proves every platform agrees. Neither says
 # anything about whether the numbers are *distributed* correctly. The
 # ziggurat -- in particular the fixed-point wedge shortcut and the tail --
-# is this package's own code and is the least scrutinised thing in it.
+# is this package's own code, and xoshiro256pp's reseeding from Philox
+# every 512 words is an unusual construction.
+#
+# Every combination is its own job, so a plan runs in parallel and each
+# combination gets the full per-job time limit. GitHub-hosted jobs stop at
+# 6 hours and PractRand cannot resume, so the battery step is capped below
+# that: a long combination is cut short with its progressive report
+# intact rather than killed with nothing uploaded. Sizes in `full` are set
+# from the throughput `pilot` measured (see dev/statistical-audit.md).
 #
 # Does not gate anything. A battery this long has flaky individual tests,
 # and "WEAK" on one of 100+ is noise, not a defect. Read the summary.
 on:
   workflow_dispatch:
     inputs:
-      sampler:
-        description: "Which sampler to test"
+      plan:
+        description: "pilot (16 GB each), full (release audit), or custom (the fields below)"
         type: choice
-        options: [normal, uniform, bits, all]
+        options: [pilot, full, custom]
+        default: pilot
+      sampler:
+        description: "custom: sampler"
+        type: choice
+        options: [normal, uniform, bits]
         default: normal
       engine:
-        description: "Which engine"
+        description: "custom: engine"
         type: choice
-        options: [philox4x64, threefry4x64, both]
-        default: both
+        options: [xoshiro256pp, philox4x64, threefry4x64]
+        default: xoshiro256pp
+      mode:
+        description: "custom: stream (one key), keys (64 sibling keys interleaved), folds (64 folded keys interleaved)"
+        type: choice
+        options: [stream, keys, folds]
+        default: stream
       gb:
-        description: "Gigabytes of stream per combination"
+        description: "custom: gigabytes"
         default: "4"
       tool:
         description: "Test battery"
@@ -37,9 +55,44 @@ name: statistical-audit
 permissions: read-all
 
 jobs:
-  audit:
+  plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - id: plan
+        env:
+          PLAN: ${{ inputs.plan }}
+          SAMPLER: ${{ inputs.sampler }}
+          ENGINE: ${{ inputs.engine }}
+          MODE: ${{ inputs.mode }}
+          GB: ${{ inputs.gb }}
+        run: |
+          set -eu
+          # The release audit of xoshiro256pp (roadmap A8): its three
+          # samplers on one stream, plus the two cross-key modes on raw bits.
+          row() { printf '{"sampler":"%s","engine":"%s","mode":"%s","gb":"%s"}' "$1" "$2" "$3" "$4"; }
+          case "$PLAN" in
+            pilot)
+              m="[$(row bits xoshiro256pp stream 16),$(row uniform xoshiro256pp stream 16),$(row normal xoshiro256pp stream 16),$(row bits xoshiro256pp keys 16),$(row bits xoshiro256pp folds 16)]" ;;
+            full)
+              m="[$(row bits xoshiro256pp stream 1024),$(row uniform xoshiro256pp stream 512),$(row normal xoshiro256pp stream 256),$(row bits xoshiro256pp keys 1024),$(row bits xoshiro256pp folds 1024)]" ;;
+            custom)
+              m="[$(row "$SAMPLER" "$ENGINE" "$MODE" "$GB")]" ;;
+          esac
+          echo "matrix={\"include\":$m}" >> "$GITHUB_OUTPUT"
+          echo "$m"
+
+  audit:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    name: ${{ matrix.sampler }}-${{ matrix.engine }}-${{ matrix.mode }} (${{ matrix.gb }} GB)
+    env:
+      NAME: ${{ matrix.sampler }}-${{ matrix.engine }}-${{ matrix.mode }}-${{ matrix.gb }}GB
     steps:
       - uses: actions/checkout@v4
 
@@ -74,60 +127,50 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y dieharder
 
       - name: Run the battery
+        # Below the job's limit, so the summary and the upload still run.
+        timeout-minutes: 330
         run: |
           set -u
-          samplers="${{ inputs.sampler }}"
-          [ "$samplers" = "all" ] && samplers="normal uniform bits"
-          engines="${{ inputs.engine }}"
-          [ "$engines" = "both" ] && engines="philox4x64 threefry4x64"
           mkdir -p audit
-          for s in $samplers; do
-            for e in $engines; do
-              name="$s-$e"
-              echo "=== $name ==="
-              if [ "${{ inputs.tool }}" = "practrand" ]; then
-                Rscript tools/statistical-audit.R --sampler="$s" --engine="$e" \
-                        --gb='${{ inputs.gb }}' \
-                  | RNG_test stdin32 -tlmin 256KB -multithreaded \
-                  > "audit/$name.txt" 2>&1 || true
-              else
-                Rscript tools/statistical-audit.R --sampler="$s" --engine="$e" \
-                        --gb='${{ inputs.gb }}' --out="audit/$name.bin"
-                dieharder -a -g 201 -f "audit/$name.bin" \
-                  > "audit/$name.txt" 2>&1 || true
-                rm -f "audit/$name.bin"
-              fi
-            done
-          done
+          echo "$(nproc) cores" > "audit/$NAME.runner"
+          start=$(date +%s)
+          if [ "${{ inputs.tool }}" = "practrand" ]; then
+            Rscript tools/statistical-audit.R --sampler='${{ matrix.sampler }}' \
+                    --engine='${{ matrix.engine }}' --mode='${{ matrix.mode }}' \
+                    --gb='${{ matrix.gb }}' \
+              | RNG_test stdin32 -tlmin 256KB -tlmax '${{ matrix.gb }}GB' -multithreaded \
+              > "audit/$NAME.txt" 2>&1 || true
+          else
+            Rscript tools/statistical-audit.R --sampler='${{ matrix.sampler }}' \
+                    --engine='${{ matrix.engine }}' --mode='${{ matrix.mode }}' \
+                    --gb='${{ matrix.gb }}' --out="audit/$NAME.bin"
+            dieharder -a -g 201 -f "audit/$NAME.bin" > "audit/$NAME.txt" 2>&1 || true
+            rm -f "audit/$NAME.bin"
+          fi
+          secs=$(( $(date +%s) - start ))
+          echo "$secs" > "audit/$NAME.seconds"
 
       - name: Summarise
         if: always()
         run: |
+          f="audit/$NAME.txt"
+          [ -e "$f" ] || { echo "no report" >> "$GITHUB_STEP_SUMMARY"; exit 0; }
+          fail=$(grep -ciE '\bFAIL(ED)?\b' "$f" || true)
+          weak=$(grep -ciE '\bWEAK\b|\bSUSPECT\b' "$f" || true)
+          reached=$(grep -oE 'length= [0-9.]+ [a-z]+' "$f" | tail -1 | sed 's/length= //')
+          secs=$(cat "audit/$NAME.seconds" 2>/dev/null || echo "?")
+          if [ "$fail" -gt 0 ]; then v="**investigate**"
+          elif [ "$weak" -gt 0 ]; then v="weak only — usually noise"
+          else v="clean"; fi
           {
-            echo "## Statistical audit"
-            echo ""
-            echo "tool \`${{ inputs.tool }}\` · ${{ inputs.gb }} GB per combination"
-            echo ""
-            echo "| combination | FAIL | WEAK | verdict |"
-            echo "|---|---:|---:|---|"
-            for f in audit/*.txt; do
-              [ -e "$f" ] || continue
-              n=$(basename "$f" .txt)
-              fail=$(grep -ciE '\bFAIL(ED)?\b' "$f" || true)
-              weak=$(grep -ciE '\bWEAK\b|\bSUSPECT\b' "$f" || true)
-              if [ "$fail" -gt 0 ]; then v="**investigate**"
-              elif [ "$weak" -gt 0 ]; then v="weak only — usually noise"
-              else v="clean"; fi
-              echo "| \`$n\` | $fail | $weak | $v |"
-            done
-            echo ""
-            echo "A stray WEAK among a hundred-plus tests is expected."
-            echo "A repeatable FAIL is not. Full logs are in the artifact."
+            echo "| combination | reached | seconds | runner | FAIL | WEAK | verdict |"
+            echo "|---|---|---:|---|---:|---:|---|"
+            echo "| \`$NAME\` | ${reached:-none} | $secs | $(cat audit/$NAME.runner 2>/dev/null) | $fail | $weak | $v |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: statistical-audit-${{ inputs.tool }}
+          name: audit-${{ env.NAME }}
           path: audit/
           if-no-files-found: warn
