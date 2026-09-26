@@ -49,6 +49,23 @@ test_that("the vectorised and portable paths produce identical values", {
                    with_simd(FALSE, format(rng_fold(key, "x"))))
 })
 
+test_that("large uniform fills are path-independent (DC ZVA on Apple arm64)", {
+  # Above 1 MiB of output the arm64 path zeroes each group's cache blocks
+  # before writing it, and only blocks lying wholly inside the group. R
+  # aligns vector data to 16 bytes, not to the block, and with several
+  # keys each column starts at a different offset, so the partial blocks at
+  # both ends of every group are exercised here.
+  skip_if_no_simd()
+  key <- rng_key(3L, engine = "xoshiro256pp")
+  keys <- rng_key(3L, n = 3L, engine = "xoshiro256pp")
+  expect_identical(with_simd(TRUE,  rng_uniform(key, 300001L)),
+                   with_simd(FALSE, rng_uniform(key, 300001L)))
+  expect_identical(with_simd(TRUE,  rng_uniform(keys, 200003L)),
+                   with_simd(FALSE, rng_uniform(keys, 200003L)))
+  expect_identical(with_simd(TRUE,  rng_uniform(key, 300001L, -1, 4)),
+                   with_simd(FALSE, rng_uniform(key, 300001L, -1, 4)))
+})
+
 test_that("multi-key and threaded fills are path-independent too", {
   skip_if_no_simd()
   keys <- rng_key(42L, n = 3L, engine = "xoshiro256pp")

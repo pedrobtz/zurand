@@ -823,6 +823,54 @@ static void xoshiro_group_neon_u01(philox4x64_key_t key, uint64_t sub0,
 #undef ZR_NROTL
 #endif /* NEON */
 
+/* DC ZVA on arm64: zero whole cache blocks without reading them first.
+ *
+ * zurand's stream puts each 512-value sub-chunk in its own contiguous
+ * 4 KiB block, so a NEON group writes ten blocks at once. That pattern
+ * does not get the "whole line is being overwritten, skip the read" path a
+ * single sequential stream gets on Apple cores, so every output line was
+ * first read from memory. Zeroing the group's region with DC ZVA first
+ * gives each store a line it already owns. Measured on the macos-latest
+ * (Apple M1) runner, dev/simd/m1_compare.c: 23-25% less time per value on
+ * large fills, reused or freshly allocated; ~20% more in cache, where the
+ * lines never left anyway -- hence the size threshold. Apple only: on
+ * the ubuntu-24.04-arm runner (Neoverse N2) it measured level or slower,
+ * so other arm64 cores keep ordinary stores.
+ *
+ * Only blocks lying entirely inside the region are zeroed. R aligns vector
+ * data to 16 bytes, not to the block, and a partial block at either end
+ * holds bytes of the neighbouring chunk or of the vector's header; those
+ * edges keep ordinary stores. Whole blocks inside one chunk are never
+ * touched by another thread. The block size is read once at load (0 if
+ * DC ZVA is prohibited), so worker threads only read it. */
+static size_t zurand_zva_bytes = 0;
+
+#ifndef ZURAND_ZVA_MIN_VALUES
+#  define ZURAND_ZVA_MIN_VALUES ((R_xlen_t)1 << 17)   /* 1 MiB of doubles */
+#endif
+
+static void zurand_zva_init(void) {
+#if defined(__APPLE__) && defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))
+    uint64_t v;
+    __asm__ volatile("mrs %0, dczid_el0" : "=r"(v));
+    zurand_zva_bytes = (v & 16) ? 0 : (size_t)4 << (v & 15);
+#endif
+}
+
+static inline void zurand_zva_region(double *p, size_t bytes) {
+#if defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))
+    size_t b = zurand_zva_bytes;
+    if (!b)
+        return;
+    uintptr_t lo = ((uintptr_t)p + b - 1) & ~(uintptr_t)(b - 1);
+    uintptr_t hi = ((uintptr_t)p + bytes) & ~(uintptr_t)(b - 1);
+    for (uintptr_t c = lo; c < hi; c += b)
+        __asm__ volatile("dc zva, %0" : : "r"(c) : "memory");
+#else
+    (void)p; (void)bytes;
+#endif
+}
+
 static int zurand_avx2_available = -1;
 static int zurand_simd_off = 0;
 
@@ -894,7 +942,7 @@ static void chunk_words_xoshiro(philox4x64_key_t key, uint64_t c,
 /* One full xoshiro chunk of uniforms, written straight into `o` when the
  * AVX2 path is on; returns 0 to fall back to words-then-convert. */
 static int uniform_chunk_xoshiro_fast(philox4x64_key_t key, uint64_t c,
-                                      double *o, int m) {
+                                      double *o, int m, int large) {
     if (m != ZURAND_XOSHIRO_SUB * ZURAND_XOSHIRO_LANES)
         return 0;
     uint64_t sub0 = c * ZURAND_XOSHIRO_LANES;
@@ -909,17 +957,19 @@ static int uniform_chunk_xoshiro_fast(philox4x64_key_t key, uint64_t c,
 #endif
 #ifdef ZURAND_NEON
     if (zurand_use_neon()) {
+        if (large)
+            zurand_zva_region(o, (size_t)m * sizeof(double));
         xoshiro_group_neon_u01(key, sub0, ZURAND_PURPOSE_UNIFORM, o);
         return 1;
     }
 #endif
-    (void)key; (void)o; (void)sub0;
+    (void)key; (void)o; (void)sub0; (void)large;
     return 0;
 }
 
 /* Philox for the key type and for the retry paths; xoshiro for bulk words. */
-#define ZE_UNIFORM_FAST(key, c, o, m) \
-    uniform_chunk_xoshiro_fast((key), (c), (o), (m))
+#define ZE_UNIFORM_FAST(key, c, o, m, large) \
+    uniform_chunk_xoshiro_fast((key), (c), (o), (m), (large))
 #define ZE_SUFFIX xoshiro
 #define ZE_KEY_T  philox4x64_key_t
 #define ZE_CHUNK_WORDS (ZURAND_CHUNK_WORDS * ZURAND_XOSHIRO_LANES)
@@ -1572,4 +1622,5 @@ void R_init_zurand(DllInfo *dll) {
     /* Settle the SIMD dispatch now, on the main thread, so C API calls from
      * worker threads only ever read it. */
     (void) zurand_use_avx2();
+    zurand_zva_init();
 }
