@@ -190,26 +190,29 @@ R123_STATIC_INLINE double ZE_N(zig_normal_at)(ZE_KEY_T key, uint64_t index,
  *    integer 0 and gets +0.0, so the flip is masked off;
  *  - ki and rabs are both below 2^52, so the signed 64-bit compare is the
  *    unsigned one.
- * Lanes that fail the compare (~1%) are redone by the scalar slow path
- * with their own position, exactly as the scalar fill would.
+ * It writes all m4 values (m4 a multiple of 4) and, per group of four, the
+ * mask of lanes that passed the compare. The caller redoes the others
+ * (~1%) with the scalar slow path at their own positions.
+ *
+ * A leaf on purpose: it calls nothing. MinGW GCC on 64-bit Windows spills
+ * 256-bit registers around a call with aligned stores that assume a
+ * 32-byte-aligned stack, which Windows does not provide (GCC bug 54412);
+ * the first version called the slow path from the loop and crashed there.
  *
  * The table entries are fetched with ordinary loads, not AVX2 gathers.
  * With gathers this was 1.8x *slower* than scalar on an i5-8500B: Intel's
  * microcode fix for Gather Data Sampling ("Downfall", 2023) makes
- * VPGATHER several times slower on Skylake through Ice Lake. With plain
- * loads it is 5-15% faster than scalar on that machine. */
+ * VPGATHER several times slower on Skylake through Ice Lake. */
 __attribute__((target("avx2")))
-static void ZE_N(normal_transform_avx2)(ZE_KEY_T key, uint64_t w0,
-                                        const uint64_t *buf, double *o,
-                                        int m) {
+static void ZE_N(normal_fast_avx2)(const uint64_t *buf, double *o, int m4,
+                                   unsigned char *accept) {
     const __m256i byte = _mm256_set1_epi64x(0xff);
     const __m256i mask52 = _mm256_set1_epi64x(0x000fffffffffffffLL);
     const __m256i one = _mm256_set1_epi64x(1);
     const __m256i exp52 = _mm256_set1_epi64x(0x4330000000000000LL);
     const __m256d two52 = _mm256_set1_pd(0x1.0p52);
     const __m256i zero = _mm256_setzero_si256();
-    int j = 0;
-    for (; j + 4 <= m; j += 4) {
+    for (int j = 0; j < m4; j += 4) {
         __m256i w = _mm256_loadu_si256((const __m256i *)(buf + j));
         __m256i idx = _mm256_and_si256(w, byte);
         __m256i rabs = _mm256_and_si256(_mm256_srli_epi64(w, 9), mask52);
@@ -229,17 +232,9 @@ static void ZE_N(normal_transform_avx2)(ZE_KEY_T key, uint64_t w0,
         __m256d x = _mm256_xor_pd(_mm256_mul_pd(d, wi),
                                   _mm256_castsi256_pd(sign));
         _mm256_storeu_pd(o + j, x);
-        int accept = _mm256_movemask_pd(
+        accept[j >> 2] = (unsigned char)_mm256_movemask_pd(
             _mm256_castsi256_pd(_mm256_cmpgt_epi64(ki, rabs)));
-        if (R123_BUILTIN_EXPECT(accept != 0xf, 0)) {
-            for (int l = 0; l < 4; l++)
-                if (!(accept & (1 << l)))
-                    o[j + l] = ZE_N(zig_normal_slow)(key, w0 + (uint64_t)(j + l),
-                                                     buf[j + l]);
-        }
     }
-    for (; j < m; j++)
-        o[j] = ZE_N(zig_normal_at)(key, w0 + (uint64_t)j, buf[j]);
 }
 #endif
 
@@ -305,7 +300,21 @@ static void ZE_N(fill_normal_column)(double *out, R_xlen_t n,
         double *o = out + w0;
 #ifdef ZURAND_X86_DISPATCH
         if (zurand_use_avx2()) {
-            ZE_N(normal_transform_avx2)(key, (uint64_t)w0, buf, o, m);
+            unsigned char accept[ZURAND_MAX_CHUNK_WORDS / 4];
+            int m4 = m & ~3;
+            ZE_N(normal_fast_avx2)(buf, o, m4, accept);
+            for (int g = 0; g < m4 / 4; g++) {
+                if (R123_BUILTIN_EXPECT(accept[g] == 0xf, 1))
+                    continue;
+                for (int l = 0; l < 4; l++) {
+                    int jj = 4 * g + l;
+                    if (!(accept[g] & (1 << l)))
+                        o[jj] = ZE_N(zig_normal_slow)(key, (uint64_t)(w0 + jj),
+                                                      buf[jj]);
+                }
+            }
+            for (int jj = m4; jj < m; jj++)
+                o[jj] = ZE_N(zig_normal_at)(key, (uint64_t)(w0 + jj), buf[jj]);
             continue;
         }
 #endif
