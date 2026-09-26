@@ -144,6 +144,16 @@ fd_P3   =  6.61375632143793436117e-05, /* 0x3F11566A, 0xAF25DE2C */
 fd_P4   = -1.65339022054652515390e-06, /* 0xBEBBBD41, 0xC5D26BF1 */
 fd_P5   =  4.13813679705723846039e-08; /* 0x3E663769, 0x72BEA4D0 */
 
+/* Out of line. Inlined into zig_normal_slow(), this function's size
+ * wrecked the code generated for the whole slow path: keeping it a call
+ * made the normal fill 15-19% faster with Apple clang on an i5-8500B and
+ * 7-9% faster with GCC on a Xeon 6973P (10 alternating rounds each, every
+ * engine). Only ~6% of wedge tests reach exp() at all -- the fixed-point
+ * brackets settle the rest -- so the call itself costs nothing
+ * measurable. Same for log1p() below, which only the tail uses. */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
 static double zurand_exp(double x)
 {
 	double y,hi,lo,c,t;
@@ -279,6 +289,9 @@ fd_Lp7 = 1.479819860511658591e-01;  /* 3FC2F112 DF3E5244 */
 
 static double fd_zero = 0.0;
 
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
 static double zurand_log1p(double x)
 {
 	double hfsq,f,c,s,z,R,u;
