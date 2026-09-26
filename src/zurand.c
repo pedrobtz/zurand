@@ -61,12 +61,56 @@
  * is the product here, so the ulp is not an acceptable trade for one fused
  * instruction in a pass that is memory-bound anyway.
  *
- * clang honours this pragma. GCC has only implemented it recently, and
- * cannot contract on an x86_64 target without FMA enabled in any case; a
- * GCC build for an FMA-capable target should also pass -ffp-contract=off,
- * which is what the planned configure script will probe for. */
+ * The pragma alone is not enough. GCC 13 ignores it, GCC contracts by
+ * default on every arm64 target, and both compilers ignore it under
+ * -ffp-contract=fast, which a user's ~/.R/Makevars may set and which R
+ * places after the package's own flags. A compiler flag of our own could
+ * be overridden the same way, and R CMD check reports any -f flag in
+ * src/Makevars as non-portable. So every product that feeds an addition
+ * goes through zurand_rounded(), which no compiler can see through, and
+ * the pragma stays as a second layer.
+ *
+ * Checking it: `clang -O2 -mfma -ffp-contract=fast` (x86_64, i386, and
+ * --target=arm64-apple-macos) must emit no vfmadd/vfmsub/fmadd/fmla at all;
+ * that is how the call sites were found. -ffast-math is outside the
+ * contract: it licenses reassociation as well as contraction, and still
+ * fuses inside the ziggurat's exp() argument. */
 #if defined(__clang__) || (defined(__GNUC__) && __GNUC__ >= 14)
 #pragma STDC FP_CONTRACT OFF
+#endif
+
+/* Returns x unchanged, after the optimiser has lost track of how it was
+ * computed: the product is rounded to double here and cannot be fused into
+ * the addition that follows. The empty asm emits no instruction; it only
+ * pins x in a vector register. The fallback's volatile store also rounds
+ * away x87 excess precision on 32-bit x86. */
+static inline double zurand_rounded(double x) {
+#if defined(__GNUC__) && (defined(__x86_64__) || defined(__SSE2_MATH__))
+    __asm__("" : "+x"(x));
+#elif defined(__GNUC__) && defined(__aarch64__)
+    __asm__("" : "+w"(x));
+#else
+    volatile double v = x;
+    x = v;
+#endif
+    return x;
+}
+
+/* The same barrier on two doubles at once, so the whole-array scaling
+ * passes stay two-wide SIMD (SSE2 / NEON). With the scalar barrier the
+ * compiler can no longer vectorise them. */
+#if defined(__GNUC__) && (defined(__x86_64__) || defined(__SSE2_MATH__) || \
+                          defined(__aarch64__))
+#  define ZURAND_HAVE_V2D 1
+typedef double zurand_v2d __attribute__((vector_size(16)));
+static inline zurand_v2d zurand_rounded2(zurand_v2d x) {
+#  if defined(__aarch64__)
+    __asm__("" : "+w"(x));
+#  else
+    __asm__("" : "+x"(x));
+#  endif
+    return x;
+}
 #endif
 
 /* Width of the deferred band on the chord side of the wedge shortcut, in
@@ -688,6 +732,36 @@ static uint64_t hash_data(SEXP data) {
     return h;
 }
 
+/* out[i] = a + s * out[i], with the product rounded before the add on
+ * every compiler (see zurand_rounded). Shared by the min/max and mean/sd
+ * passes; elementwise, so the threaded result equals the serial one. */
+static void affine_pass(double *out, R_xlen_t total, double a, double s,
+                        int nt) {
+#ifdef ZURAND_HAVE_V2D
+    const R_xlen_t npair = total / 2;
+    const zurand_v2d av = {a, a}, sv = {s, s};
+#ifdef ZURAND_OPENMP
+#pragma omp parallel for if(nt > 1 && total >= ZURAND_OMP_MIN_VALUES) \
+    num_threads(nt) default(none) shared(out, npair, av, sv) schedule(static)
+#endif
+    for (R_xlen_t p = 0; p < npair; p++) {
+        zurand_v2d x;
+        memcpy(&x, out + 2 * p, sizeof x);
+        x = av + zurand_rounded2(sv * x);
+        memcpy(out + 2 * p, &x, sizeof x);
+    }
+    if (total & 1)
+        out[total - 1] = a + zurand_rounded(s * out[total - 1]);
+#else
+#ifdef ZURAND_OPENMP
+#pragma omp parallel for if(nt > 1 && total >= ZURAND_OMP_MIN_VALUES) \
+    num_threads(nt) default(none) shared(out, total, a, s) schedule(static)
+#endif
+    for (R_xlen_t i = 0; i < total; i++)
+        out[i] = a + zurand_rounded(s * out[i]);
+#endif
+}
+
 /* ---- .Call entry points: keys ---- */
 
 static R_xlen_t checked_product(R_xlen_t a, R_xlen_t b, const char *what) {
@@ -834,14 +908,8 @@ SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
             fill_uniform_column_philox(out + n * col, n,
                                        key_from_words(kw, nkey, col), par_rows);
     }
-    if (min != 0.0 || span != 1.0) {
-#ifdef ZURAND_OPENMP
-#pragma omp parallel for if(nt > 1 && total >= ZURAND_OMP_MIN_VALUES) \
-    num_threads(nt) default(none) shared(out, total, min, span) schedule(static)
-#endif
-        for (R_xlen_t i = 0; i < total; i++)
-            out[i] = min + span * out[i];
-    }
+    if (min != 0.0 || span != 1.0)
+        affine_pass(out, total, min, span, nt);
     UNPROTECT(1);
     return ans;
 }
@@ -889,14 +957,8 @@ SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_) {
             fill_normal_column_philox(out + n * col, n,
                                       key_from_words(kw, nkey, col), par_rows);
     }
-    if (mean != 0.0 || sd != 1.0) {
-#ifdef ZURAND_OPENMP
-#pragma omp parallel for if(nt > 1 && total >= ZURAND_OMP_MIN_VALUES) \
-    num_threads(nt) default(none) shared(out, total, mean, sd) schedule(static)
-#endif
-        for (R_xlen_t i = 0; i < total; i++)
-            out[i] = mean + sd * out[i];
-    }
+    if (mean != 0.0 || sd != 1.0)
+        affine_pass(out, total, mean, sd, nt);
     UNPROTECT(1);
     return ans;
 }

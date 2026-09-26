@@ -98,8 +98,8 @@ static double ZE_N(zig_normal_slow)(ZE_KEY_T key, uint64_t index, uint64_t r) {
             /* layer-0 tail; the first ordinate reuses Y */
             double yy = -log1p(-ZURAND_U64_TO_DOUBLE(Y));
             for (;;) {
-                double xx = -ziggurat_nor_inv_r *
-                    log1p(-ZURAND_U64_TO_DOUBLE(ZE_N(zig_next)(&s, key, index)));
+                double xx = zurand_rounded(-ziggurat_nor_inv_r *
+                    log1p(-ZURAND_U64_TO_DOUBLE(ZE_N(zig_next)(&s, key, index))));
                 if (yy + yy > xx * xx)
                     return sign ? -(ziggurat_nor_r + xx)
                                 : ziggurat_nor_r + xx;
@@ -135,8 +135,8 @@ static double ZE_N(zig_normal_slow)(ZE_KEY_T key, uint64_t index, uint64_t r) {
             return x;
         if (!reject) {
             double u = ZURAND_U64_TO_DOUBLE(Y);
-            if ((fi_double[idx - 1] - fi_double[idx]) * u + fi_double[idx] <
-                exp(-0.5 * x * x))
+            double rise = zurand_rounded((fi_double[idx - 1] - fi_double[idx]) * u);
+            if (rise + fi_double[idx] < exp(-0.5 * x * x))
                 return x;
         }
 

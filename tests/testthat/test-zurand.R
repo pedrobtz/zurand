@@ -138,6 +138,23 @@ test_that("rng_normal() returns shifted and scaled normal values", {
   expect_identical(zm[, 2L], rng_normal(keys[2], 5L))
 })
 
+test_that("scaling is the unfused mean + sd * z, for odd and even lengths", {
+  # R evaluates `a + s * x` as two separately rounded vector operations, so
+  # this pins the C scaling pass to the unfused definition. The pass works
+  # two doubles at a time; odd lengths exercise its trailing element, and
+  # multi-key output its full n x K extent.
+  key <- rng_key(99L)
+  keys <- rng_key(99L, n = 3L)
+  for (n in c(1L, 2L, 7L, 1000L, 1001L)) {
+    expect_identical(rng_normal(key, n, mean = 0.3, sd = 1.7),
+                     0.3 + 1.7 * rng_normal(key, n))
+    expect_identical(rng_uniform(key, n, min = -0.3, max = 2.9),
+                     -0.3 + (2.9 - -0.3) * rng_uniform(key, n))
+  }
+  expect_identical(rng_normal(keys, 5L, mean = 0.3, sd = 1.7),
+                   0.3 + 1.7 * rng_normal(keys, 5L))
+})
+
 test_that("rng_normal() draws from the normal distribution", {
   # deterministic given the key, so these are regression tests, not flaky
   # statistical ones; n exceeds the OpenMP threshold
