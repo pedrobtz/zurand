@@ -1,6 +1,8 @@
 # Portable pure-C fallback for 64-bit mulhilo on platforms without
 # __uint128_t (e.g. 32-bit builds). On x86_64/aarch64 the faster
 # __uint128_t path is still selected automatically by philox.h.
-PKG_CPPFLAGS = -DR123_USE_MULHILO64_C99=1
+# inst/include holds the public C API header (zurand.h), which the package
+# compiles against too so both sides share one definition of its table.
+PKG_CPPFLAGS = -DR123_USE_MULHILO64_C99=1 -I../inst/include
 PKG_CFLAGS = $(SHLIB_OPENMP_CFLAGS)
 PKG_LIBS = $(SHLIB_OPENMP_CFLAGS)

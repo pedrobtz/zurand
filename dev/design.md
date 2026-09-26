@@ -192,32 +192,37 @@ opt-in.
 ## 5. The C API (for packages that `LinkingTo: zurand`)
 
 This is the adoption multiplier and the safe home of the in-place fill.
+Implemented in B1 (`inst/include/zurand.h`) as one versioned table of
+function pointers rather than one `R_GetCCallable()` shim per function:
+the table is fetched once, on the main thread, and a per-function lazy
+lookup would otherwise call the R API from whichever worker thread first
+used it.
 
 ```c
-/* inst/include/zurand.h -- header-only shims over R_GetCCallable() */
 typedef struct { uint64_t k0, k1; int engine; int stream; } zurand_key;
 
-int  zurand_api_version(void);                 /* bumped on ABI change */
-int  zurand_key_get(SEXP keys, R_xlen_t i, zurand_key *out); /* main thread */
-zurand_key zurand_fold_u64(zurand_key k, uint64_t data);
+typedef struct zurand_api {
+    int version; size_t size;                        /* append-only */
+    int (*key_get)(SEXP keys, R_xlen_t i, zurand_key *out);   /* main thread */
+    int (*fold_int)(zurand_key k, int64_t data, zurand_key *out);
+    int (*fill_uniform)(zurand_key k, size_t n, double min, double max, double *out);
+    int (*fill_normal) (zurand_key k, size_t n, double mean, double sd, double *out);
+    int (*fill_integer)(zurand_key k, size_t n, int min, int max, int *out);
+    int (*fill_bits64) (zurand_key k, size_t n, uint64_t *out);
+} zurand_api;
 
-void zurand_fill_uniform(zurand_key k, uint64_t offset, size_t n,
-                         double min, double max, double *out);
-void zurand_fill_normal (zurand_key k, uint64_t offset, size_t n,
-                         double mean, double sd, double *out);
-void zurand_fill_integer(zurand_key k, uint64_t offset, size_t n,
-                         int min, int max, int *out);
-void zurand_fill_bits64 (zurand_key k, uint64_t offset, size_t n,
-                         uint64_t *out);
+const zurand_api *zurand_get_api(void);   /* main thread; errors if too old */
 ```
 
-Contract: everything except `zurand_key_get` is **reentrant**. The
-functions call no R API, allocate nothing and touch no mutable global
-state. The SIMD dispatch flag is read-only and output-neutral. So a caller
-may invoke them from its own OpenMP or pthreads workers and get the same
-values as the R functions. The caller owns `out`, so there is no
-copy-on-write question. The fill functions are the same code the R
-samplers run, since the R entry points become thin wrappers over them.
+Contract: everything except `key_get` is **reentrant**. The functions call
+no R API, allocate nothing and touch no mutable global state; the SIMD
+dispatch is settled when the package loads, so worker threads only read
+it. Invalid arguments come back as return codes (`ZURAND_EINVAL`,
+`ZURAND_EKEY`), because an R error on a worker thread would take the
+process down. The fills are the same per-key functions the R samplers call,
+so the values are the R values; a fixture package in `tests/testthat`
+checks that from inside an OpenMP loop. `offset` (C1) will arrive as new
+table members, not as a change to these.
 
 ## 6. Evidence required before the freeze
 

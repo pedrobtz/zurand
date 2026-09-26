@@ -143,6 +143,27 @@ survive a change of default:
 key <- rng_key(42L, engine = "xoshiro256pp")
 ```
 
+## Using zurand from C
+
+Packages can draw from zurand in C, into buffers they own and from their
+own worker threads, and get exactly the values the R functions return.
+Declare `LinkingTo: zurand` and `Imports: zurand`, then:
+
+```c
+#include <zurand.h>
+
+const zurand_api *zr = zurand_get_api();     /* main thread, once */
+zurand_key k;
+zr->key_get(keys, 0, &k);                     /* keys: an rng_key from R */
+
+/* then from any thread: */
+if (zr->fill_normal(k, n, 0.0, 1.0, buf) != ZURAND_OK) { /* bad arguments */ }
+```
+
+The header, [inst/include/zurand.h](inst/include/zurand.h), documents the
+rest: uniform, integer and 64-bit fills, and `fold_int()`, which derives a
+key exactly as `rng_fold(key, i)` does.
+
 ## Interop with R's RNG
 
 `rng_key_from_r()` is the one function here that deliberately consumes R's
