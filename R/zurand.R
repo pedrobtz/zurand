@@ -32,6 +32,16 @@
 #'
 #'   A key records its engine, so a key made with one never produces the
 #'   other's values. Changing engine changes every number you get.
+#'
+#' @section Stream version:
+#' A key also records the version of the stream definition it was made
+#' under, as `attr(key, "stream")`; every key made by this version of
+#' zurand is stream `1L`. If a defect in a stream is ever found after
+#' release, the fix becomes a new stream version for new keys, and existing
+#' keys -- including saved ones -- keep producing exactly the values they
+#' always did. A key saved before the attribute existed is treated as
+#' stream 1. A key from a newer stream than this version of zurand
+#' implements is an error rather than a silent reinterpretation.
 #' @return An object of class `rng_key` containing `n` keys.
 #' @export
 #' @examples
@@ -242,7 +252,14 @@ length.rng_key <- function(x) {
   out <- words[i, , drop = FALSE]
   class(out) <- "rng_key"
   attr(out, "engine") <- attr(x, "engine", exact = TRUE)
+  attr(out, "stream") <- key_stream(x)
   out
+}
+
+# A key without the attribute predates it, and is stream 1.
+key_stream <- function(x) {
+  s <- attr(x, "stream", exact = TRUE)
+  if (is.null(s)) 1L else as.integer(s)
 }
 
 #' @rdname rng_key
@@ -273,11 +290,16 @@ c.rng_key <- function(..., recursive = FALSE) {
   if (length(unique(engines)) != 1L) {
     stop("all keys must use the same engine", call. = FALSE)
   }
+  streams <- vapply(dots, key_stream, integer(1))
+  if (length(unique(streams)) != 1L) {
+    stop("all keys must use the same stream version", call. = FALSE)
+  }
 
   out <- do.call(rbind, lapply(dots, unclass))
   dimnames(out) <- NULL
   class(out) <- "rng_key"
   attr(out, "engine") <- engines[[1L]]
+  attr(out, "stream") <- streams[[1L]]
   out
 }
 
