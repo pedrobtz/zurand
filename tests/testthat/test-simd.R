@@ -26,6 +26,12 @@ test_that("the vectorised and portable paths produce identical values", {
     slow <- with_simd(FALSE, rng_uniform(key, n))
     expect_identical(fast, slow, info = paste("uniform, n =", n))
   }
+  # Many full groups through the fused convert-and-store path, plus the
+  # scaling pass that runs on its output.
+  expect_identical(with_simd(TRUE,  rng_uniform(key, 100003L)),
+                   with_simd(FALSE, rng_uniform(key, 100003L)))
+  expect_identical(with_simd(TRUE,  rng_uniform(key, 5000L, -2, 7)),
+                   with_simd(FALSE, rng_uniform(key, 5000L, -2, 7)))
   for (n in c(1L, 513L, 2048L, 5000L)) {
     expect_identical(with_simd(TRUE,  rng_normal(key, n)),
                      with_simd(FALSE, rng_normal(key, n)),
