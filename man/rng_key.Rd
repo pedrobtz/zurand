@@ -34,9 +34,9 @@ a pure function of the key and the draw index, the same key gives the
 same values on every platform and thread count, and draw \code{i} does not
 depend on \code{n}. They differ in speed and in the stream they produce.
 \itemize{
-\item \code{"xoshiro256pp"} (default) -- the fastest: about \strong{2.4x} dqrng on
-uniform and \strong{1.9x} RcppZiggurat on normal (single thread, x86_64,
-with AVX2). Philox derives a fresh 256-bit xoshiro256++ state for each
+\item \code{"xoshiro256pp"} (default) -- the fastest of the three, and on one
+thread about 1.6-2.5x dqrng on uniform and 1.9-2.7x RcppZiggurat on
+normal (x86_64 and Apple Silicon; see the performance article). Philox derives a fresh 256-bit xoshiro256++ state for each
 512-value chunk, then a cheap recurrence produces the chunk, so a
 chunk depends only on the key and its index. Reaching an arbitrary
 index costs at most 511 recurrence steps. Audited with PractRand to
