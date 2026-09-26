@@ -103,7 +103,7 @@ No output changes. The work is adoption and packaging.
 |--:|---|---|
 | B1 | **C API** (design §5): `inst/include/zurand.h`, `R_RegisterCCallable()` for reentrant fill functions, R samplers reimplemented as thin wrappers over them | the in-place fill PR #4 attempted, delivered where it is safe; lets simulation, MCMC and bootstrap packages draw from their own threads. Test it by building a tiny fixture package in CI that `LinkingTo`s zurand and compares against the R functions |
 | B2 | **Docs**: state `rng_uniform()`'s interval the way `?runif` does; README benchmark table with a platform header, one thread and all threads, randompack on its fastest engine; vignettes "why stateless" and "performance"; NEWS.md; pkgdown | the case for the package currently lives in `dev/` |
-| B3 | **Threading on CRAN**: confirm the tests stay within CRAN's two-core limit (cap with `rng_threads(2L)` in `tests/testthat/setup.R` if `OMP_THREAD_LIMIT` is not honoured), and say plainly in the README that CRAN's macOS binaries have no OpenMP | a common reason for a CRAN bounce; and on macOS the one-thread number is the number |
+| B3 | ~~Threading on CRAN~~ **DONE**: confirm the tests stay within CRAN's two-core limit (cap with `rng_threads(2L)` in `tests/testthat/setup.R` if `OMP_THREAD_LIMIT` is not honoured), and say plainly in the README that CRAN's macOS binaries have no OpenMP | a common reason for a CRAN bounce; and on macOS the one-thread number is the number |
 | B4 | **Release hygiene**: version 0.1.0; `cran-comments.md` explaining the `-Wunused-const-variable` pragma and any FP-contract mechanism from A2; the upstream Random123 URL instead of the local path in CLAUDE.md; a pass with the `cran-extrachecks` skill | the old Phase 4 items |
 | B5 | Submit | |
 
