@@ -220,8 +220,10 @@ old <- rng_threads(1L)
 rng_threads(old)     # restore
 ```
 
-On macOS, Apple clang ships without OpenMP, so a build there is
-single-threaded unless `~/.R/Makevars` defines `SHLIB_OPENMP_CFLAGS` against
+On macOS, Apple clang ships without OpenMP, and R's macOS configuration
+leaves `SHLIB_OPENMP_CFLAGS` empty, so the CRAN binary for macOS is
+single-threaded. On a Mac the single-thread speed is the speed. A source
+build gets threads if `~/.R/Makevars` defines `SHLIB_OPENMP_CFLAGS` against
 a `libomp` installation.
 
 ## License

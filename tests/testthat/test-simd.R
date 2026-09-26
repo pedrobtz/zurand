@@ -48,12 +48,13 @@ test_that("multi-key and threaded fills are path-independent too", {
   keys <- rng_key(42L, n = 3L, engine = "xoshiro256pp")
   expect_identical(with_simd(TRUE,  rng_normal(keys, 3000L)),
                    with_simd(FALSE, rng_normal(keys, 3000L)))
-  old <- rng_threads()
-  on.exit(rng_threads(old), add = TRUE)
-  rng_threads(1L)
-  one <- with_simd(TRUE, rng_uniform(keys, 3000L))
-  rng_threads(0L)
-  expect_identical(with_simd(TRUE, rng_uniform(keys, 3000L)), one)
+  # 3 x 20000 values crosses the 32,768 threshold, so two threads really
+  # split the fill; two is the most CRAN allows (see setup.R).
+  raw <- rng_threads(1L)
+  on.exit(rng_threads(raw), add = TRUE)
+  one <- with_simd(TRUE, rng_uniform(keys, 20000L))
+  rng_threads(2L)
+  expect_identical(with_simd(TRUE, rng_uniform(keys, 20000L)), one)
 })
 
 test_that("rng_simd() validates and round-trips", {

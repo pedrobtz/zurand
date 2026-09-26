@@ -1,0 +1,138 @@
+---
+title: "Stateless random numbers"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Stateless random numbers}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+```{r setup}
+library(zurand)
+```
+
+## One idea
+
+R's generators are stateful. `set.seed()` fixes a starting point, and every
+call to `runif()` or `rnorm()` moves a hidden cursor, `.Random.seed`. What
+you get depends on everything drawn before: add one `rnorm()` call early in
+a script and every later number changes; split a loop across workers and
+the numbers depend on how the work was divided.
+
+zurand has no cursor. A value is a pure function of a **key** and the draw's
+**position**:
+
+```{r}
+key <- rng_key(2026L)
+rng_uniform(key, 3L)
+rng_uniform(key, 3L)          # same key, same values
+rng_uniform(key, 6L)[1:3]     # draw i does not depend on how many you ask for
+```
+
+Nothing is consumed, so nothing has to be passed along, saved or restored.
+
+## Many streams: key vectors and folding
+
+Independent streams come from independent keys. Ask for a vector of them,
+and a sampler returns one column per key:
+
+```{r}
+keys <- rng_key(2026L, n = 3L)
+rng_normal(keys, 4L)
+```
+
+Or derive a key from what a piece of work *is*, with `rng_fold()`. The same
+data always derives the same key, so a computation can name its parts
+instead of counting them:
+
+```{r}
+chain_key <- function(chain) rng_fold(key, paste("chain", chain))
+rng_normal(chain_key(3), 2L)
+rng_normal(chain_key(3), 2L)  # chain 3 gets the same numbers every run
+```
+
+Folding is typed: `rng_fold(key, 1)` and `rng_fold(key, "1")` differ, while
+`1L` and `1` agree.
+
+## Reproducible no matter how the work is split
+
+Because every task's numbers come from its own key, the result cannot
+depend on scheduling. Here is a small bootstrap, one key per replicate. It
+gives the same answer serially, in any order, or spread over workers:
+
+```{r}
+x <- c(2.1, 3.4, 1.9, 5.6, 4.2, 3.3, 2.8, 4.9)
+boot_mean <- function(b) {
+  i <- rng_integer(rng_fold(key, b), length(x), 1L, length(x))
+  mean(x[i])
+}
+serial <- vapply(1:200, boot_mean, numeric(1))
+
+# The same replicates computed in a random order, then put back in place.
+order <- sample(200)
+shuffled <- numeric(200)
+shuffled[order] <- vapply(order, boot_mean, numeric(1))
+identical(serial, shuffled)
+```
+
+With `parallel::mclapply()` or `future.apply::future_lapply()` in place of
+`vapply()` the values are the same again: no worker needs a seed, and none
+can disturb another. zurand's own threaded fills work the same way:
+`rng_threads()` changes the speed, never the values.
+
+## Engines
+
+A key records its engine:
+
+| engine | what it is |
+|---|---|
+| `"xoshiro256pp"` (default) | xoshiro256++, reseeded from Philox every 512 values; the fastest |
+| `"philox4x64"` | Philox4x64-10, counter-based: each value computed from its position |
+| `"threefry4x64"` | Threefry4x64-13, counter-based |
+
+All three give the same guarantees. Changing engine changes every value, so
+name it when a stream has to outlive a change of default:
+
+```{r}
+k <- rng_key(2026L, engine = "philox4x64")
+attr(k, "engine")
+```
+
+## Bit-identical everywhere
+
+The same key gives the same bits on Linux (glibc and musl), macOS and
+Windows, on x86_64 and ARM, at any thread count and with or without SIMD.
+That is enforced, not assumed. zurand computes the `exp()` and `log1p()`
+its normal sampler needs with its own port of fdlibm instead of the
+platform's library, which rounds differently from system to system, and it
+keeps compilers from fusing multiply-adds, which would change results by a
+rounding step. Every CI platform checks known answers and hashes of whole
+streams.
+
+Each key also carries a stream version:
+
+```{r}
+attr(key, "stream")
+```
+
+The output of every `(engine, stream)` pair is frozen. If a stream ever
+needed correcting, the fix would ship as a new version for new keys, and
+existing keys, including saved ones, would go on producing exactly what they
+always have.
+
+## Interop
+
+`rng_key_from_r()` is the one function that reads R's own generator. Use it
+to turn a `set.seed()` into a key:
+
+```{r}
+set.seed(1)
+rng_key_from_r()
+```
+
+Packages can use the same streams from C or C++, from their own threads,
+through the API in `zurand.h`; see the README.
