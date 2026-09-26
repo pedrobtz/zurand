@@ -28,6 +28,12 @@
 #  define ZE_CHUNK_WORDS ZURAND_CHUNK_WORDS
 #endif
 
+/* Counter word 3 for this engine's Philox/Threefry calls (see
+ * ZURAND_TAG_* in zurand.c). */
+#ifndef ZE_TAG
+#  define ZE_TAG ZURAND_TAG_PHILOX
+#endif
+
 #define ZE_CAT2(a, b) a##_##b
 #define ZE_CAT(a, b) ZE_CAT2(a, b)
 #define ZE_N(name) ZE_CAT(name, ZE_SUFFIX)
@@ -38,7 +44,7 @@ R123_STATIC_INLINE zurand_ctr_t ZE_N(zurand_block)(ZE_KEY_T key,
                                                 uint64_t index,
                                                 uint64_t domain,
                                                 uint64_t purpose) {
-    zurand_ctr_t ctr = {{index, domain, purpose, 0}};
+    zurand_ctr_t ctr = {{index, domain, purpose, ZE_TAG}};
     return ZE_GEN(ctr, key);
 }
 
@@ -316,3 +322,4 @@ static void ZE_N(fill_integer_column)(int *out, R_xlen_t n, ZE_KEY_T key,
 #undef ZE_GEN
 #undef ZE_CUSTOM_CHUNK
 #undef ZE_CHUNK_WORDS
+#undef ZE_TAG

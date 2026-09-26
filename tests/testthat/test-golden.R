@@ -138,36 +138,36 @@ test_that("the xoshiro256pp engine is bit-stable", {
   # this engine reseeds and the only place its indexing could go wrong.
   expect_identical(rng_uniform(rng_key(42L, engine = "xoshiro256pp"), 8L),
     c(
-      0x1.2a581f80c437p-5, 0x1.ab2018f5da24dp-1, 0x1.e4334cceac67ap-2,
-      0x1.6a7784e81a88p-8, 0x1.be3ba9c4dcadbp-1, 0x1.a3ed6b35e7622p-2,
-      0x1.910a74a0ac7b6p-2, 0x1.7d5150edfa817p-1
+      0x1.4988189cff8bfp-1, 0x1.ab157a53c46f6p-2, 0x1.0602eb9773fe4p-3,
+      0x1.b456575313855p-1, 0x1.6585e4082e9c2p-2, 0x1.a7c2a0cd00fd6p-2,
+      0x1.f1001006a2aaep-2, 0x1.a661066328b8cp-3
     ))
 
   expect_identical(rng_normal(rng_key(42L, engine = "xoshiro256pp"), 8L),
     c(
-      -0x1.36e7186c4f557p+0, 0x1.9b7c19da02f9fp+0, -0x1.3e745a307bf21p-1,
-      0x1.905276bc6b61ap-1, 0x1.6c338450b9db6p-1, 0x1.56dac9dfb8d1p+0,
-      -0x1.b9b8c577125f8p-1, 0x1.9a051051413f4p-2
+      0x1.a16fec0c427a4p+0, -0x1.1e5ed0e26844fp+0, -0x1.53ee3709bad7fp-1,
+      0x1.ea3a4df3d4c86p-3, -0x1.84eac07512cb3p-3, 0x1.23ee809a5d6a5p+0,
+      0x1.e51aece65feebp-1, -0x1.511ace579518cp+0
     ))
 
   expect_identical(rng_uniform(rng_key(42L, engine = "xoshiro256pp"), 1030L)[508:520],
     c(
-      0x1.173d0de51886fp-1, 0x1.7923105527bbdp-1, 0x1.44b43d9e80b66p-2,
-      0x1.b078f6407c3afp-1, 0x1.f399030c36676p-2, 0x1.d6f79ebed95edp-1,
-      0x1.8d2909b26a29bp-1, 0x1.1c6e147599dbcp-3, 0x1.c6e3e615d6fd7p-1,
-      0x1.4e51bf05f26ep-6, 0x1.46f3b6de802cfp-1, 0x1.e3020d45b0c6ep-2,
-      0x1.e05aec585b2e7p-1
+      0x1.01db1257ab559p-1, 0x1.48590d3ee5a24p-3, 0x1.569accb317091p-1,
+      0x1.a1dd51f31c83p-5, 0x1.b15d07a312351p-1, 0x1.e3d20fcc2e735p-1,
+      0x1.da275b5cff706p-2, 0x1.ca055dbb7302ep-2, 0x1.ecb7d0833eff8p-4,
+      0x1.1e380dbe3af78p-4, 0x1.085021e3c048ap-2, 0x1.25b4b860936e1p-1,
+      0x1.7e356443bfde2p-2
     ))
 
   expect_identical(rng_integer(rng_key(42L, engine = "xoshiro256pp"), 8L, min = 1L, max = 6L),
     c(
-      1L, 5L, 3L, 5L, 2L, 1L, 4L, 5L
+      3L, 1L, 4L, 2L, 5L, 3L, 3L, 1L
     ))
 
   expect_identical(as.character(rng_bits(rng_key(42L, engine = "xoshiro256pp"), 6L, bits = 64L)),
     c(
-      "1b56f8cdd2f1eb5e", "6f452a520ec8e62f", "244edfface7c6cd1",
-      "0a1d672e40c991eb", "2f7e7b02530edffc", "87251fef7a1b81a0"
+      "43c5f4cd83802dbd", "78da9ead113fe5a4", "299a3bb52451dd67",
+      "5fbbf3fa2cd02aa7", "19f9ca1d2aa9841e", "7a0702166e468fd6"
     ))
 
   expect_false(identical(rng_normal(rng_key(42L), 64L),

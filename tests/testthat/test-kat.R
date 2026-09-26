@@ -121,10 +121,10 @@ test_that("the xoshiro256pp engine is Philox-seeded xoshiro256++", {
     as.character(rng_bits(rng_key(42L, engine = "xoshiro256pp"), 12L,
                           bits = 64L)),
     c(
-      "1b56f8cdd2f1eb5e", "6f452a520ec8e62f", "244edfface7c6cd1",
-      "0a1d672e40c991eb", "2f7e7b02530edffc", "87251fef7a1b81a0",
-      "9350556fd960839d", "6910cc1a9333c2e5", "7ccae33979945e2b",
-      "cf8b8b330f5e634c", "6904c471b430bf12", "35bd804babdb3e5f"
+      "43c5f4cd83802dbd", "78da9ead113fe5a4", "299a3bb52451dd67",
+      "5fbbf3fa2cd02aa7", "19f9ca1d2aa9841e", "7a0702166e468fd6",
+      "6375abd361bd67b0", "cd5550b6f84b7143", "28c4819c67aee065",
+      "4797aa23e3c82513", "5230501d0813e217", "83048653310e7dbe"
     ))
 
   # seed 1, chunk 0
@@ -132,10 +132,10 @@ test_that("the xoshiro256pp engine is Philox-seeded xoshiro256++", {
     as.character(rng_bits(rng_key(1L, engine = "xoshiro256pp"), 12L,
                           bits = 64L)),
     c(
-      "0236ff70a50671be", "d61d364a1852d903", "5bd04558e85dd67e",
-      "b2e94439eb3695ab", "7885f3906a9875d7", "25891a13e0bbfb9d",
-      "f1f7f4763f1fe9af", "78d029f7a7cd8dee", "f3fb6dbc40ecc4ef",
-      "ccf4319481205b6f", "a8e0aa620e48546f", "f07a3c709def6f2d"
+      "70a59c7d3ebaa6be", "acb6925e51f278c2", "88c0b3ef43baddf7",
+      "d2984b97aa87f48a", "4477c0504ee3e82c", "b0a2dfb8e45edf48",
+      "01c0c612baf2e34a", "b286c333f4d231a1", "b7614b70315703de",
+      "e51acc1217b946ae", "614c328eb022d89c", "3b908773b1b8ae77"
     ))
 
   # seed 2026, chunk 0
@@ -143,10 +143,10 @@ test_that("the xoshiro256pp engine is Philox-seeded xoshiro256++", {
     as.character(rng_bits(rng_key(2026L, engine = "xoshiro256pp"), 12L,
                           bits = 64L)),
     c(
-      "a2f2b191e10a323c", "c6deecf52ac1c358", "84a7b0924a54e491",
-      "cf4b5e509937cfc8", "666a65533e56d6ec", "82af9b76dfe68722",
-      "2ce72dd5625dfad4", "ccd96825f820cada", "636b89eb3e808b88",
-      "d623c385091c989c", "8935919ee10b24f5", "5315199e72c909cb"
+      "4175b5c953f366e5", "df902ff6ad22f930", "5f1463f89ce46b24",
+      "206cab7051d620e3", "6df7825e2538a28c", "0e4caaa3a788c13a",
+      "e1be9dbc45c0b6e7", "f04370075bc595ab", "bd49e8155275b13b",
+      "e69d3355426afa33", "a71572e9e93c2284", "e7c7d585b614c377"
     ))
 
   # seed 42, words 510..515: the last two of chunk 0 and the first four of
@@ -155,8 +155,8 @@ test_that("the xoshiro256pp engine is Philox-seeded xoshiro256++", {
     as.character(rng_bits(rng_key(42L, engine = "xoshiro256pp"), 516L,
                           bits = 64L))[511:516],
     c(
-      "708e364257a88881", "bd62f71b99809463", "8163862abbd492e7",
-      "744fe5e25e614d66", "70dcda492a464480", "069b26a2ebe411e6"
+      "9cd34d657f47ae4e", "bb4c81a002ded4d6", "78b32993e2c6421d",
+      "7fef2abfe002c6a7", "c970545f205ba1b1", "455f32d504bd369d"
     ))
 })
 
