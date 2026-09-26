@@ -14,6 +14,6 @@ set -e
 RINC=$(Rscript -e 'cat(R.home("include"))')
 cd "$(dirname "$0")/../src"
 clang -fsyntax-only -Xclang -fopenmp \
-      -I../dev/ompstub -I"$RINC" -I. \
+      -I../dev/ompstub -I"$RINC" -I. -I../inst/include \
       -DNDEBUG -DR123_USE_MULHILO64_C99=1 zurand.c
 echo "OpenMP pragmas OK (default(none) clauses complete)"

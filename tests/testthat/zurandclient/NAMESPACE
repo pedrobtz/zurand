@@ -1,0 +1,2 @@
+useDynLib(zurandclient, .registration = TRUE)
+export(client_fill, client_fold, client_errors)

@@ -1,0 +1,9 @@
+Package: zurandclient
+Version: 0.0.1
+Title: Test Fixture for the 'zurand' C API
+Description: Built by tests/testthat/test-c-api.R to exercise the 'zurand'
+    C API the way a downstream package would. A real package declares
+    'LinkingTo: zurand' and 'Imports: zurand'; this fixture gets the header
+    path from the test instead, so it also builds under devtools::test().
+License: MIT
+Encoding: UTF-8
