@@ -135,7 +135,7 @@ A key records its engine, chosen when it is created:
 
 | `engine` | what it is |
 |---|---|
-| `"xoshiro256pp"` (default) | xoshiro256++, reseeded from Philox every 512 values; the fastest, with an AVX2 path that gives the same bits as the scalar one |
+| `"xoshiro256pp"` (default) | xoshiro256++, reseeded from Philox every 512 values; zurand's fastest engine, with an AVX2 path that gives the same bits as the scalar one |
 | `"philox4x64"` | Philox4x64-10, counter-based: every value computed directly from its position |
 | `"threefry4x64"` | Threefry4x64-13, counter-based |
 
@@ -150,6 +150,37 @@ survive a change of default:
 ```r
 key <- rng_key(42L, engine = "xoshiro256pp")
 ```
+
+## Performance
+
+Millions of values per second for `n = 1e7`, median of five rounds, from the
+`benchmark` workflow on GitHub-hosted runners (2026-09-26). Every package is
+measured in the same `bench::mark()` call on the same machine.
+
+| | Linux x86_64, 1 thread | Linux x86_64, 4 threads | macOS arm64, 1 thread |
+|---|---:|---:|---:|
+| **uniform** | | | |
+| zurand (`xoshiro256pp`) | 569 | **1370** | 638 |
+| zurand (`philox4x64`) | 258 | 587 | 516 |
+| randompack (`x256++simd`) | **617** | 656 | **1309** |
+| dqrng | 350 | 352 | 256 |
+| base R `runif()` | 99 | 103 | 185 |
+| **normal** | | | |
+| zurand (`xoshiro256pp`) | 329 | **822** | 437 |
+| zurand (`philox4x64`) | 197 | 468 | 363 |
+| randompack (`x256++simd`) | **333** | 324 | **594** |
+| RcppZiggurat (MT) | 123 | 121 | 224 |
+| dqrng | 140 | 140 | 229 |
+| base R `rnorm()` | 28 | 28 | 43 |
+
+Linux: AMD EPYC 7763, AVX2, OpenMP. macOS: Apple M1, no OpenMP, as in the
+CRAN binary. On one thread zurand is ahead of dqrng and RcppZiggurat on
+both platforms, and level with randompack's SIMD engine on x86_64;
+randompack is faster on Apple Silicon, where zurand has no vector path yet.
+With threads, zurand's output is still bit-identical to one thread, and
+none of the others parallelizes at the R level. The
+[performance article](https://github.com/pedrobtz/zurand/blob/main/vignettes/performance.Rmd)
+has the method and how to reproduce these numbers.
 
 ## Using zurand from C
 
@@ -197,8 +228,10 @@ old <- rng_threads(1L)
 rng_threads(old)     # restore
 ```
 
-On macOS, Apple clang ships without OpenMP, so a build there is
-single-threaded unless `~/.R/Makevars` defines `SHLIB_OPENMP_CFLAGS` against
+On macOS, Apple clang ships without OpenMP, and R's macOS configuration
+leaves `SHLIB_OPENMP_CFLAGS` empty, so the CRAN binary for macOS is
+single-threaded. On a Mac the single-thread speed is the speed. A source
+build gets threads if `~/.R/Makevars` defines `SHLIB_OPENMP_CFLAGS` against
 a `libomp` installation.
 
 ## License

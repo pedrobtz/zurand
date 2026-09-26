@@ -53,6 +53,12 @@ jobs:
           r-version: release
           http-user-agent: release
 
+      # RcppZiggurat's Linux binary links the system GSL, which the runner
+      # image does not ship; without it the package fails to load.
+      - name: System libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgsl-dev
+
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           extra-packages: |
@@ -80,10 +86,13 @@ jobs:
           n      <- as.integer(as.numeric(Sys.getenv("ZURAND_N")))
           rounds <- as.integer(Sys.getenv("ZURAND_ROUNDS"))
           dqset.seed(42L)
-          kp <- rng_key(42L); kt <- rng_key(42L, engine = "threefry4x64")
+          kp <- rng_key(42L, engine = "philox4x64")
+          kt <- rng_key(42L, engine = "threefry4x64")
           kx <- rng_key(42L, engine = "xoshiro256pp")
-          rp <- randompack::randompack_rng("philox")
-          sitmo::setSeed(42L)
+          # randompack's default engine is its fastest (8-lane SIMD
+          # xoshiro256++); its philox is the counter-based comparison.
+          rp <- randompack::randompack_rng()
+          rp_philox <- randompack::randompack_rng("philox")
           sink <- Sys.getenv("GITHUB_STEP_SUMMARY")
           say <- function(...) { cat(..., sep = "", file = sink, append = TRUE)
                                  cat(..., sep = "") }
@@ -109,9 +118,16 @@ jobs:
           }
 
           threads <- rng_threads()
+          cpu <- tryCatch(switch(Sys.info()[["sysname"]],
+            Darwin  = system("sysctl -n machdep.cpu.brand_string", intern = TRUE),
+            Linux   = sub(".*:\\s*", "", grep("^model name", readLines("/proc/cpuinfo"),
+                                            value = TRUE)[1]),
+            Windows = Sys.getenv("PROCESSOR_IDENTIFIER")),
+            error = function(e) "unknown CPU")
           say("## Benchmark\n\n", sprintf(
-            "`%s` · n = %s · %d rounds · R %s · OpenMP: %s · SIMD: %s\n\n",
-            Sys.getenv("RUNNER_OS"), format(n, big.mark = ","), rounds,
+            "`%s` · %s · %s · %d cores · n = %s · %d rounds · R %s · OpenMP: %s · SIMD: %s\n\n",
+            Sys.getenv("RUNNER_OS"), cpu, R.version$arch, parallel::detectCores(),
+            format(n, big.mark = ","), rounds,
             getRversion(),
             if (threads > 1) paste0("yes, ", threads, " threads") else
               "**absent — the all-threads tables below are meaningless**",
@@ -123,6 +139,7 @@ jobs:
             zurand_philox   = quote(rng_uniform(kp, n)),
             dqrng           = quote(dqrunif(n)),
             randompack      = quote(rp$unif(len = n)),
+            randompack_philox = quote(rp_philox$unif(len = n)),
             sitmo           = quote(runif_sitmo(n, 0, 1, 42L)),
             base_R          = quote(runif(n)),
             alloc_only      = quote(numeric(n)))
@@ -133,6 +150,7 @@ jobs:
             RcppZig_MT      = quote(zrnormMT(n)),
             RcppZig_LZLLV   = quote(zrnorm(n)),
             randompack      = quote(rp$normal(len = n)),
+            randompack_philox = quote(rp_philox$normal(len = n)),
             dqrng           = quote(dqrnorm(n)),
             base_R          = quote(rnorm(n)),
             alloc_only      = quote(numeric(n)))

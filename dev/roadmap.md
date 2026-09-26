@@ -47,18 +47,27 @@ R CMD INSTALL . && Rscript tools/benchmark.R
   other metric regresses, and output is bit-identical unless the change is
   listed in milestone A.
 
-## Status (2026-09-25)
+## Status (2026-09-26)
 
-x86_64 i5-8500B, one thread, n = 1e7, from `dev/benchmark-baseline.md`:
+n = 1e7, M/s, from the `benchmark` workflow on GitHub runners, each package
+in the same `bench::mark()` call:
 
-| engine | uniform | Gaussian | note |
-|---|---:|---:|---|
-| `xoshiro256pp` + AVX2 | **776 M/s**, 2.4x dqrng | **376 M/s**, 1.9x RcppZiggurat MT | fastest in the field on both |
-| `philox4x64` (current default) | 314, 0.96x dqrng | 215, 1.09x | |
-| `threefry4x64` | ~1.1x philox | ~1.15x philox | |
+| | EPYC 7763, 1 thread | EPYC, 4 threads | Apple M1, 1 thread |
+|---|---:|---:|---:|
+| uniform: zurand `xoshiro256pp` | 569 | 1370 | 638 |
+| uniform: randompack `x256++simd` | **617** | 656 | **1309** |
+| uniform: dqrng | 350 | 352 | 256 |
+| Gaussian: zurand `xoshiro256pp` | 329 | 822 | 437 |
+| Gaussian: randompack `x256++simd` | **333** | 324 | **594** |
+| Gaussian: RcppZiggurat MT | 123 | 121 | 224 |
 
-No M-series baseline exists yet, and no all-threads baseline has been
-published.
+The i5-8500B used for development gives zurand 780/377 against randompack's
+SIMD engine at 431-441/256-263, so the single-thread ranking depends on the
+microarchitecture. Earlier baselines measured randompack's philox engine
+only, which flattered zurand. On Apple Silicon memory is not the limit
+(`numeric(n)` runs at 7700 M/s) and zurand has no vector path, which makes
+C4 (NEON) the largest single-thread gain left. With threads zurand leads
+everywhere it has them.
 
 Done: KAT against Random123 for both counter engines; golden values in hex
 floats; threads = serial and SIMD = scalar identity tests; two-pass uniform
@@ -103,7 +112,7 @@ No output changes. The work is adoption and packaging.
 |--:|---|---|
 | B1 | ~~C API~~ **DONE** (design §5): `inst/include/zurand.h`, `R_RegisterCCallable()` for reentrant fill functions, R samplers reimplemented as thin wrappers over them | the in-place fill PR #4 attempted, delivered where it is safe; lets simulation, MCMC and bootstrap packages draw from their own threads. Test it by building a tiny fixture package in CI that `LinkingTo`s zurand and compares against the R functions |
 | B2 | **Docs**: state `rng_uniform()`'s interval the way `?runif` does; README benchmark table with a platform header, one thread and all threads, randompack on its fastest engine; vignettes "why stateless" and "performance"; NEWS.md; pkgdown | the case for the package currently lives in `dev/` |
-| B3 | **Threading on CRAN**: confirm the tests stay within CRAN's two-core limit (cap with `rng_threads(2L)` in `tests/testthat/setup.R` if `OMP_THREAD_LIMIT` is not honoured), and say plainly in the README that CRAN's macOS binaries have no OpenMP | a common reason for a CRAN bounce; and on macOS the one-thread number is the number |
+| B3 | ~~Threading on CRAN~~ **DONE**: confirm the tests stay within CRAN's two-core limit (cap with `rng_threads(2L)` in `tests/testthat/setup.R` if `OMP_THREAD_LIMIT` is not honoured), and say plainly in the README that CRAN's macOS binaries have no OpenMP | a common reason for a CRAN bounce; and on macOS the one-thread number is the number |
 | B4 | **Release hygiene**: version 0.1.0; `cran-comments.md` explaining the `-Wunused-const-variable` pragma and any FP-contract mechanism from A2; the upstream Random123 URL instead of the local path in CLAUDE.md; a pass with the `cran-extrachecks` skill | the old Phase 4 items |
 | B5 | Submit | |
 
@@ -121,7 +130,7 @@ or claims a new argument, purpose value or engine name.
 | C1 | `offset = 0` on every sampler (and in the C API from B1) | additive | counter engines: O(1); xoshiro: at most 511 steps |
 | C2 | Vector `mean`/`sd`/`min`/`max`, recycled | additive | same per-element formula as the scalar case |
 | C3 | Fuse the `mean`/`sd` and `min`/`max` scaling into the per-chunk transform; packed `{ki, wi}` ziggurat table | neutral | old items 1.3 and 1.2; 1.2 measured 1.10x on the transform |
-| C4 | NEON path for `xoshiro256pp` (2 sub-chunks per register) and an M-series baseline from a `macos-14` runner | neutral | old 5.2 and the missing primary-machine baseline; matters more to Mac users than threads do |
+| C4 | NEON path for `xoshiro256pp` (2 sub-chunks per register) | neutral | **highest priority after release**: on Apple M1 randompack's SIMD engine is 2x zurand on uniform (1309 vs 638 M/s) and CRAN's macOS binary has no threads to make up for it; the M-series baseline now exists (2026-09-26 CI benchmark) |
 | C5 | `rng_exponential()` | additive, purpose 5 | NumPy's exponential tables are already vendored |
 | C6 | AVX2 ziggurat fast path: two gathers, a compare, a scalar loop for rejected lanes | neutral | land only if the ratio interval separates; realistic target 500 M/s |
 | C7 | `rng_normal(method = "inversion")` | additive, purpose 6 | monotone in `u`, for CRN, antithetics and QMC |

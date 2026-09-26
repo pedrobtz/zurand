@@ -251,22 +251,35 @@ test_that("rng_threads() caps parallelism without changing results", {
   expect_identical(rng_normal(keys, 40001L), z)
   expect_identical(rng_integer(key, 70001L, -9L, 9L), x)
 
-  # setting returns the raw previous cap so restores round-trip exactly,
-  # including back to the uncapped state
-  prev <- rng_threads(0L)
-  expect_identical(prev, 1L)
-  expect_identical(rng_threads(), eff)
+  # Two threads, the most CRAN allows, and the same values again.
+  rng_threads(2L)
   expect_identical(rng_uniform(key, 70001L), u)
+  expect_identical(rng_normal(keys, 40001L), z)
 
-  # far above the machine count is allowed and equivalent to no cap
-  rng_threads(1e9)
-  expect_identical(rng_threads(), eff)
-  rng_threads(0L)
+  # Setting returns the raw previous cap, so restores round-trip exactly,
+  # including to and from the uncapped state. No draws happen uncapped
+  # here: on CRAN that would use every core (see setup.R).
+  expect_identical(rng_threads(0L), 2L)
+  uncapped <- rng_threads()
+  expect_gte(uncapped, eff)
+  # Far above the machine count is allowed and equivalent to no cap.
+  expect_identical(rng_threads(1e9), 0L)
+  expect_identical(rng_threads(), uncapped)
 
   expect_error(rng_threads(-1L), "at least 1")
   expect_error(rng_threads(1.5), "at least 1")
   expect_error(rng_threads(c(1L, 2L)), "single value")
-  expect_identical(rng_threads(), eff)
+})
+
+test_that("an uncapped fill equals a single-threaded one", {
+  # Uses every core the OpenMP runtime offers, which CRAN forbids.
+  skip_on_cran()
+  key <- rng_key(31L)
+  raw <- rng_threads(1L)
+  on.exit(rng_threads(raw))
+  u <- rng_uniform(key, 70001L)
+  rng_threads(0L)
+  expect_identical(rng_uniform(key, 70001L), u)
 })
 
 test_that("stateless functions do not touch .Random.seed", {

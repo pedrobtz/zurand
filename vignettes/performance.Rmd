@@ -1,0 +1,128 @@
+---
+title: "Performance"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Performance}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+This article reports what zurand costs and how that was measured. The code
+below is not run when the vignette is built: a fair benchmark takes
+minutes and needs every competing package installed.
+
+## Results
+
+Millions of values per second for `n = 1e7`, median of five rounds, from
+the package's `benchmark` workflow on GitHub-hosted runners, 2026-09-26.
+
+| | Linux x86_64, 1 thread | Linux x86_64, 4 threads | macOS arm64, 1 thread |
+|---|---:|---:|---:|
+| **uniform** | | | |
+| zurand (`xoshiro256pp`) | 569 | **1370** | 638 |
+| zurand (`threefry4x64`) | 320 | 731 | 364 |
+| zurand (`philox4x64`) | 258 | 587 | 516 |
+| randompack (`x256++simd`) | **617** | 656 | **1309** |
+| randompack (`philox`) | 244 | 242 | 484 |
+| dqrng | 350 | 352 | 256 |
+| sitmo | 168 | 168 | 310 |
+| base R `runif()` | 99 | 103 | 185 |
+| **normal** | | | |
+| zurand (`xoshiro256pp`) | 329 | **822** | 437 |
+| zurand (`threefry4x64`) | 210 | 487 | 288 |
+| zurand (`philox4x64`) | 197 | 468 | 363 |
+| randompack (`x256++simd`) | **333** | 324 | **594** |
+| randompack (`philox`) | 177 | 177 | 348 |
+| RcppZiggurat (MT) | 123 | 121 | 224 |
+| RcppZiggurat (LZLLV) | 93 | 93 | 276 |
+| dqrng | 140 | 140 | 229 |
+| base R `rnorm()` | 28 | 28 | 43 |
+
+- **Linux:** AMD EPYC 7763, 4 cores, AVX2, OpenMP.
+- **macOS:** Apple M1 (virtualised), 3 cores, no OpenMP. That is also what
+  the CRAN binary for macOS gets, because R's macOS configuration leaves
+  `SHLIB_OPENMP_CFLAGS` empty.
+
+## Reading the table
+
+- **Against dqrng and RcppZiggurat**, zurand's default engine is ahead on
+  every platform: 1.6–2.5x dqrng on uniform, 1.9–2.7x RcppZiggurat on
+  normal, single-threaded.
+- **Against randompack's SIMD engine** it is level on x86_64, and about
+  half the speed on Apple Silicon for uniform. On the M1, memory is not the
+  limit (allocating and zeroing the vector alone runs at over 7,000 M/s),
+  and zurand has no NEON path yet; that is the next planned speed-up. On
+  the development machine, an Intel i5-8500B, zurand measured 780 M/s
+  uniform against randompack's 431–441, so the single-thread ranking
+  depends on the microarchitecture.
+- **With threads**, zurand is the only package here that parallelizes at the
+  R level, and the threaded output is bit-identical to the serial one.
+  None of the others' single-thread rates approach its four-thread rate on
+  Linux.
+- **The engines differ in speed, not in guarantees.** Philox and Threefry
+  are counter-based: each value is computed from its position. The default
+  xoshiro256pp reseeds a cheap recurrence from Philox every 512 values.
+
+## Method
+
+Every number comes from one protocol:
+
+- an `-O2` build, never `devtools::load_all()` in its default debug mode,
+  which compiles `-O0` and runs about ten times slower;
+- every package measured in the same `bench::mark()` call on the same
+  machine, and the ratio reported over repeated rounds, because absolute
+  throughput on a shared machine moves by more than the differences being
+  measured;
+- each competitor on its fastest engine, with its counter-based engine
+  alongside where it has one.
+
+```{r}
+library(zurand)
+library(bench)
+
+n <- 1e7
+key <- rng_key(42L)                  # xoshiro256pp, the default
+rp <- randompack::randompack_rng()   # randompack's fastest engine
+
+rng_threads(1L)
+bench::mark(
+  zurand     = rng_uniform(key, n),
+  randompack = rp$unif(len = n),
+  dqrng      = dqrng::dqrunif(n),
+  base       = runif(n),
+  check = FALSE, min_iterations = 10
+)
+```
+
+The full comparison is `tools/benchmark.R` in the source repository, and
+the `benchmark` workflow runs it on any GitHub-hosted runner.
+
+## Threads
+
+`rng_threads()` caps how many threads zurand uses. The cap changes speed,
+never values:
+
+```{r}
+key <- rng_key(1L)
+rng_threads(1L); one <- rng_normal(key, 1e7)
+rng_threads(0L); all <- rng_normal(key, 1e7)   # 0 removes the cap
+identical(one, all)
+#> [1] TRUE
+```
+
+Fills go parallel above 32,768 values. With several keys the threads split
+the keys; with one key they split its positions.
+
+## Beyond R
+
+The C API in `zurand.h` fills buffers the caller owns, from the caller's
+own threads, with the values the R functions return. For a simulation
+that consumes random numbers as it goes, filling a reused buffer avoids
+allocating a new R vector per call. For large vectors that allocation is a
+large share of the time: on the Linux runner, allocating and zeroing a
+vector of 1e7 doubles alone runs at about 1,250 M/s, the same order as
+zurand's four-thread fill.

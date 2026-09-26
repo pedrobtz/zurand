@@ -21,6 +21,13 @@ A numeric vector of length \code{n} for one key, or an \code{n} by
 Stateless uniform sampling. \code{rng_uniform(key, n, min, max)} is a pure
 function of its arguments and returns ordinary numeric vectors or matrices.
 }
+\details{
+With the default bounds every value lies strictly inside \eqn{(0, 1)}: it
+is \eqn{(m + 1/2) 2^{-52}} for a 52-bit integer \eqn{m}, so neither
+endpoint can occur. Other bounds are applied as \code{min + (max - min) * u},
+which, as with \code{\link[stats:runif]{stats::runif()}}, will not return either extreme value
+unless \code{max = min} or \code{max - min} is small compared with \code{min}.
+}
 \examples{
 key <- rng_key(42L)
 rng_uniform(key)
