@@ -6,31 +6,28 @@
 \usage{
 rng_key_from_r(
   n = 1L,
-  engine = c("philox4x64", "threefry4x64", "xoshiro256pp")
+  engine = c("xoshiro256pp", "philox4x64", "threefry4x64")
 )
 }
 \arguments{
 \item{n}{A single non-negative whole number: how many keys to create.}
 
-\item{engine}{The counter-based engine. Both are Random123 generators, so
-both give the same guarantee: a value is a pure function of the key and
-the draw index, reachable directly without generating what precedes it.
-They differ only in speed and in the stream they produce.
+\item{engine}{The engine. All three give the same guarantees: a value is
+a pure function of the key and the draw index, the same key gives the
+same values on every platform and thread count, and draw \code{i} does not
+depend on \code{n}. They differ in speed and in the stream they produce.
 \itemize{
-\item \code{"philox4x64"} (default) -- Philox4x64-10. The original engine; its
-stream is fixed and will not change.
-\item \code{"threefry4x64"} -- Threefry4x64-13. About 1.1x faster than the
-default in practice, though 1.8x faster per word in isolation: past
-L1 the fill is limited by memory, not by the generator.
-\item \code{"xoshiro256pp"} -- the fastest, roughly \strong{2x} the default on
-uniform and \strong{1.7x} on normal. Philox derives a fresh 256-bit
-xoshiro256++ state for each 512-value chunk, then a cheap
-recurrence produces the chunk. Reproducibility is unaffected: a
-chunk depends only on the key and its index, so the same key gives
-the same values, draw \code{i} still does not depend on \code{n}, and a
-threaded fill is bit-identical to a serial one. What it gives up is
-the ability to reach an arbitrary index in constant time, which no
-exported function offers; \code{"philox4x64"} keeps that property open.
+\item \code{"xoshiro256pp"} (default) -- the fastest: about \strong{2.4x} dqrng on
+uniform and \strong{1.9x} RcppZiggurat on normal (single thread, x86_64,
+with AVX2). Philox derives a fresh 256-bit xoshiro256++ state for each
+512-value chunk, then a cheap recurrence produces the chunk, so a
+chunk depends only on the key and its index. Reaching an arbitrary
+index costs at most 511 recurrence steps. Audited with PractRand to
+1 TB, including interleaved streams of sibling and folded keys.
+\item \code{"philox4x64"} -- Philox4x64-10 from Random123, counter-based: each
+value is computed directly from its position.
+\item \code{"threefry4x64"} -- Threefry4x64-13 from Random123, counter-based;
+about 1.1x Philox in practice.
 }
 
 A key records its engine, so a key made with one never produces the

@@ -4,9 +4,9 @@
 \name{zurand-package}
 \alias{zurand}
 \alias{zurand-package}
-\title{zurand: Stateless Random Numbers via Counter-Based Generation}
+\title{zurand: Fast Stateless Random Number Generation}
 \description{
-Stateless deterministic random number generation using the Philox counter-based generator from the 'Random123' library by Salmon, Moraes, Dror and Shaw (2011) \doi{10.1145/2063384.2063405}. Random values are pure functions of immutable keys and sampler arguments, so sampling never reads or mutates '.Random.seed'. Independent substreams are requested as key vectors with rng_key(seed, n) or derived explicitly with rng_fold().
+Fast, stateless, deterministic random number generation. Random values are pure functions of immutable keys and sampler arguments, so sampling never reads or mutates '.Random.seed', and output is bit-identical across platforms and thread counts. The default engine is xoshiro256++ reseeded from the Philox counter-based generator of the 'Random123' library by Salmon, Moraes, Dror and Shaw (2011) \doi{10.1145/2063384.2063405}; Philox and Threefry are also available directly. Independent substreams are requested as key vectors with rng_key(seed, n) or derived explicitly with rng_fold().
 }
 \author{
 \strong{Maintainer}: Pedro Baltazar \email{pedrobtz@gmail.com} [copyright holder]

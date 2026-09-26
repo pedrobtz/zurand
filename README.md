@@ -6,8 +6,10 @@
 ![Coverage](https://github.com/pedrobtz/zurand/raw/main/.github/badges/coverage.svg)
 <!-- badges: end -->
 
-Stateless random numbers for R, built on the Philox4x64-10 counter-based
-generator from [Random123](https://github.com/DEShawResearch/random123).
+Fast, stateless random numbers for R. The default engine is xoshiro256++,
+reseeded every 512 values from the Philox4x64-10 counter-based generator of
+[Random123](https://github.com/DEShawResearch/random123); Philox and Threefry
+are available directly.
 
 Every value is a pure function of an immutable **key** plus the sampler's
 arguments. Samplers never read or mutate `.Random.seed`, so results do not
@@ -34,10 +36,10 @@ key
 #> <rng_key> rng_key[2feb6e95bdd73226b266f10328efe333]
 
 rng_uniform(key, 5L)
-#> [1] 0.7901089 0.7292057 0.5056636 0.1168211 0.1449297
+#> [1] 0.6436165 0.4170741 0.1279353 0.8522212 0.3491436
 
 rng_uniform(key, 5L)   # same key, same draws
-#> [1] 0.7901089 0.7292057 0.5056636 0.1168211 0.1449297
+#> [1] 0.6436165 0.4170741 0.1279353 0.8522212 0.3491436
 ```
 
 Drawing more values extends the sequence rather than changing it — draw `i` is
@@ -67,11 +69,11 @@ column per key:
 
 ```r
 rng_uniform(keys, 4L)
-#>           [,1]      [,2]      [,3]
-#> [1,] 0.7901089 0.1729620 0.7636065
-#> [2,] 0.7292057 0.9580783 0.8891381
-#> [3,] 0.5056636 0.9048795 0.1261067
-#> [4,] 0.1168211 0.5774249 0.4911186
+#>           [,1]       [,2]      [,3]
+#> [1,] 0.6436165 0.85879755 0.3794245
+#> [2,] 0.4170741 0.60044715 0.6979140
+#> [3,] 0.1279353 0.09813149 0.6872125
+#> [4,] 0.8522212 0.77553624 0.4570548
 ```
 
 Or derive a key from structured data with `rng_fold()`, which is useful when
@@ -82,7 +84,7 @@ rng_fold(key, "layer1")
 #> <rng_key> rng_key[8dbacb9f407ebc3ae10ed1561177db53]
 
 rng_uniform(rng_fold(key, "chain 3"), 3L)
-#> [1] 0.2692752 0.3617336 0.7737181
+#> [1] 0.53081894 0.07105536 0.40177051
 ```
 
 Folding is typed: `rng_fold(key, 1)` and `rng_fold(key, "1")` give different
@@ -100,10 +102,10 @@ key, so `1L` and `1` agree.
 
 ```r
 rng_normal(key, 5L)
-#> [1] 0.2397225 0.6828912 0.2552504 1.5763296 0.7653972
+#> [1]  1.6306140 -1.1186343 -0.6639268  0.2393690 -0.1899009
 
 rng_integer(key, 10L, min = 1L, max = 6L)
-#>  [1] 2 2 1 5 5 2 3 3 2 2
+#>  [1] 3 1 4 2 5 3 3 1 1 5
 ```
 
 `rng_bits()` exposes the generator stream directly. With `bits = 32` it
@@ -113,10 +115,32 @@ loss:
 
 ```r
 rng_bits(key, 3L)
-#> [1]  601333868 2746897238 3549456219
+#> [1] 2206215613  289400228  609344871
 
 rng_bits(key, 3L, bits = 64L)
-#> [1] "c0e6592123d7a06c" "0c89edc8a3ba5356" "6eb27f65d390675b"
+#> [1] "43c5f4cd83802dbd" "78da9ead113fe5a4" "299a3bb52451dd67"
+```
+
+## Engines
+
+A key records its engine, chosen when it is created:
+
+| `engine` | what it is |
+|---|---|
+| `"xoshiro256pp"` (default) | xoshiro256++, reseeded from Philox every 512 values; the fastest, with an AVX2 path that gives the same bits as the scalar one |
+| `"philox4x64"` | Philox4x64-10, counter-based: every value computed directly from its position |
+| `"threefry4x64"` | Threefry4x64-13, counter-based |
+
+Every engine gives the same guarantees: the same key gives the same values
+on every platform and thread count, and draw `i` does not depend on how
+many values you ask for. The default passed a PractRand audit to 1 TB,
+including interleaved streams of sibling and folded keys
+([dev/statistical-audit.md](dev/statistical-audit.md)). Changing engine
+changes every value, so name it explicitly if you need the stream to
+survive a change of default:
+
+```r
+key <- rng_key(42L, engine = "xoshiro256pp")
 ```
 
 ## Interop with R's RNG
@@ -152,6 +176,8 @@ a `libomp` installation.
 
 MIT, see [LICENSE](LICENSE).
 
-This package bundles two BSD 3-clause components, credited in
+This package bundles three third-party components, credited in
 [inst/COPYRIGHTS](inst/COPYRIGHTS): the Random123 library (D. E. Shaw
-Research) and NumPy's ziggurat constant tables (NumPy Developers).
+Research, BSD 3-clause), NumPy's ziggurat constant tables (NumPy Developers,
+BSD 3-clause), and fdlibm's `exp` and `log1p` (Sun Microsystems, permissive
+notice), which keep normal draws identical across platforms.

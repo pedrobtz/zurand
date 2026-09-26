@@ -65,7 +65,7 @@ for seed, w in CASES.items():
     L.append('')
     L.append('  # seed %d  ->  k0 = %016x, k1 = %016x' % (seed, k[0], k[1]))
     L.append('  expect_identical(')
-    L.append('    as.character(rng_bits(rng_key(%dL), %dL, bits = 64L)),' % (seed, NW))
+    L.append('    as.character(rng_bits(rng_key(%dL, engine = "philox4x64"), %dL, bits = 64L)),' % (seed, NW))
     L.append('    c(')
     L.append(rvec(vals, '      '))
     L.append('    ))')

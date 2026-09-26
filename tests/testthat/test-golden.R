@@ -19,7 +19,7 @@
 # exact, so a failure is always about zurand and never about the parser.
 
 test_that("rng_uniform() is bit-stable", {
-  expect_identical(rng_uniform(rng_key(42L), 12L),
+  expect_identical(rng_uniform(rng_key(42L, engine = "philox4x64"), 12L),
     c(
       0x1.94892844f95b3p-1, 0x1.755a733c937bdp-1, 0x1.02e656ef8b9c5p-1,
       0x1.de7fc5b9fac18p-4, 0x1.28d0ec0331c84p-3, 0x1.217a5097cf953p-1,
@@ -27,7 +27,7 @@ test_that("rng_uniform() is bit-stable", {
       0x1.51284d42ea72bp-1, 0x1.c5c477c80e57fp-1, 0x1.300957b62323p-5
     ))
 
-  expect_identical(rng_uniform(rng_key(42L), 4L, min = -2, max = 5),
+  expect_identical(rng_uniform(rng_key(42L, engine = "philox4x64"), 4L, min = -2, max = 5),
     c(
       0x1.c3f00678b45fap+1, 0x1.8d5e49aa0218ap+1, 0x1.8a26304668a32p+0,
       -0x1.2ea8197ea24b6p+0
@@ -35,7 +35,7 @@ test_that("rng_uniform() is bit-stable", {
 })
 
 test_that("rng_normal() is bit-stable, including the ziggurat slow paths", {
-  expect_identical(rng_normal(rng_key(42L), 12L),
+  expect_identical(rng_normal(rng_key(42L, engine = "philox4x64"), 12L),
     c(
       0x1.eaf3a6731a5acp-3, 0x1.5da3eb05253b7p-1, 0x1.05605afe8dea1p-2,
       0x1.938a55bc3ab33p+0, 0x1.87e22300ef1bdp-1, -0x1.284c25bf4ee9ep+1,
@@ -46,14 +46,14 @@ test_that("rng_normal() is bit-stable, including the ziggurat slow paths", {
   # Indices whose |z| >= 3.6542: the fast path cannot produce these, so they
   # pin the wedge and tail branches that most of the C code exists to serve.
   tail_idx <- c(1178L, 2172L, 4062L, 11756L, 13112L, 15279L, 28487L, 31217L)
-  expect_identical(rng_normal(rng_key(42L), 200000L)[tail_idx],
+  expect_identical(rng_normal(rng_key(42L, engine = "philox4x64"), 200000L)[tail_idx],
     c(
       -0x1.dab829352c64fp+1, 0x1.e33d338a8b521p+1, 0x1.e15104edb253cp+1,
       0x1.e9dbc8aa84804p+1, -0x1.fe1f18f1827a2p+1, 0x1.f4489461bf7bap+1,
       -0x1.00d548d92c897p+2, -0x1.d6785e4c6308ap+1
     ))
 
-  expect_identical(rng_normal(rng_key(42L), 4L, mean = 2, sd = 3),
+  expect_identical(rng_normal(rng_key(42L, engine = "philox4x64"), 4L, mean = 2, sd = 3),
     c(
       0x1.5c0daf3594f1p+1, 0x1.031d7821edf64p+2, 0x1.6204221f7537cp+1,
       0x1.aea7c04d2c066p+2
@@ -61,13 +61,13 @@ test_that("rng_normal() is bit-stable, including the ziggurat slow paths", {
 })
 
 test_that("rng_integer() is bit-stable, including the rejection path", {
-  expect_identical(rng_integer(rng_key(42L), 12L, min = 1L, max = 6L),
+  expect_identical(rng_integer(rng_key(42L, engine = "philox4x64"), 12L, min = 1L, max = 6L),
     c(
       2L, 2L, 1L, 5L, 5L, 2L, 3L, 3L, 2L, 2L, 4L, 1L
     ))
 
   # A near-maximal range makes Lemire rejection actually fire.
-  expect_identical(rng_integer(rng_key(42L), 8L, min = 1L, max = 2000000000L),
+  expect_identical(rng_integer(rng_key(42L, engine = "philox4x64"), 8L, min = 1L, max = 2000000000L),
     c(
       352578979L, 449361876L, 108978621L, 1398085695L, 1538485321L,
       638067389L, 977655369L, 980169362L
@@ -75,7 +75,7 @@ test_that("rng_integer() is bit-stable, including the rejection path", {
 
   # A range wider than 2^31: the offset above min no longer fits an int, so
   # this is the case that must not be computed as min + (int)offset.
-  expect_identical(rng_integer(rng_key(42L), 8L, min = -2000000000L, max = 2000000000L),
+  expect_identical(rng_integer(rng_key(42L, engine = "philox4x64"), 8L, min = -2000000000L, max = 2000000000L),
     c(
       -1294842043L, -1101276249L, -1782042759L, 796171389L, 1076970642L,
       -723865223L, -44689263L, -39661276L
@@ -83,11 +83,11 @@ test_that("rng_integer() is bit-stable, including the rejection path", {
 })
 
 test_that("rng_fold() derives stable keys", {
-  expect_identical(format(rng_fold(rng_key(42L), "layer1")),
+  expect_identical(format(rng_fold(rng_key(42L, engine = "philox4x64"), "layer1")),
     c(
       "rng_key[8dbacb9f407ebc3ae10ed1561177db53]"
     ))
-  expect_identical(format(rng_fold(rng_key(42L), 7L)),
+  expect_identical(format(rng_fold(rng_key(42L, engine = "philox4x64"), 7L)),
     c(
       "rng_key[a11aab0f92e75bb8303c089c13db8156]"
     ))
@@ -96,7 +96,7 @@ test_that("rng_fold() derives stable keys", {
 test_that("multi-key matrices are bit-stable", {
   # Column j must equal the single-key draw for key j; this pins the layout
   # as well as the values.
-  expect_identical(as.vector(rng_normal(rng_key(42L, n = 3L), 4L)),
+  expect_identical(as.vector(rng_normal(rng_key(42L, n = 3L, engine = "philox4x64"), 4L)),
     c(
       0x1.eaf3a6731a5acp-3, 0x1.5da3eb05253b7p-1, 0x1.05605afe8dea1p-2,
       0x1.938a55bc3ab33p+0, -0x1.d3c185913a391p-1, -0x1.2e13522a66651p-3,
@@ -127,7 +127,7 @@ test_that("the threefry4x64 engine is bit-stable", {
       3L, 4L, 6L, 3L, 3L, 6L, 3L, 6L
     ))
 
-  expect_false(identical(rng_normal(rng_key(42L), 64L),
+  expect_false(identical(rng_normal(rng_key(42L, engine = "philox4x64"), 64L),
                          rng_normal(rng_key(42L, engine = "threefry4x64"), 64L)))
   expect_identical(attr(rng_key(1L, engine = "threefry4x64"), "engine"),
                    "threefry4x64")
@@ -170,7 +170,7 @@ test_that("the xoshiro256pp engine is bit-stable", {
       "5fbbf3fa2cd02aa7", "19f9ca1d2aa9841e", "7a0702166e468fd6"
     ))
 
-  expect_false(identical(rng_normal(rng_key(42L), 64L),
+  expect_false(identical(rng_normal(rng_key(42L, engine = "philox4x64"), 64L),
                          rng_normal(rng_key(42L, engine = "xoshiro256pp"), 64L)))
 
   # A xoshiro key is a Philox key, so it folds with Philox: the derived key
@@ -178,12 +178,22 @@ test_that("the xoshiro256pp engine is bit-stable", {
   # with only the engine attribute differing. A two-way dispatch once sent
   # these down the threefry path; this pins the fix.
   fx <- rng_fold(rng_key(42L, engine = "xoshiro256pp"), "layer1")
-  expect_identical(unclass(fx)[1L, ], unclass(rng_fold(rng_key(42L), "layer1"))[1L, ])
+  expect_identical(unclass(fx)[1L, ], unclass(rng_fold(rng_key(42L, engine = "philox4x64"), "layer1"))[1L, ])
   expect_identical(attr(fx, "engine"), "xoshiro256pp")
   expect_identical(format(rng_fold(rng_key(42L, engine = "xoshiro256pp"), "layer1")),
     c(
       "rng_key[8dbacb9f407ebc3ae10ed1561177db53]"
     ))
+})
+
+test_that("the default engine is xoshiro256pp", {
+  # Chosen at the stream freeze after the release audit (dev/statistical-
+  # audit.md). Every value pinned above names its engine, so this is the
+  # one test that states what a bare rng_key(seed) means.
+  expect_identical(attr(rng_key(42L), "engine"), "xoshiro256pp")
+  expect_identical(rng_uniform(rng_key(42L), 8L),
+                   rng_uniform(rng_key(42L, engine = "xoshiro256pp"), 8L))
+  expect_identical(attr(rng_key_from_r(1L), "engine"), "xoshiro256pp")
 })
 
 test_that("draw i does not depend on n", {
