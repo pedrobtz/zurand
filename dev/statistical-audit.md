@@ -50,6 +50,26 @@ folded by the threefry path. Fixing that changed every block key the audit
 uses for this engine, so the earlier rows no longer describe the stream the
 tool emits; these do.
 
+### xoshiro256pp release audit (roadmap A8)
+
+For the stream after the engine tag (#22) and the fdlibm port (#20).
+PractRand pre0.95, `-multithreaded`, GitHub-hosted `ubuntu-latest`
+(4 cores), via the `statistical-audit` workflow's `pilot` plan,
+2026-09-26 (run 36221770952).
+
+| sampler | mode | length | result | throughput |
+|---|---|---|---|---:|
+| bits | stream | 16 GB | no anomalies in 240 test results | 109 MB/s |
+| uniform | stream | 16 GB | no anomalies in 240 test results | 105 MB/s |
+| normal | stream | 16 GB | no anomalies in 240 test results | 48 MB/s |
+| bits | keys (64 sibling keys interleaved) | 16 GB | no anomalies in 240 test results | 98 MB/s |
+| bits | folds (64 folded keys interleaved) | 16 GB | no anomalies in 240 test results | 153 MB/s |
+
+Throughput is set by `tools/statistical-audit.R`, not by PractRand or the
+generator; normal is slowest because the `pnorm()` mapping runs in R. It
+sized the `full` plan to fit GitHub's 6-hour job limit: 1 TB for bits,
+uniform and both cross-key modes, 512 GB for normal.
+
 ## Still to run
 
 - uniform and bits, both engines, at the same depth

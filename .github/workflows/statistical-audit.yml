@@ -76,7 +76,12 @@ jobs:
             pilot)
               m="[$(row bits xoshiro256pp stream 16),$(row uniform xoshiro256pp stream 16),$(row normal xoshiro256pp stream 16),$(row bits xoshiro256pp keys 16),$(row bits xoshiro256pp folds 16)]" ;;
             full)
-              m="[$(row bits xoshiro256pp stream 1024),$(row uniform xoshiro256pp stream 512),$(row normal xoshiro256pp stream 256),$(row bits xoshiro256pp keys 1024),$(row bits xoshiro256pp folds 1024)]" ;;
+              # Sized from the 2026-09-26 pilot on 4-core runners: bits and
+              # uniform ~105 MB/s, cross-key 98-153, normal 48 (the R-side
+              # pnorm() mapping). 1 TB at 105 MB/s is ~2.8 h; normal is the
+              # one that cannot reach 1 TB inside the 330-minute cap, and
+              # 512 GB takes ~3 h.
+              m="[$(row bits xoshiro256pp stream 1024),$(row uniform xoshiro256pp stream 1024),$(row normal xoshiro256pp stream 512),$(row bits xoshiro256pp keys 1024),$(row bits xoshiro256pp folds 1024)]" ;;
             custom)
               m="[$(row "$SAMPLER" "$ENGINE" "$MODE" "$GB")]" ;;
           esac
