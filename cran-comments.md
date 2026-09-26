@@ -4,7 +4,10 @@ This is a first submission.
 
 ## R CMD check results
 
-0 errors | 0 warnings | 1 note
+0 errors | 0 warnings | 2 notes
+
+* checking CRAN incoming feasibility ... NOTE
+  New submission
 
 * checking pragmas in C/C++ headers and code ... NOTE
   File which contains pragma(s) suppressing diagnostics: 'src/zurand.c'
@@ -18,6 +21,11 @@ This is a first submission.
   the vendored file. No other diagnostic is suppressed.
 
 ## Notes for the reviewer
+
+* Possibly misspelled words in DESCRIPTION, if flagged, are names:
+  xoshiro, Philox and Threefry are the random number generators the
+  package implements, and Blackman, Vigna, Salmon, Moraes, Dror, Marsaglia
+  and Tsang are the authors of the cited papers.
 
 * Multiple threads: the samplers use OpenMP above 32,768 values when R was
   built with it. The tests cap the package at two threads unless NOT_CRAN
