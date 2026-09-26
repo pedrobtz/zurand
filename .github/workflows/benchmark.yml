@@ -53,6 +53,12 @@ jobs:
           r-version: release
           http-user-agent: release
 
+      # RcppZiggurat's Linux binary links the system GSL, which the runner
+      # image does not ship; without it the package fails to load.
+      - name: System libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgsl-dev
+
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           extra-packages: |
@@ -87,7 +93,6 @@ jobs:
           # xoshiro256++); its philox is the counter-based comparison.
           rp <- randompack::randompack_rng()
           rp_philox <- randompack::randompack_rng("philox")
-          sitmo::setSeed(42L)
           sink <- Sys.getenv("GITHUB_STEP_SUMMARY")
           say <- function(...) { cat(..., sep = "", file = sink, append = TRUE)
                                  cat(..., sep = "") }
