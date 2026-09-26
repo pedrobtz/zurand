@@ -1,9 +1,9 @@
 /* The ziggurat's fast path in isolation: 64-bit words already in cache,
  * turned into normals. Every variant must give the same bits as N0, the
- * structure zurand ships; the rare slow path is a stand-in of comparable
- * cost, shared by all variants.
+ * structure zurand shipped before #40; the rare slow path is a stand-in
+ * of comparable cost, shared by all variants.
  *
- *   N0  one draw per iteration, branch to the slow path inline (shipped)
+ *   N0  one draw per iteration, branch to the slow path inline
  *   N1  branch-free: every draw computed, a reject flag recorded, rejects
  *       fixed afterwards; restrict pointers
  *   N2  N1 unrolled by four, independent chains
@@ -11,6 +11,9 @@
  *       loads, no gathers), rejects fixed afterwards
  *   N4  randompack's structure: words in the output array, converted in
  *       place, backwards
+ *   N5  signed wi table (512 entries) and rabs - 1 < ki - 1   (shipped, #40)
+ *   N6  N5 unrolled by four                                  (shipped, #40)
+ *   N7  N6 with BMI2 bextr for the field extraction (x86)
  */
 #include <stdint.h>
 #include <stdio.h>

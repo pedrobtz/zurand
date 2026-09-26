@@ -54,19 +54,20 @@ in the same `bench::mark()` call:
 
 | | EPYC 7763, 1 thread | EPYC, 4 threads | Apple M1, 1 thread |
 |---|---:|---:|---:|
-| uniform: zurand `xoshiro256pp` | **887** | **1928** | 1208 |
-| uniform: randompack `x256++simd` | 693 | 696 | **1226** |
-| uniform: dqrng | 369 | 370 | 234 |
-| Gaussian: zurand `xoshiro256pp` | 346 | **856** | **471** |
-| Gaussian: randompack `x256++simd` | **360** | 360 | 461 |
-| Gaussian: RcppZiggurat MT | 125 | 125 | 182 |
+| uniform: zurand `xoshiro256pp` | **884** | **1911** | **1837** |
+| uniform: randompack `x256++simd` | 691 | 689 | 1274 |
+| uniform: dqrng | 369 | 369 | 248 |
+| Gaussian: zurand `xoshiro256pp` | **358** | **877** | **661** |
+| Gaussian: randompack `x256++simd` | **357** | 356 | 559 |
+| Gaussian: RcppZiggurat MT | 125 | 125 | 200 |
 
-After the fused AVX2 uniform (#34) and the NEON path (#35). Before them the
-same runners gave zurand 569 / 1370 / 638 on uniform and randompack's SIMD
-engine led on one thread. Now zurand leads on uniform on x86_64 and is
-level elsewhere (within 4%); with threads it leads by 2.4-2.8x. Normals
-are bounded by the scalar ziggurat's table lookups (C6 was tried and not
-merged).
+After the fused AVX2 uniform (#34), the NEON path (#35, #38), `DC ZVA` on
+Apple (#39) and the signed-table ziggurat (#40). zurand now leads
+randompack on every row but x86 Gaussian, which is level. The M1 margins
+in this run (1.44x uniform, 1.18x Gaussian) are the fast end: same-machine
+A/Bs on three M1 runners gave 1.05-1.15x and 1.05-1.20x. Both packages'
+normals are bounded by the scalar ziggurat's table lookups, and the
+ziggurat implementation is frozen (below).
 
 Done: KAT against Random123 for both counter engines; golden values in hex
 floats; threads = serial and SIMD = scalar identity tests; two-pass uniform
@@ -128,10 +129,10 @@ or claims a new argument, purpose value or engine name.
 |--:|---|---|---|
 | C1 | `offset = 0` on every sampler (and in the C API from B1) | additive | counter engines: O(1); xoshiro: at most 511 steps |
 | C2 | Vector `mean`/`sd`/`min`/`max`, recycled | additive | same per-element formula as the scalar case |
-| C3 | Fuse the `mean`/`sd` and `min`/`max` scaling into the per-chunk transform; packed `{ki, wi}` ziggurat table | neutral | old items 1.3 and 1.2; 1.2 measured 1.10x on the transform |
+| C3 | Fuse the `mean`/`sd` and `min`/`max` scaling into the per-chunk transform; ~~packed `{ki, wi}` ziggurat table~~ | neutral | old item 1.3; the packed table (old 1.2) was remeasured at the R level on x86 and M1 and gave nothing -- both tables sit in L1 -- so it is dropped with the ziggurat freeze below |
 | C4 | ~~NEON path for `xoshiro256pp`~~ **DONE** #35: 8 sub-chunks in four 2-lane registers; M1 uniform 632 -> 1208 M/s, level with randompack | neutral | **highest priority after release**: on Apple M1 randompack's SIMD engine is 2x zurand on uniform (1309 vs 638 M/s) and CRAN's macOS binary has no threads to make up for it; the M-series baseline now exists (2026-09-26 CI benchmark) |
 | C5 | `rng_exponential()` | additive, purpose 5 | NumPy's exponential tables are already vendored |
-| C6 | ~~AVX2 ziggurat fast path~~ **TRIED, NOT MERGED** #36: gathers 1.8x slower on Downfall-patched Intel; plain loads +0-9% xoshiro, philox -6..+7% across four CPUs; fails the no-regression rule | neutral | land only if the ratio interval separates; realistic target 500 M/s |
+| C6 | ~~AVX2 ziggurat fast path~~ **TRIED, NOT MERGED** #36: gathers 1.8x slower on Downfall-patched Intel; plain loads +0-9% xoshiro, philox -6..+7% across four CPUs; fails the no-regression rule | neutral | closed by the ziggurat freeze below: in isolation every SIMD fast path was slower than the scalar loop |
 | C7 | `rng_normal(method = "inversion")` | additive, purpose 6 | monotone in `u`, for CRN, antithetics and QMC |
 | C8 | `rng_permutation()`, `rng_sample()` | additive | dqrng's most-used function |
 | C9 | Split `src/zurand.c` along engine and sampler lines | neutral | 1,050 lines and three engines |
@@ -148,6 +149,28 @@ or claims a new argument, purpose value or engine name.
 - `dev/simd/ab.R`: same-machine A/B of two builds. Runner-to-runner
   comparisons are not enough, since GitHub hands out Intel and AMD CPUs at
   random.
+
+### Ziggurat implementation frozen (2026-09-26)
+
+The normal sampler's *implementation*, not only its stream, is frozen at
+#40. Every angle below was measured bit-identical to the shipped output;
+only the two in bold were merged. Reopen only for a different method
+(say, inversion or Box-Muller with deterministic vector `log`/`sin`,
+which is additive: C7), never to tune this one again.
+
+| angle | result | where |
+|---|---|---|
+| **signed `wi` table + `rabs - 1 < ki - 1` accept test** | -15% per draw on x86 (four instructions fewer) | #40, N5 |
+| **fast-path loop unrolled by 4** | -18-22% per draw on M1, level on x86 | #40, N6 |
+| SIMD fast path: AVX2 gathers, AVX2 plain loads, NEON lane loads | slower than scalar on every CPU; gathers 1.8x slower under Intel's Downfall microcode | #36, `dev/simd/zig_compare.c` N3 |
+| branch-free with a fix-up pass, plain and unrolled | 1.4-1.6x slower: the ~1% reject branch is nearly free | N1, N2 |
+| randompack's structure (words in the output, converted in place, backwards) | slower on x86 and M1 | N4 |
+| packed `{ki, wi}` table | no gain: both tables sit in L1 | microbench |
+| BMI2 field extraction (`bextr`) | inconsistent across CPUs | N7 |
+| batched slow path: rejects recorded, their retry Philox/Threefry blocks computed four at a time | i5, 10 alternating rounds, one thread: xoshiro +2.3-2.7%, philox +0.7%, **threefry -1.6-2.6% (0 of 20 rounds faster)**; M1 +2-4% at 1e7, mixed at 1e6; x86 runners within noise. Capped by the ~1.15% reject rate; fails the no-regression rule | not merged |
+| `DC ZVA` before large normal fills (Apple) | level or slower on three M1 runners (1e7: 1.05-1.13 -> 0.87-1.02 of randompack). Normals are one sequential store stream per chunk, which Apple cores already write without reading; the uniform path's ten interleaved 4 KiB blocks are what `DC ZVA` fixes (#39) | not merged |
+
+What remains is the table lookups, the same in every ziggurat, and memory.
 
 ## Retired
 
@@ -176,6 +199,7 @@ or claims a new argument, purpose value or engine name.
 | 2026-09-26 | fdlibm `exp`/`log1p` instead of the platform libm | platforms disagreed; deterministic beats correctly rounded here; #20 |
 | 2026-09-26 | 32-bit x87 outside the reproducibility contract | double rounding on every add; no CRAN platform since R 4.2.0 |
 | 2026-09-26 | **default engine becomes `xoshiro256pp`** (was proposed 2026-09-25) | 2.4x dqrng on uniform versus 0.96x today; conditional on A6 and A8 |
+| 2026-09-26 | **ziggurat implementation frozen at #40** | every remaining angle measured level or worse on some engine or CPU; see "Ziggurat implementation frozen" |
 
 ## Open questions
 
