@@ -160,25 +160,25 @@ measured in the same `bench::mark()` call on the same machine.
 | | Linux x86_64, 1 thread | Linux x86_64, 4 threads | macOS arm64, 1 thread |
 |---|---:|---:|---:|
 | **uniform** | | | |
-| zurand (`xoshiro256pp`) | 569 | **1370** | 638 |
-| zurand (`philox4x64`) | 258 | 587 | 516 |
-| randompack (`x256++simd`) | **617** | 656 | **1309** |
-| dqrng | 350 | 352 | 256 |
-| base R `runif()` | 99 | 103 | 185 |
+| zurand (`xoshiro256pp`) | **887** | **1928** | 1208 |
+| zurand (`philox4x64`) | 282 | 623 | 421 |
+| randompack (`x256++simd`) | 693 | 696 | **1226** |
+| dqrng | 369 | 370 | 234 |
+| base R `runif()` | 104 | 104 | 144 |
 | **normal** | | | |
-| zurand (`xoshiro256pp`) | 329 | **822** | 437 |
-| zurand (`philox4x64`) | 197 | 468 | 363 |
-| randompack (`x256++simd`) | **333** | 324 | **594** |
-| RcppZiggurat (MT) | 123 | 121 | 224 |
-| dqrng | 140 | 140 | 229 |
-| base R `rnorm()` | 28 | 28 | 43 |
+| zurand (`xoshiro256pp`) | 346 | **856** | **471** |
+| zurand (`philox4x64`) | 207 | 476 | 280 |
+| randompack (`x256++simd`) | **360** | 360 | 461 |
+| RcppZiggurat (MT) | 125 | 125 | 182 |
+| dqrng | 143 | 143 | 189 |
+| base R `rnorm()` | 28 | 28 | 33 |
 
-Linux: AMD EPYC 7763, AVX2, OpenMP. macOS: Apple M1, no OpenMP, as in the
-CRAN binary. On one thread zurand is ahead of dqrng and RcppZiggurat on
-both platforms, and level with randompack's SIMD engine on x86_64;
-randompack is faster on Apple Silicon, where zurand has no vector path yet.
-With threads, zurand's output is still bit-identical to one thread, and
-none of the others parallelizes at the R level. The
+Linux: AMD EPYC 7763, AVX2, OpenMP. macOS: Apple M1, NEON, no OpenMP, as in
+the CRAN binary. On one thread zurand leads dqrng and RcppZiggurat by 2-5x,
+leads randompack's SIMD engine by 1.3x on uniform on x86_64, and is level
+with it elsewhere (within 4%). With threads zurand is 2.4-2.8x the fastest
+single-threaded alternative, and its output is still bit-identical to one
+thread; none of the others parallelizes at the R level. The
 [performance article](https://github.com/pedrobtz/zurand/blob/main/vignettes/performance.Rmd)
 has the method and how to reproduce these numbers.
 
@@ -203,10 +203,10 @@ bench::mark(
 #> # A tibble: 4 × 13
 #>   expression      min   median `itr/sec` mem_alloc `gc/sec` n_itr  n_gc total_time result
 #>   <bch:expr> <bch:tm> <bch:tm>     <dbl> <bch:byt>    <dbl> <int> <dbl>   <bch:tm> <list>
-#> 1 zurand       12.7ms   12.8ms     77.5     76.3MB    96.9     12    15      155ms <NULL>
-#> 2 dqrng        30.1ms   31.3ms     32.2     76.3MB    32.2      7     7      218ms <NULL>
-#> 3 randompack   21.9ms     22ms     45.5     76.3MB    40.9     10     9      220ms <NULL>
-#> 4 base        125.7ms  126.1ms      7.93    76.3MB     7.93     2     2      252ms <NULL>
+#> 1 zurand       9.87ms     10ms     99.2     76.3MB   120.      14    17      141ms <NULL>
+#> 2 dqrng       29.95ms   30.4ms     32.8     76.3MB    28.7      8     7      244ms <NULL>
+#> 3 randompack  21.87ms     22ms     45.4     76.3MB    50.5      9    10      198ms <NULL>
+#> 4 base       125.38ms  125.7ms      7.95    76.3MB     7.95     2     2      251ms <NULL>
 #> # ℹ 3 more variables: memory <list>, time <list>, gc <list>
 
 bench::mark(
@@ -220,11 +220,11 @@ bench::mark(
 #> # A tibble: 5 × 13
 #>   expression        min  median `itr/sec` mem_alloc `gc/sec` n_itr  n_gc total_time result
 #>   <bch:expr>   <bch:tm> <bch:t>     <dbl> <bch:byt>    <dbl> <int> <dbl>   <bch:tm> <list>
-#> 1 zurand           26ms  26.2ms     38.0     76.3MB    38.0      8     8      211ms <NULL>
-#> 2 dqrng          66.9ms    67ms     14.5     76.3MB    19.4      3     4      206ms <NULL>
-#> 3 RcppZiggurat   50.6ms  51.1ms     19.4     76.5MB    19.4      5     5      258ms <NULL>
-#> 4 randompack     37.3ms  37.6ms     26.5     76.3MB    26.5      6     6      226ms <NULL>
-#> 5 base          418.7ms 418.7ms      2.39    76.3MB     2.39     1     1      419ms <NULL>
+#> 1 zurand         25.9ms  26.1ms     38.2     76.3MB    49.1      7     9      183ms <NULL>
+#> 2 dqrng          67.3ms  67.5ms     14.8     76.3MB    11.1      4     3      270ms <NULL>
+#> 3 RcppZiggurat   49.5ms    50ms     20.0     76.5MB    25.0      4     5      200ms <NULL>
+#> 4 randompack     37.5ms    38ms     26.3     76.3MB    26.3      6     6      229ms <NULL>
+#> 5 base          417.9ms 417.9ms      2.39    76.3MB     2.39     1     1      418ms <NULL>
 #> # ℹ 3 more variables: memory <list>, time <list>, gc <list>
 ```
 

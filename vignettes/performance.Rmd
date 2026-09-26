@@ -23,49 +23,53 @@ the package's `benchmark` workflow on GitHub-hosted runners, 2026-09-26.
 | | Linux x86_64, 1 thread | Linux x86_64, 4 threads | macOS arm64, 1 thread |
 |---|---:|---:|---:|
 | **uniform** | | | |
-| zurand (`xoshiro256pp`) | 569 | **1370** | 638 |
-| zurand (`threefry4x64`) | 320 | 731 | 364 |
-| zurand (`philox4x64`) | 258 | 587 | 516 |
-| randompack (`x256++simd`) | **617** | 656 | **1309** |
-| randompack (`philox`) | 244 | 242 | 484 |
-| dqrng | 350 | 352 | 256 |
-| sitmo | 168 | 168 | 310 |
-| base R `runif()` | 99 | 103 | 185 |
+| zurand (`xoshiro256pp`) | **887** | **1928** | 1208 |
+| zurand (`philox4x64`) | 282 | 623 | 421 |
+| randompack (`x256++simd`) | 693 | 696 | **1226** |
+| randompack (`philox`) | 252 | 253 | 367 |
+| dqrng | 369 | 370 | 234 |
+| base R `runif()` | 104 | 104 | 144 |
 | **normal** | | | |
-| zurand (`xoshiro256pp`) | 329 | **822** | 437 |
-| zurand (`threefry4x64`) | 210 | 487 | 288 |
-| zurand (`philox4x64`) | 197 | 468 | 363 |
-| randompack (`x256++simd`) | **333** | 324 | **594** |
-| randompack (`philox`) | 177 | 177 | 348 |
-| RcppZiggurat (MT) | 123 | 121 | 224 |
-| RcppZiggurat (LZLLV) | 93 | 93 | 276 |
-| dqrng | 140 | 140 | 229 |
-| base R `rnorm()` | 28 | 28 | 43 |
+| zurand (`xoshiro256pp`) | 346 | **856** | **471** |
+| zurand (`philox4x64`) | 207 | 476 | 280 |
+| randompack (`x256++simd`) | **360** | 360 | 461 |
+| randompack (`philox`) | 185 | 185 | 271 |
+| RcppZiggurat (MT) | 125 | 125 | 182 |
+| dqrng | 143 | 143 | 189 |
+| base R `rnorm()` | 28 | 28 | 33 |
 
 - **Linux:** AMD EPYC 7763, 4 cores, AVX2, OpenMP.
-- **macOS:** Apple M1 (virtualised), 3 cores, no OpenMP. That is also what
-  the CRAN binary for macOS gets, because R's macOS configuration leaves
-  `SHLIB_OPENMP_CFLAGS` empty.
+- **macOS:** Apple M1 (virtualised), 3 cores, NEON, no OpenMP. That is
+  also what the CRAN binary for macOS gets, because R's macOS configuration
+  leaves `SHLIB_OPENMP_CFLAGS` empty.
 
 ## Reading the table
 
-- **Against dqrng and RcppZiggurat**, zurand's default engine is ahead on
-  every platform: 1.6–2.5x dqrng on uniform, 1.9–2.7x RcppZiggurat on
-  normal, single-threaded.
-- **Against randompack's SIMD engine** it is level on x86_64, and about
-  half the speed on Apple Silicon for uniform. On the M1, memory is not the
-  limit (allocating and zeroing the vector alone runs at over 7,000 M/s),
-  and zurand has no NEON path yet; that is the next planned speed-up. On
-  the development machine, an Intel i5-8500B, zurand measured 780 M/s
-  uniform against randompack's 431–441, so the single-thread ranking
-  depends on the microarchitecture.
+- **Against dqrng and RcppZiggurat**, zurand's default engine is 2.4-5x
+  faster on uniform and 2.5-2.8x on normal, single-threaded.
+- **Against randompack's SIMD engine**, the fastest single-threaded
+  competitor, zurand leads by 1.3x on uniform on x86_64 and is level with
+  it otherwise: within 1% on uniform on Apple Silicon, within 4% on normal
+  on both. Both vectorise the generator (AVX2 on x86_64, NEON on arm64),
+  and both use NumPy's ziggurat, scalar, for normals.
 - **With threads**, zurand is the only package here that parallelizes at the
-  R level, and the threaded output is bit-identical to the serial one.
-  None of the others' single-thread rates approach its four-thread rate on
-  Linux.
+  R level, and the threaded output is bit-identical to the serial one. On
+  four cores it is 2.8x randompack on uniform and 2.4x on normal.
 - **The engines differ in speed, not in guarantees.** Philox and Threefry
   are counter-based: each value is computed from its position. The default
   xoshiro256pp reseeds a cheap recurrence from Philox every 512 values.
+
+## What was tried and rejected
+
+- **Non-temporal stores** for large uniform fills: faster in a synthetic
+  harness, slower at the R level on both Intel and AMD, one thread and
+  four. R's fresh vectors cost page faults, which streaming stores do not
+  avoid.
+- **A vectorised ziggurat fast path** for normals: with AVX2 gathers it
+  was 1.8x slower on Intel CPUs carrying the "Downfall" microcode fix; with
+  plain loads it gained up to 9% on some Intel CPUs, nothing on AMD, and
+  lost 6% for philox on another. The table lookups, not the arithmetic,
+  are the cost.
 
 ## Method
 

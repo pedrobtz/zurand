@@ -54,20 +54,19 @@ in the same `bench::mark()` call:
 
 | | EPYC 7763, 1 thread | EPYC, 4 threads | Apple M1, 1 thread |
 |---|---:|---:|---:|
-| uniform: zurand `xoshiro256pp` | 569 | 1370 | 638 |
-| uniform: randompack `x256++simd` | **617** | 656 | **1309** |
-| uniform: dqrng | 350 | 352 | 256 |
-| Gaussian: zurand `xoshiro256pp` | 329 | 822 | 437 |
-| Gaussian: randompack `x256++simd` | **333** | 324 | **594** |
-| Gaussian: RcppZiggurat MT | 123 | 121 | 224 |
+| uniform: zurand `xoshiro256pp` | **887** | **1928** | 1208 |
+| uniform: randompack `x256++simd` | 693 | 696 | **1226** |
+| uniform: dqrng | 369 | 370 | 234 |
+| Gaussian: zurand `xoshiro256pp` | 346 | **856** | **471** |
+| Gaussian: randompack `x256++simd` | **360** | 360 | 461 |
+| Gaussian: RcppZiggurat MT | 125 | 125 | 182 |
 
-The i5-8500B used for development gives zurand 780/377 against randompack's
-SIMD engine at 431-441/256-263, so the single-thread ranking depends on the
-microarchitecture. Earlier baselines measured randompack's philox engine
-only, which flattered zurand. On Apple Silicon memory is not the limit
-(`numeric(n)` runs at 7700 M/s) and zurand has no vector path, which makes
-C4 (NEON) the largest single-thread gain left. With threads zurand leads
-everywhere it has them.
+After the fused AVX2 uniform (#34) and the NEON path (#35). Before them the
+same runners gave zurand 569 / 1370 / 638 on uniform and randompack's SIMD
+engine led on one thread. Now zurand leads on uniform on x86_64 and is
+level elsewhere (within 4%); with threads it leads by 2.4-2.8x. Normals
+are bounded by the scalar ziggurat's table lookups (C6 was tried and not
+merged).
 
 Done: KAT against Random123 for both counter engines; golden values in hex
 floats; threads = serial and SIMD = scalar identity tests; two-pass uniform
@@ -130,9 +129,9 @@ or claims a new argument, purpose value or engine name.
 | C1 | `offset = 0` on every sampler (and in the C API from B1) | additive | counter engines: O(1); xoshiro: at most 511 steps |
 | C2 | Vector `mean`/`sd`/`min`/`max`, recycled | additive | same per-element formula as the scalar case |
 | C3 | Fuse the `mean`/`sd` and `min`/`max` scaling into the per-chunk transform; packed `{ki, wi}` ziggurat table | neutral | old items 1.3 and 1.2; 1.2 measured 1.10x on the transform |
-| C4 | NEON path for `xoshiro256pp` (2 sub-chunks per register) | neutral | **highest priority after release**: on Apple M1 randompack's SIMD engine is 2x zurand on uniform (1309 vs 638 M/s) and CRAN's macOS binary has no threads to make up for it; the M-series baseline now exists (2026-09-26 CI benchmark) |
+| C4 | ~~NEON path for `xoshiro256pp`~~ **DONE** #35: 8 sub-chunks in four 2-lane registers; M1 uniform 632 -> 1208 M/s, level with randompack | neutral | **highest priority after release**: on Apple M1 randompack's SIMD engine is 2x zurand on uniform (1309 vs 638 M/s) and CRAN's macOS binary has no threads to make up for it; the M-series baseline now exists (2026-09-26 CI benchmark) |
 | C5 | `rng_exponential()` | additive, purpose 5 | NumPy's exponential tables are already vendored |
-| C6 | AVX2 ziggurat fast path: two gathers, a compare, a scalar loop for rejected lanes | neutral | land only if the ratio interval separates; realistic target 500 M/s |
+| C6 | ~~AVX2 ziggurat fast path~~ **TRIED, NOT MERGED** #36: gathers 1.8x slower on Downfall-patched Intel; plain loads +0-9% xoshiro, philox -6..+7% across four CPUs; fails the no-regression rule | neutral | land only if the ratio interval separates; realistic target 500 M/s |
 | C7 | `rng_normal(method = "inversion")` | additive, purpose 6 | monotone in `u`, for CRN, antithetics and QMC |
 | C8 | `rng_permutation()`, `rng_sample()` | additive | dqrng's most-used function |
 | C9 | Split `src/zurand.c` along engine and sampler lines | neutral | 1,050 lines and three engines |
@@ -140,6 +139,15 @@ or claims a new argument, purpose value or engine name.
 | C11 | `RNGkind("user-supplied")` bridge | additive, opt-in | only if users ask; stateful by nature |
 
 ---
+
+### Also done after the freeze
+
+- Fused uniform conversion in the AVX2 path (#34): EPYC one thread
+  569 -> 887 M/s, four threads 1370 -> 1928. Non-temporal stores on top
+  were measured and rejected (slower at the R level on Intel and AMD).
+- `dev/simd/ab.R`: same-machine A/B of two builds. Runner-to-runner
+  comparisons are not enough, since GitHub hands out Intel and AMD CPUs at
+  random.
 
 ## Retired
 
