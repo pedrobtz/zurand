@@ -3,6 +3,7 @@
 #include <Rinternals.h>
 #include <R_ext/Rdynload.h>
 #include <R_ext/Random.h>
+#include "zurand.h"   /* the public C API, from inst/include */
 #include <stdint.h>
 #include <inttypes.h>
 #include <limits.h>
@@ -145,14 +146,14 @@ static inline zurand_v2d zurand_rounded2(zurand_v2d x) {
 #define ZURAND_ENGINE_PHILOX   "philox4x64"
 #define ZURAND_ENGINE_THREEFRY "threefry4x64"
 #define ZURAND_ENGINE_XOSHIRO  "xoshiro256pp"
-#define ZURAND_ENGINE ZURAND_ENGINE_PHILOX  /* the default */
 
 /* Both engines produce the same 256-bit block type; only their key types
  * differ. The sampler core is written against this. */
 typedef philox4x64_ctr_t zurand_ctr_t;
 
-typedef enum { ZURAND_ENG_PHILOX = 0, ZURAND_ENG_THREEFRY = 1,
-               ZURAND_ENG_XOSHIRO = 2 } zurand_engine_t;
+typedef enum { ZURAND_ENG_PHILOX = ZURAND_ENGINE_PHILOX4X64,
+               ZURAND_ENG_THREEFRY = ZURAND_ENGINE_THREEFRY4X64,
+               ZURAND_ENG_XOSHIRO = ZURAND_ENGINE_XOSHIRO256PP } zurand_engine_t;
 #define ZURAND_MAX_EXACT_INT 9007199254740991.0
 
 #define ZURAND_PURPOSE_BITS    ((uint64_t)0)
@@ -304,15 +305,18 @@ static philox4x64_key_t key_from_words(const int *words, R_xlen_t nkey, R_xlen_t
  * This does not invent entropy: the key space stays 128 bits, which is
  * exactly what rng_key(seed) produces for philox too. It only avoids handing
  * Threefry's schedule two constant words. */
-static threefry4x64_key_t key_from_words_threefry(const int *words,
-                                                  R_xlen_t nkey, R_xlen_t i) {
-    philox4x64_key_t p = key_from_words(words, nkey, i);
+static threefry4x64_key_t threefry_key_from_philox(philox4x64_key_t p) {
     threefry4x64_key_t k;
     k.v[0] = p.v[0];
     k.v[1] = p.v[1];
     k.v[2] = p.v[0] ^ UINT64_C(0x9e3779b97f4a7c15);
     k.v[3] = p.v[1] ^ UINT64_C(0xbb67ae8584caa73b);
     return k;
+}
+
+static threefry4x64_key_t key_from_words_threefry(const int *words,
+                                                  R_xlen_t nkey, R_xlen_t i) {
+    return threefry_key_from_philox(key_from_words(words, nkey, i));
 }
 
 static SEXP alloc_key_vector(R_xlen_t nkey, SEXP engine, int stream) {
@@ -689,6 +693,44 @@ static void chunk_words_xoshiro(philox4x64_key_t key, uint64_t c,
 #define ZE_CUSTOM_CHUNK 1
 #include "zurand_engine.h"
 
+/* ---- per-key fills, shared by the .Call entry points and the C API ----
+ *
+ * One key, one output buffer, no R API, so they are safe on any thread.
+ * par_rows > 1 splits one long fill over OpenMP threads, which the R
+ * samplers use; the C API passes 0 and leaves threading to its caller. */
+
+static void fill_uniform_key(zurand_engine_t eng, philox4x64_key_t kp,
+                             double *out, R_xlen_t n, int par_rows) {
+    if (eng == ZURAND_ENG_THREEFRY)
+        fill_uniform_column_threefry(out, n, threefry_key_from_philox(kp), par_rows);
+    else if (eng == ZURAND_ENG_XOSHIRO)
+        fill_uniform_column_xoshiro(out, n, kp, par_rows);
+    else
+        fill_uniform_column_philox(out, n, kp, par_rows);
+}
+
+static void fill_normal_key(zurand_engine_t eng, philox4x64_key_t kp,
+                            double *out, R_xlen_t n, int par_rows) {
+    if (eng == ZURAND_ENG_THREEFRY)
+        fill_normal_column_threefry(out, n, threefry_key_from_philox(kp), par_rows);
+    else if (eng == ZURAND_ENG_XOSHIRO)
+        fill_normal_column_xoshiro(out, n, kp, par_rows);
+    else
+        fill_normal_column_philox(out, n, kp, par_rows);
+}
+
+static void fill_integer_key(zurand_engine_t eng, philox4x64_key_t kp,
+                             int *out, R_xlen_t n, int min, uint32_t range,
+                             uint32_t threshold, int par_rows) {
+    if (eng == ZURAND_ENG_THREEFRY)
+        fill_integer_column_threefry(out, n, threefry_key_from_philox(kp),
+                                     min, range, threshold, par_rows);
+    else if (eng == ZURAND_ENG_XOSHIRO)
+        fill_integer_column_xoshiro(out, n, kp, min, range, threshold, par_rows);
+    else
+        fill_integer_column_philox(out, n, kp, min, range, threshold, par_rows);
+}
+
 
 /* ---- stable fold hashing ---- */
 
@@ -706,6 +748,17 @@ static void hash_u64(uint64_t *h, uint64_t x) {
         hash_byte(h, (unsigned char)(x & 0xffu));
         x >>= 8;
     }
+}
+
+/* Final avalanche (MurmurHash3's fmix64), shared by rng_fold() and the C
+ * API's fold_int() so the two cannot derive different keys. */
+static uint64_t hash_finish(uint64_t h) {
+    h ^= h >> 33;
+    h *= UINT64_C(0xff51afd7ed558ccd);
+    h ^= h >> 33;
+    h *= UINT64_C(0xc4ceb9fe1a85ec53);
+    h ^= h >> 33;
+    return h;
 }
 
 static uint64_t hash_data(SEXP data) {
@@ -772,12 +825,7 @@ static uint64_t hash_data(SEXP data) {
         Rf_error("`data` must be a character, integer, double, logical or raw vector");
     }
 
-    h ^= h >> 33;
-    h *= UINT64_C(0xff51afd7ed558ccd);
-    h ^= h >> 33;
-    h *= UINT64_C(0xc4ceb9fe1a85ec53);
-    h ^= h >> 33;
-    return h;
+    return hash_finish(h);
 }
 
 /* out[i] = a + s * out[i], with the product rounded before the add on
@@ -945,18 +993,9 @@ SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
 #pragma omp parallel for if(par_cols) num_threads(nt) default(none) \
     shared(kw, out, n, nkey, par_rows, eng) schedule(static)
 #endif
-    for (R_xlen_t col = 0; col < nkey; col++) {
-        if (eng == ZURAND_ENG_THREEFRY)
-            fill_uniform_column_threefry(out + n * col, n,
-                                         key_from_words_threefry(kw, nkey, col),
-                                         par_rows);
-        else if (eng == ZURAND_ENG_XOSHIRO)
-            fill_uniform_column_xoshiro(out + n * col, n,
-                                        key_from_words(kw, nkey, col), par_rows);
-        else
-            fill_uniform_column_philox(out + n * col, n,
-                                       key_from_words(kw, nkey, col), par_rows);
-    }
+    for (R_xlen_t col = 0; col < nkey; col++)
+        fill_uniform_key(eng, key_from_words(kw, nkey, col), out + n * col, n,
+                         par_rows);
     if (min != 0.0 || span != 1.0)
         affine_pass(out, total, min, span, nt);
     UNPROTECT(1);
@@ -994,18 +1033,9 @@ SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_) {
 #pragma omp parallel for if(par_cols) num_threads(nt) default(none) \
     shared(kw, out, n, nkey, par_rows, eng) schedule(static)
 #endif
-    for (R_xlen_t col = 0; col < nkey; col++) {
-        if (eng == ZURAND_ENG_THREEFRY)
-            fill_normal_column_threefry(out + n * col, n,
-                                        key_from_words_threefry(kw, nkey, col),
-                                        par_rows);
-        else if (eng == ZURAND_ENG_XOSHIRO)
-            fill_normal_column_xoshiro(out + n * col, n,
-                                       key_from_words(kw, nkey, col), par_rows);
-        else
-            fill_normal_column_philox(out + n * col, n,
-                                      key_from_words(kw, nkey, col), par_rows);
-    }
+    for (R_xlen_t col = 0; col < nkey; col++)
+        fill_normal_key(eng, key_from_words(kw, nkey, col), out + n * col, n,
+                        par_rows);
     if (mean != 0.0 || sd != 1.0)
         affine_pass(out, total, mean, sd, nt);
     UNPROTECT(1);
@@ -1039,20 +1069,9 @@ SEXP C_rng_integer(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     shared(kw, out, n, nkey, min, range, threshold, par_rows, eng) \
     schedule(static)
 #endif
-    for (R_xlen_t col = 0; col < nkey; col++) {
-        if (eng == ZURAND_ENG_THREEFRY)
-            fill_integer_column_threefry(out + n * col, n,
-                                         key_from_words_threefry(kw, nkey, col),
-                                         min, range, threshold, par_rows);
-        else if (eng == ZURAND_ENG_XOSHIRO)
-            fill_integer_column_xoshiro(out + n * col, n,
-                                        key_from_words(kw, nkey, col),
-                                        min, range, threshold, par_rows);
-        else
-            fill_integer_column_philox(out + n * col, n,
-                                       key_from_words(kw, nkey, col),
-                                       min, range, threshold, par_rows);
-    }
+    for (R_xlen_t col = 0; col < nkey; col++)
+        fill_integer_key(eng, key_from_words(kw, nkey, col), out + n * col, n,
+                         min, range, threshold, par_rows);
     UNPROTECT(1);
     return ans;
 }
@@ -1061,10 +1080,14 @@ SEXP C_rng_integer(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
  * engine header. Code outside the header -- rng_bits() -- has to agree
  * with it: passing a 512-word chunk index to an engine that groups four
  * of them silently reads the wrong sub-chunks. */
-static R_xlen_t engine_chunk_words(zurand_engine_t eng) {
-    R_xlen_t w = eng == ZURAND_ENG_XOSHIRO
+static R_xlen_t engine_chunk_words_raw(zurand_engine_t eng) {
+    return eng == ZURAND_ENG_XOSHIRO
         ? (R_xlen_t)ZURAND_CHUNK_WORDS * ZURAND_XOSHIRO_LANES
         : (R_xlen_t)ZURAND_CHUNK_WORDS;
+}
+
+static R_xlen_t engine_chunk_words(zurand_engine_t eng) {
+    R_xlen_t w = engine_chunk_words_raw(eng);
     /* Every caller writes this many words into a buffer sized by
      * ZURAND_MAX_CHUNK_WORDS. Leaving one at the narrow width while this
      * returned the wide one overflowed the stack by 1533 words, which the
@@ -1146,6 +1169,151 @@ SEXP C_rng_bits(SEXP key, SEXP n_, SEXP bits_) {
     return ans;
 }
 
+/* ---- C API (inst/include/zurand.h) ----
+ *
+ * Everything below except api_key_get() runs without the R API, so the
+ * fills can be called from a caller's worker threads. Arguments are checked
+ * as the R samplers check them, but reported as return codes: an R error
+ * raised on a worker thread would take the process down. */
+
+/* The API's engine codes are the internal ones; zurand_engine_t is defined
+ * from the header's constants, so they cannot drift apart. */
+
+static int api_key_ok(zurand_key k) {
+    return (k.engine == ZURAND_ENG_PHILOX || k.engine == ZURAND_ENG_THREEFRY ||
+            k.engine == ZURAND_ENG_XOSHIRO) &&
+           k.stream >= 1 && k.stream <= ZURAND_STREAM_CURRENT;
+}
+
+static philox4x64_key_t api_philox_key(zurand_key k) {
+    philox4x64_key_t p;
+    p.v[0] = k.k0;
+    p.v[1] = k.k1;
+    return p;
+}
+
+static int api_key_get(SEXP keys, R_xlen_t i, zurand_key *out) {
+    R_xlen_t nkey = key_count(keys);          /* R errors if not a key vector */
+    if (i < 0 || i >= nkey)
+        return ZURAND_EINVAL;
+    philox4x64_key_t p = key_from_words(INTEGER(keys), nkey, i);
+    out->k0 = p.v[0];
+    out->k1 = p.v[1];
+    out->engine = (int)key_engine_code(keys);
+    out->stream = key_stream(keys);
+    return ZURAND_OK;
+}
+
+/* hash_data() for a length-one integer or double vector holding `data`. */
+static int api_fold_int(zurand_key k, int64_t data, zurand_key *out) {
+    if (!api_key_ok(k))
+        return ZURAND_EKEY;
+    uint64_t h = UINT64_C(1469598103934665603);
+    hash_byte(&h, 2);
+    hash_u64(&h, 1);
+    hash_u64(&h, (uint64_t)data);
+    h = hash_finish(h);
+    uint64_t domain = h ^ UINT64_C(0x9e3779b97f4a7c15);
+    philox4x64_key_t p = api_philox_key(k);
+    zurand_ctr_t r = k.engine == ZURAND_ENG_THREEFRY
+        ? zurand_block_threefry(threefry_key_from_philox(p), h, domain,
+                                ZURAND_PURPOSE_FOLD)
+        : zurand_block_philox(p, h, domain, ZURAND_PURPOSE_FOLD);
+    out->k0 = r.v[0];
+    out->k1 = r.v[1];
+    out->engine = k.engine;
+    out->stream = k.stream;
+    return ZURAND_OK;
+}
+
+static int api_fill_uniform(zurand_key k, size_t n, double min, double max,
+                            double *out) {
+    if (!api_key_ok(k))
+        return ZURAND_EKEY;
+    if (!isfinite(min) || !isfinite(max) || min > max ||
+        n > (size_t)R_XLEN_T_MAX)
+        return ZURAND_EINVAL;
+    R_xlen_t nn = (R_xlen_t)n;
+    double span = max - min;
+    if (span == 0.0) {
+        for (R_xlen_t i = 0; i < nn; i++)
+            out[i] = min;
+        return ZURAND_OK;
+    }
+    fill_uniform_key((zurand_engine_t)k.engine, api_philox_key(k), out, nn, 0);
+    if (min != 0.0 || span != 1.0)
+        affine_pass(out, nn, min, span, 1);
+    return ZURAND_OK;
+}
+
+static int api_fill_normal(zurand_key k, size_t n, double mean, double sd,
+                           double *out) {
+    if (!api_key_ok(k))
+        return ZURAND_EKEY;
+    if (!isfinite(mean) || !isfinite(sd) || sd < 0 || n > (size_t)R_XLEN_T_MAX)
+        return ZURAND_EINVAL;
+    R_xlen_t nn = (R_xlen_t)n;
+    if (sd == 0.0) {
+        for (R_xlen_t i = 0; i < nn; i++)
+            out[i] = mean;
+        return ZURAND_OK;
+    }
+    fill_normal_key((zurand_engine_t)k.engine, api_philox_key(k), out, nn, 0);
+    if (mean != 0.0 || sd != 1.0)
+        affine_pass(out, nn, mean, sd, 1);
+    return ZURAND_OK;
+}
+
+static int api_fill_integer(zurand_key k, size_t n, int min, int max,
+                            int *out) {
+    if (!api_key_ok(k))
+        return ZURAND_EKEY;
+    if (min == NA_INTEGER || max == NA_INTEGER || min > max ||
+        n > (size_t)R_XLEN_T_MAX)
+        return ZURAND_EINVAL;
+    uint32_t range = (uint32_t)((int64_t)max - (int64_t)min + 1);
+    uint32_t threshold = (uint32_t)((UINT64_C(0x100000000) - range) % range);
+    fill_integer_key((zurand_engine_t)k.engine, api_philox_key(k), out,
+                     (R_xlen_t)n, min, range, threshold, 0);
+    return ZURAND_OK;
+}
+
+static int api_fill_bits64(zurand_key k, size_t n, uint64_t *out) {
+    if (!api_key_ok(k))
+        return ZURAND_EKEY;
+    if (n > (size_t)R_XLEN_T_MAX)
+        return ZURAND_EINVAL;
+    zurand_engine_t eng = (zurand_engine_t)k.engine;
+    philox4x64_key_t kp = api_philox_key(k);
+    threefry4x64_key_t kt = threefry_key_from_philox(kp);
+    R_xlen_t nn = (R_xlen_t)n;
+    R_xlen_t cw = engine_chunk_words_raw(eng);
+    R_xlen_t nchunk = (nn + cw - 1) / cw;
+    for (R_xlen_t c = 0; c < nchunk; c++) {
+        uint64_t buf[ZURAND_MAX_CHUNK_WORDS + ZURAND_CHUNK_SLACK];
+        R_xlen_t w0 = c * cw;
+        int m = (int)(nn - w0 < cw ? nn - w0 : cw);
+        bits_chunk(eng, kp, kt, (uint64_t)c, buf, m);
+        memcpy(out + w0, buf, (size_t)m * sizeof(uint64_t));
+    }
+    return ZURAND_OK;
+}
+
+static const zurand_api zurand_api_table = {
+    ZURAND_API_VERSION,
+    sizeof(zurand_api),
+    api_key_get,
+    api_fold_int,
+    api_fill_uniform,
+    api_fill_normal,
+    api_fill_integer,
+    api_fill_bits64
+};
+
+static const zurand_api *zurand_api_get(void) {
+    return &zurand_api_table;
+}
+
 /* ---- registration ---- */
 
 static const R_CallMethodDef CallEntries[] = {
@@ -1165,4 +1333,8 @@ static const R_CallMethodDef CallEntries[] = {
 void R_init_zurand(DllInfo *dll) {
     R_registerRoutines(dll, NULL, CallEntries, NULL, NULL);
     R_useDynamicSymbols(dll, FALSE);
+    R_RegisterCCallable("zurand", "zurand_api", (DL_FUNC) &zurand_api_get);
+    /* Settle the SIMD dispatch now, on the main thread, so C API calls from
+     * worker threads only ever read it. */
+    (void) zurand_use_avx2();
 }
