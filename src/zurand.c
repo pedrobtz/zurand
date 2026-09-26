@@ -517,6 +517,63 @@ static int lemire_accept(uint32_t x, uint32_t range, uint32_t threshold,
 
 /* exp() and log1p() for the ziggurat's slow path: fdlibm, so the result
  * does not depend on the platform's libm. See the file for why. */
+/* Transparent huge pages for large output vectors, Linux only.
+ *
+ * R serves a large vector from malloc(), which glibc maps fresh, so the
+ * fill is the first touch of every page and pays one fault per page. With
+ * 4 KiB pages that is one fault per 512 doubles, and on the CI runners it
+ * costs more than generating the values: forcing 4 KiB pages took the
+ * uniform fill of 1e7 from 837 to 242 M/s on an EPYC 7763 and the normal
+ * fill from 338 to 162. Kernels with transparent_hugepage/enabled set to
+ * "always" hand out 2 MiB pages by themselves; with "madvise" (the Ubuntu
+ * default, and the ubuntu-24.04-arm runner) a mapping gets them only when
+ * asked, and asking took the same fills on a Neoverse N2 from 268 to 532
+ * and from 214 to 344. The hint is given only in that "madvise" mode: in
+ * "always" mode the pages are already large and an explicit request also
+ * opts the mapping into synchronous compaction, measured 6-9% slower; in
+ * "never" mode it does nothing. The kernel only tags the mapping. Values,
+ * order and stream are unaffected; options(zurand.hugepages = FALSE)
+ * turns the hint off. */
+#if defined(__linux__)
+#  include <sys/mman.h>
+#  include <unistd.h>
+#endif
+#ifndef ZURAND_THP_MIN_BYTES
+#  define ZURAND_THP_MIN_BYTES ((size_t)4 << 20)
+#endif
+static int zurand_thp_madvise_mode = 0;   /* set once at load, read after */
+
+static void zurand_thp_init(void) {
+#if defined(__linux__) && defined(MADV_HUGEPAGE)
+    FILE *f = fopen("/sys/kernel/mm/transparent_hugepage/enabled", "r");
+    if (!f)
+        return;
+    char line[128];
+    if (fgets(line, sizeof line, f))
+        zurand_thp_madvise_mode = strstr(line, "[madvise]") != NULL;
+    fclose(f);
+#endif
+}
+
+/* Called from the .Call entry points on the main thread, before the fill. */
+static void zurand_advise_output(void *p, size_t bytes) {
+#if defined(__linux__) && defined(MADV_HUGEPAGE)
+    if (!zurand_thp_madvise_mode || bytes < ZURAND_THP_MIN_BYTES)
+        return;
+    SEXP opt = Rf_GetOption1(Rf_install("zurand.hugepages"));
+    if (opt != R_NilValue && Rf_isLogical(opt) && LENGTH(opt) == 1 &&
+        LOGICAL(opt)[0] == FALSE)
+        return;
+    uintptr_t ps = (uintptr_t)sysconf(_SC_PAGESIZE);
+    uintptr_t lo = ((uintptr_t)p + ps - 1) & ~(ps - 1);
+    uintptr_t hi = ((uintptr_t)p + bytes) & ~(ps - 1);
+    if (hi > lo)
+        (void)madvise((void *)lo, hi - lo, MADV_HUGEPAGE);
+#else
+    (void)p; (void)bytes;
+#endif
+}
+
 #include "zurand_fdlibm.h"
 
 #define ZE_SUFFIX philox
@@ -1284,6 +1341,7 @@ SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
 
     const int *kw = INTEGER(key);
     SEXP ans = PROTECT(Rf_allocVector(REALSXP, total));
+    zurand_advise_output(REAL(ans), (size_t)total * sizeof(double));
     set_sample_dim(ans, n, nkey);
     double *out = REAL(ans);
     double span = max - min;
@@ -1325,6 +1383,7 @@ SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_) {
 
     const int *kw = INTEGER(key);
     SEXP ans = PROTECT(Rf_allocVector(REALSXP, total));
+    zurand_advise_output(REAL(ans), (size_t)total * sizeof(double));
     set_sample_dim(ans, n, nkey);
     double *out = REAL(ans);
     int nt = zurand_threads();
@@ -1370,6 +1429,7 @@ SEXP C_rng_integer(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     uint32_t threshold = (uint32_t)((UINT64_C(0x100000000) - range) % range);
     const int *kw = INTEGER(key);
     SEXP ans = PROTECT(Rf_allocVector(INTSXP, total));
+    zurand_advise_output(INTEGER(ans), (size_t)total * sizeof(int));
     set_sample_dim(ans, n, nkey);
     int *out = INTEGER(ans);
     int nt = zurand_threads();
@@ -1436,6 +1496,7 @@ SEXP C_rng_bits(SEXP key, SEXP n_, SEXP bits_) {
 
     if (bits == 32) {
         SEXP ans = PROTECT(Rf_allocVector(REALSXP, total));
+        zurand_advise_output(REAL(ans), (size_t)total * sizeof(double));
         set_sample_dim(ans, n, nkey);
         double *out = REAL(ans);
         for (R_xlen_t col = 0; col < nkey; col++) {
@@ -1650,4 +1711,5 @@ void R_init_zurand(DllInfo *dll) {
     zurand_zig_tables_init();
     (void) zurand_use_avx2();
     zurand_zva_init();
+    zurand_thp_init();
 }

@@ -31,6 +31,18 @@ the value is always 1 and setting a cap has no effect.
 \details{
 Draws below an internal size threshold always run single-threaded.
 }
+\section{Page size on Linux}{
+
+R serves a large vector from fresh memory, so filling it is the first
+touch of every page and pays one page fault per page. When the Linux
+kernel's transparent huge pages are in \code{madvise} mode (the Ubuntu
+default), the samplers ask for 2 MiB pages on output vectors of 4 MiB and
+more before filling them, which about halves the time of large fills on
+such systems; on kernels set to \code{always} the pages are large anyway, and
+the request is not made. No value changes either way.
+\code{options(zurand.hugepages = FALSE)} turns the request off.
+}
+
 \examples{
 rng_threads()
 old <- rng_threads(1L)

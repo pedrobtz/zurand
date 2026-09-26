@@ -137,6 +137,29 @@ identical(one, all)
 Fills go parallel above 32,768 values. With several keys the threads split
 the keys; with one key they split its positions.
 
+## Page size on Linux
+
+R serves a large vector from `malloc()`, which glibc maps fresh, so the
+fill is the first touch of every page and pays one page fault per page.
+With 4 KiB pages that costs more than generating the values. On the CI
+runner's kernel, which uses 2 MiB pages for everything
+(`transparent_hugepage/enabled` = `always`), forcing 4 KiB pages took the
+uniform fill of 1e7 values from 837 to 242 M/s and the normal fill from
+338 to 162. Kernels in `madvise` mode -- the Ubuntu default -- give a
+mapping 2 MiB pages only when asked, and zurand asks, on output vectors of
+4 MiB and more (`options(zurand.hugepages = FALSE)` stops it). On the
+`ubuntu-24.04-arm` runner, a Neoverse N2 in `madvise` mode, one thread:
+
+| M/s, n = 1e7 | zurand without the request | zurand with it | randompack |
+|---|---:|---:|---:|
+| uniform | 268 | **532** | 271 |
+| normal | 214 | **344** | 200 |
+
+No value changes; the kernel only tags the mapping. In `always` mode the
+request is skipped: the pages are already large, and asking explicitly
+also opts the mapping into synchronous compaction, measured 6-9% slower.
+macOS has no equivalent for memory it did not map itself.
+
 ## Beyond R
 
 The C API in `zurand.h` fills buffers the caller owns, from the caller's

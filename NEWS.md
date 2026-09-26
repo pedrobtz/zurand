@@ -35,6 +35,10 @@ across platforms, thread counts, SIMD paths and call order.
   on or off, which `rng_simd()` can switch to check.
 * Large fills use OpenMP threads where R was built with it; `rng_threads()`
   caps them, and the values do not depend on the thread count.
+* On Linux kernels with transparent huge pages in `madvise` mode, output
+  vectors of 4 MiB and more are filled on 2 MiB pages, which about halves
+  the time of large fills there. `options(zurand.hugepages = FALSE)` turns
+  the request off.
 
 ## C API
 

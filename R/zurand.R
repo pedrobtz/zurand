@@ -193,6 +193,16 @@ rng_bits <- function(key, n = 1L, bits = 32L) {
 #'
 #' Draws below an internal size threshold always run single-threaded.
 #'
+#' @section Page size on Linux:
+#' R serves a large vector from fresh memory, so filling it is the first
+#' touch of every page and pays one page fault per page. When the Linux
+#' kernel's transparent huge pages are in `madvise` mode (the Ubuntu
+#' default), the samplers ask for 2 MiB pages on output vectors of 4 MiB and
+#' more before filling them, which about halves the time of large fills on
+#' such systems; on kernels set to `always` the pages are large anyway, and
+#' the request is not made. No value changes either way.
+#' `options(zurand.hugepages = FALSE)` turns the request off.
+#'
 #' @param threads `NULL` to query the effective maximum, a single whole
 #'   number of at least 1 to cap zurand's thread use, or `0` to remove the
 #'   cap. Values above the machine's thread count are allowed and
