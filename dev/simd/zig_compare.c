@@ -125,6 +125,57 @@ __attribute__((noinline)) static void n3(const uint64_t *restrict buf, double *r
 static void n3(const uint64_t *buf, double *o, int m) { n2(buf, o, m); }
 #endif
 
+/* N5: signed wi table indexed by sign and layer (512 entries), and an
+ * accept test of rabs - 1 < ki - 1 so rabs == 0 (which must give +0.0, not
+ * -0.0) goes to the slow path. Same bits: rabs * (-wi) == -(rabs * wi). */
+static double wis[512];
+static uint64_t kim1[256];
+static void tables_init(void) {
+  for (int i = 0; i < 256; i++) { wis[i] = wi_double[i]; wis[256 + i] = -wi_double[i];
+    /* ki == 0 (layer 1 has no rectangle): 0 here, so rabs - 1 < 0 never
+     * holds and every draw is rejected, as rabs < 0 never holds */
+    kim1[i] = ki_double[i] ? ki_double[i] - 1 : 0; }
+}
+__attribute__((noinline)) static double slow5(uint64_t index, uint64_t r) {
+  uint64_t rabs = (r >> 9) & 0x000fffffffffffffULL;
+  /* rabs == 0 was accepted by the original test exactly when ki > 0, with
+   * x = (double)(-0 or 0) * wi = +0.0; with ki == 0 it went to the slow path */
+  if (rabs == 0 && ki_double[r & 0xff] != 0) return 0.0;
+  return slow(index, r);
+}
+static inline double fast5(uint64_t index, uint64_t r) {
+  uint64_t rabs = (r >> 9) & 0x000fffffffffffffULL;
+  double x = (double)rabs * wis[r & 0x1ff];
+  if (__builtin_expect(rabs - 1 < kim1[r & 0xff], 1)) return x;
+  return slow5(index, r);
+}
+__attribute__((noinline)) static void n5(const uint64_t *restrict buf, double *restrict o, int m) {
+  for (int j = 0; j < m; j++) o[j] = fast5((uint64_t)j, buf[j]);
+}
+__attribute__((noinline)) static void n6(const uint64_t *restrict buf, double *restrict o, int m) {
+  for (int j = 0; j < m; j += 4) {
+    o[j]     = fast5((uint64_t)j,     buf[j]);
+    o[j + 1] = fast5((uint64_t)j + 1, buf[j + 1]);
+    o[j + 2] = fast5((uint64_t)j + 2, buf[j + 2]);
+    o[j + 3] = fast5((uint64_t)j + 3, buf[j + 3]);
+  }
+}
+#if defined(__x86_64__)
+#include <immintrin.h>
+__attribute__((target("bmi,bmi2"), noinline))
+static void n7(const uint64_t *restrict buf, double *restrict o, int m) {
+  for (int j = 0; j < m; j += 4) {
+#define ONE7(k) do { uint64_t r = buf[j + k]; uint64_t rabs = _bextr_u64(r, 9, 52); \
+      double x = (double)rabs * wis[r & 0x1ff];                                   \
+      o[j + k] = __builtin_expect(rabs - 1 < kim1[r & 0xff], 1) ? x : slow5((uint64_t)(j + k), r); } while (0)
+    ONE7(0); ONE7(1); ONE7(2); ONE7(3);
+#undef ONE7
+  }
+}
+#else
+static void n7(const uint64_t *restrict buf, double *restrict o, int m) { n6(buf, o, m); }
+#endif
+
 /* N4: randompack's structure, in place over the output array, backwards */
 __attribute__((noinline)) static void n4(uint64_t *wo, int m) {
   for (int j = m; j-- > 0;) {
@@ -140,26 +191,33 @@ int main(void) {
   uint64_t z = 0x9e3779b97f4a7c15ULL;
   for (int i = 0; i < NW; i++) { z += 0x9e3779b97f4a7c15ULL; uint64_t t = z;
     t = (t ^ (t >> 30)) * 0xbf58476d1ce4e5b9ULL; t = (t ^ (t >> 27)) * 0x94d049bb133111ebULL; words[i] = t ^ (t >> 31); }
+  tables_init();
   n0(words, o0, NW);
   int rej = 0; for (int i = 0; i < NW; i++) rej += (words[i] >> 9 & 0xfffffffffffffULL) >= ki_double[words[i] & 0xff];
   printf("rejected in fast path: %d of %d\n", rej, NW);
-  void (*fs[3])(const uint64_t *, double *, int) = {n1, n2, n3};
-  const char *nm[5] = {"N0 shipped: branch per draw", "N1 branch-free, restrict, fix-up",
-                       "N2 N1 unrolled x4", "N3 vector fast path", "N4 randompack: in place, backwards"};
-  for (int k = 0; k < 3; k++) { memset(o, 0, sizeof o); fs[k](words, o, NW);
+  void (*fs[6])(const uint64_t *, double *, int) = {n1, n2, n3, n5, n6, n7};
+  const char *nm[8] = {"N0 shipped: branch per draw", "N1 branch-free, restrict, fix-up",
+                       "N2 N1 unrolled x4", "N3 vector fast path", "N5 signed table, rabs-1 < ki-1",
+                       "N6 N5 unrolled x4", "N7 N6 + BMI2 bextr (x86)", "N4 randompack: in place, backwards"};
+  for (int k = 0; k < 6; k++) { memset(o, 0, sizeof o); fs[k](words, o, NW);
     printf("%-38s identical to N0: %s\n", nm[k + 1], memcmp(o, o0, sizeof o) ? "NO" : "yes"); }
   memcpy(scratch, words, sizeof words); n4(scratch, NW);
-  printf("%-38s identical to N0: %s\n", nm[4], memcmp(scratch, o0, sizeof o0) ? "NO" : "yes");
+  printf("%-38s identical to N0: %s\n", nm[7], memcmp(scratch, o0, sizeof o0) ? "NO" : "yes");
+  /* the rabs == 0 edge case, which random words essentially never hit */
+  { uint64_t e[8] = {0x100 | 7, 7, 0x100 | 200, 200, 1, 0x101, 1 | (5ULL << 9), 0x101 | (5ULL << 9)};
+    double a[8], b[8];
+    n0(e, a, 8); n5(e, b, 8);
+    printf("rabs == 0 edge (+0.0 with sign bit set): %s\n", memcmp(a, b, sizeof a) ? "MISMATCH" : "identical"); }
   const long REPS = 20000;
   for (int round = 0; round < 3; round++) {
     printf("-- round %d  (ns per draw, words in cache)\n", round + 1);
-    double best[5] = {1e9, 1e9, 1e9, 1e9, 1e9};
+    double best[8] = {1e9, 1e9, 1e9, 1e9, 1e9, 1e9, 1e9, 1e9};
     for (int t = 0; t < 5; t++) {
       double s = now(); for (long r = 0; r < REPS; r++) n0(words, o, NW); s = now() - s; if (s < best[0]) best[0] = s;
-      for (int k = 0; k < 3; k++) { s = now(); for (long r = 0; r < REPS; r++) fs[k](words, o, NW); s = now() - s; if (s < best[k + 1]) best[k + 1] = s; }
-      s = now(); for (long r = 0; r < REPS; r++) { memcpy(scratch, words, sizeof words); n4(scratch, NW); } s = now() - s; if (s < best[4]) best[4] = s;
+      for (int k = 0; k < 6; k++) { s = now(); for (long r = 0; r < REPS; r++) fs[k](words, o, NW); s = now() - s; if (s < best[k + 1]) best[k + 1] = s; }
+      s = now(); for (long r = 0; r < REPS; r++) { memcpy(scratch, words, sizeof words); n4(scratch, NW); } s = now() - s; if (s < best[7]) best[7] = s;
     }
-    for (int k = 0; k < 5; k++) printf("  %-38s %.3f%s\n", nm[k], best[k] / (REPS * (double)NW) * 1e9, k == 4 ? "  (includes copying the words in)" : "");
+    for (int k = 0; k < 8; k++) printf("  %-38s %.3f%s\n", nm[k], best[k] / (REPS * (double)NW) * 1e9, k == 7 ? "  (includes copying the words in)" : "");
   }
   return 0;
 }
