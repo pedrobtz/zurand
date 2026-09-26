@@ -27,6 +27,15 @@ across platforms, thread counts, SIMD paths and call order.
 * `rng_threads()` caps OpenMP use; `rng_simd()` reports or disables the
   AVX2 path. Neither changes any value.
 
+## Performance
+
+* The `xoshiro256pp` engine vectorises its generator on x86_64 (AVX2,
+  chosen at run time) and on arm64 (NEON), and converts uniforms in
+  registers without a second pass. Output is identical with the vector path
+  on or off, which `rng_simd()` can switch to check.
+* Large fills use OpenMP threads where R was built with it; `rng_threads()`
+  caps them, and the values do not depend on the thread count.
+
 ## C API
 
 * `inst/include/zurand.h` lets packages that `LinkingTo: zurand` fill
