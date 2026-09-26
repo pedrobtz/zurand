@@ -10,3 +10,15 @@ permissions: read-all
 jobs:
   R-CMD-check:
     uses: pedrobtz/r-actions/.github/workflows/r-cmd-check.yml@v1
+    with:
+      # The default four, plus GCC on arm64. GCC contracts a + b * c into a
+      # fused multiply-add by default wherever the target has one, and every
+      # arm64 target does; clang-on-arm64 (macOS) and GCC-on-x86_64 (no FMA
+      # in the baseline ISA) never exercise that. This leg is what proves
+      # the golden values survive it.
+      runners: >-
+        [{"os": "macos-latest", "r": "release"},
+         {"os": "windows-latest", "r": "release"},
+         {"os": "ubuntu-latest", "r": "release"},
+         {"os": "ubuntu-latest", "r": "oldrel-1"},
+         {"os": "ubuntu-24.04-arm", "r": "release"}]
