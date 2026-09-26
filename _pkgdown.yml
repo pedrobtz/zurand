@@ -1,0 +1,29 @@
+url: ~
+template:
+  bootstrap: 5
+
+reference:
+  - title: Keys
+    contents:
+      - rng_key
+      - rng_key_from_r
+      - rng_fold
+  - title: Samplers
+    contents:
+      - rng_uniform
+      - rng_normal
+      - rng_integer
+      - rng_bits
+  - title: Performance controls
+    desc: Change speed, never values.
+    contents:
+      - rng_threads
+      - rng_simd
+  - title: Package
+    contents:
+      - zurand-package
+
+articles:
+  - title: Articles
+    contents:
+      - zurand
