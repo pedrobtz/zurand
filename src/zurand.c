@@ -194,6 +194,36 @@ static SEXP engine_symbol(void) {
     return Rf_install("engine");
 }
 
+/* Stream-format version, recorded on every key next to its engine. It is
+ * what lets a stream be fixed after release without breaking saved keys:
+ * a bug found after v0.1.0 becomes stream 2 for new keys, and stream-1 keys
+ * keep producing stream-1 values. Only stream 1 exists. A key without the
+ * attribute predates it and is stream 1. See dev/design.md, section 3.1. */
+#define ZURAND_STREAM_CURRENT 1
+
+static SEXP stream_symbol(void) {
+    return Rf_install("stream");
+}
+
+static int key_stream(SEXP key) {
+    SEXP s = Rf_getAttrib(key, stream_symbol());
+    if (s == R_NilValue)
+        return 1;
+    int v = NA_INTEGER;
+    if (TYPEOF(s) == INTSXP && Rf_xlength(s) == 1)
+        v = INTEGER(s)[0];
+    else if (TYPEOF(s) == REALSXP && Rf_xlength(s) == 1 &&
+             REAL(s)[0] == (double)(int)REAL(s)[0])
+        v = (int)REAL(s)[0];
+    if (v == NA_INTEGER || v < 1)
+        Rf_error("<rng_key> has an invalid `stream` attribute");
+    if (v > ZURAND_STREAM_CURRENT)
+        Rf_error("<rng_key> uses stream version %d, but this version of "
+                 "zurand implements streams up to %d; update zurand",
+                 v, ZURAND_STREAM_CURRENT);
+    return v;
+}
+
 static int engine_code(SEXP engine) {
     if (TYPEOF(engine) == STRSXP && Rf_xlength(engine) == 1) {
         const char *s = CHAR(STRING_ELT(engine, 0));
@@ -246,6 +276,7 @@ static R_xlen_t key_count(SEXP key) {
 
     SEXP engine = Rf_getAttrib(key, engine_symbol());
     check_engine(engine);
+    (void) key_stream(key);
     return (R_xlen_t)INTEGER(dim)[0];
 }
 
@@ -284,7 +315,7 @@ static threefry4x64_key_t key_from_words_threefry(const int *words,
     return k;
 }
 
-static SEXP alloc_key_vector(R_xlen_t nkey, SEXP engine) {
+static SEXP alloc_key_vector(R_xlen_t nkey, SEXP engine, int stream) {
     check_engine(engine);
     if (nkey > R_XLEN_T_MAX / ZURAND_KEY_WORDS)
         Rf_error("too many keys requested");
@@ -297,9 +328,11 @@ static SEXP alloc_key_vector(R_xlen_t nkey, SEXP engine) {
     INTEGER(dim)[1] = ZURAND_KEY_WORDS;
     Rf_setAttrib(ans, R_DimSymbol, dim);
     Rf_setAttrib(ans, engine_symbol(), engine);
+    SEXP st = PROTECT(Rf_ScalarInteger(stream));
+    Rf_setAttrib(ans, stream_symbol(), st);
     SEXP cls = PROTECT(Rf_mkString("rng_key"));
     Rf_classgets(ans, cls);
-    UNPROTECT(3);
+    UNPROTECT(4);
     return ans;
 }
 
@@ -803,7 +836,7 @@ SEXP C_rng_key(SEXP seed, SEXP n_, SEXP engine) {
     uint64_t state = u64_seed(seed);
     R_xlen_t n = length_scalar(n_, "n");
 
-    SEXP ans = PROTECT(alloc_key_vector(n, engine));
+    SEXP ans = PROTECT(alloc_key_vector(n, engine, ZURAND_STREAM_CURRENT));
     for (R_xlen_t i = 0; i < n; i++) {
         uint64_t k0 = splitmix64_next(&state);
         uint64_t k1 = splitmix64_next(&state);
@@ -821,7 +854,7 @@ SEXP C_rng_key_from_r(SEXP n_, SEXP engine) {
     check_engine(engine);
     R_xlen_t n = length_scalar(n_, "n");
 
-    SEXP ans = PROTECT(alloc_key_vector(n, engine));
+    SEXP ans = PROTECT(alloc_key_vector(n, engine, ZURAND_STREAM_CURRENT));
     GetRNGstate();
     for (R_xlen_t i = 0; i < n; i++) {
         uint64_t k0 = ((uint64_t)r_random_u32() << 32) | (uint64_t)r_random_u32();
@@ -841,7 +874,7 @@ SEXP C_rng_fold(SEXP key, SEXP data) {
     SEXP engine = key_engine(key);
 
     const int *kw = INTEGER(key);
-    SEXP ans = PROTECT(alloc_key_vector(nkey, engine));
+    SEXP ans = PROTECT(alloc_key_vector(nkey, engine, key_stream(key)));
     for (R_xlen_t i = 0; i < nkey; i++) {
         zurand_ctr_t out;
         /* xoshiro keys are Philox keys -- Philox derives their chunk seeds

@@ -78,6 +78,18 @@ integer representation.
 The samplers in this package never read or update \code{.Random.seed}. Calling a
 sampler twice with the same key and arguments returns the same values.
 }
+\section{Stream version}{
+
+A key also records the version of the stream definition it was made
+under, as \code{attr(key, "stream")}; every key made by this version of
+zurand is stream \code{1L}. If a defect in a stream is ever found after
+release, the fix becomes a new stream version for new keys, and existing
+keys -- including saved ones -- keep producing exactly the values they
+always did. A key saved before the attribute existed is treated as
+stream 1. A key from a newer stream than this version of zurand
+implements is an error rather than a silent reinterpretation.
+}
+
 \examples{
 key <- rng_key(42L)
 keys <- rng_key(42L, n = 4L)
