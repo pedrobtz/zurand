@@ -20,6 +20,7 @@ Other contributors:
 \itemize{
   \item D. E. Shaw Research (Random123 library, src/Random123/) [copyright holder]
   \item NumPy Developers (Ziggurat constant tables, src/numpyzig/) [copyright holder]
+  \item Sun Microsystems, Inc. (fdlibm exp() and log1p(), src/zurand_fdlibm.h) [copyright holder]
 }
 
 }
