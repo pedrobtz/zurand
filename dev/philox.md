@@ -154,7 +154,7 @@ Philox itself attaches no meaning to the counter — it is just 256 bits of inpu
 | `v[0]` | block index | output position `>> 2` or fold hash | which 4-word block |
 | `v[1]` | domain | usually 0; integer rejection attempt; fold domain | independent subspace for the same block index |
 | `v[2]` | purpose | internal, never user-visible | what kind of question is being asked |
-| `v[3]` | reserved | fixed 0 | reserved for future extensions |
+| `v[3]` | engine tag | 0, or 1 for `xoshiro256pp` | keeps the Philox calls the xoshiro engine makes (sub-chunk seeds, retry words) apart from the philox engine's own blocks |
 
 The public API no longer exposes arbitrary counters. Users pass immutable key vectors plus sampler arguments; samplers internally use output positions `0:(n - 1)` as the counter coordinate for each key. Samplers default to `n = 1L`; with one key they return a plain vector, and with multiple keys they return an `n x length(key)` matrix, including a `1 x K` matrix for one draw per key. Users derive independent streams explicitly with `rng_key(seed, n)` or `rng_fold()`.
 
