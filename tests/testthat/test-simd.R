@@ -49,6 +49,23 @@ test_that("the vectorised and portable paths produce identical values", {
                    with_simd(FALSE, format(rng_fold(key, "x"))))
 })
 
+test_that("the vector ziggurat equals the scalar one for every engine", {
+  # The normal transform is vectorised for all three engines, not only
+  # xoshiro256pp. 100003 normals include about a thousand draws that fail
+  # the fast-path compare and go to the scalar wedge and tail code, and an
+  # odd length leaves a scalar remainder.
+  skip_if_no_simd()
+  for (engine in c("xoshiro256pp", "philox4x64", "threefry4x64")) {
+    key <- rng_key(2026L, engine = engine)
+    expect_identical(with_simd(TRUE,  rng_normal(key, 100003L)),
+                     with_simd(FALSE, rng_normal(key, 100003L)),
+                     info = engine)
+    expect_identical(with_simd(TRUE,  rng_normal(key, 7L, 1.5, 3)),
+                     with_simd(FALSE, rng_normal(key, 7L, 1.5, 3)),
+                     info = engine)
+  }
+})
+
 test_that("multi-key and threaded fills are path-independent too", {
   skip_if_no_simd()
   keys <- rng_key(42L, n = 3L, engine = "xoshiro256pp")

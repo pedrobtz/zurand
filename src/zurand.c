@@ -493,16 +493,6 @@ static int lemire_accept(uint32_t x, uint32_t range, uint32_t threshold,
  * does not depend on the platform's libm. See the file for why. */
 #include "zurand_fdlibm.h"
 
-#define ZE_SUFFIX philox
-#define ZE_KEY_T  philox4x64_key_t
-#define ZE_GEN(c, k) philox4x64_R(10, (c), (k))
-#include "zurand_engine.h"
-
-#define ZE_SUFFIX threefry
-#define ZE_KEY_T  threefry4x64_key_t
-#define ZE_GEN(c, k) threefry4x64_R(13, (c), (k))
-#include "zurand_engine.h"
-
 /* ---- xoshiro256++, seeded per chunk by Philox ----
  *
  * The counter-based engines recompute a value from its counter, which
@@ -852,6 +842,18 @@ static void chunk_words_xoshiro(philox4x64_key_t key, uint64_t c,
                            have < ZURAND_XOSHIRO_SUB ? have : ZURAND_XOSHIRO_SUB);
     }
 }
+
+/* The counter-based engines. Included here, after the SIMD dispatch, so
+ * their fills can use the vector ziggurat. */
+#define ZE_SUFFIX philox
+#define ZE_KEY_T  philox4x64_key_t
+#define ZE_GEN(c, k) philox4x64_R(10, (c), (k))
+#include "zurand_engine.h"
+
+#define ZE_SUFFIX threefry
+#define ZE_KEY_T  threefry4x64_key_t
+#define ZE_GEN(c, k) threefry4x64_R(13, (c), (k))
+#include "zurand_engine.h"
 
 /* One full xoshiro chunk of uniforms, written straight into `o` when the
  * AVX2 path is on; returns 0 to fall back to words-then-convert. */

@@ -178,6 +178,71 @@ R123_STATIC_INLINE double ZE_N(zig_normal_at)(ZE_KEY_T key, uint64_t index,
     return ZE_N(zig_normal_slow)(key, index, r);
 }
 
+#ifdef ZURAND_X86_DISPATCH
+/* The ziggurat fast path four draws at a time, for a buffer of words.
+ *
+ * Bit-identical to zig_normal_at() lane by lane:
+ *  - rabs < 2^52, so OR-ing in the exponent of 2^52 and subtracting 2^52
+ *    converts it to a double exactly;
+ *  - the product with wi is the same IEEE multiply, and (-a) * b is
+ *    exactly -(a * b), so the sign is applied afterwards as a sign-bit
+ *    flip -- except when rabs == 0, where the scalar code negates the
+ *    integer 0 and gets +0.0, so the flip is masked off;
+ *  - ki and rabs are both below 2^52, so the signed 64-bit compare is the
+ *    unsigned one.
+ * Lanes that fail the compare (~1%) are redone by the scalar slow path
+ * with their own position, exactly as the scalar fill would.
+ *
+ * The table entries are fetched with ordinary loads, not AVX2 gathers.
+ * With gathers this was 1.8x *slower* than scalar on an i5-8500B: Intel's
+ * microcode fix for Gather Data Sampling ("Downfall", 2023) makes
+ * VPGATHER several times slower on Skylake through Ice Lake. With plain
+ * loads it is 5-15% faster than scalar on that machine. */
+__attribute__((target("avx2")))
+static void ZE_N(normal_transform_avx2)(ZE_KEY_T key, uint64_t w0,
+                                        const uint64_t *buf, double *o,
+                                        int m) {
+    const __m256i byte = _mm256_set1_epi64x(0xff);
+    const __m256i mask52 = _mm256_set1_epi64x(0x000fffffffffffffLL);
+    const __m256i one = _mm256_set1_epi64x(1);
+    const __m256i exp52 = _mm256_set1_epi64x(0x4330000000000000LL);
+    const __m256d two52 = _mm256_set1_pd(0x1.0p52);
+    const __m256i zero = _mm256_setzero_si256();
+    int j = 0;
+    for (; j + 4 <= m; j += 4) {
+        __m256i w = _mm256_loadu_si256((const __m256i *)(buf + j));
+        __m256i idx = _mm256_and_si256(w, byte);
+        __m256i rabs = _mm256_and_si256(_mm256_srli_epi64(w, 9), mask52);
+        __m256i sign = _mm256_slli_epi64(
+            _mm256_and_si256(_mm256_srli_epi64(w, 8), one), 63);
+        sign = _mm256_andnot_si256(_mm256_cmpeq_epi64(rabs, zero), sign);
+        __m256d d = _mm256_sub_pd(
+            _mm256_castsi256_pd(_mm256_or_si256(rabs, exp52)), two52);
+        uint64_t ix[4];
+        _mm256_storeu_si256((__m256i *)ix, idx);
+        __m256d wi = _mm256_set_pd(wi_double[ix[3]], wi_double[ix[2]],
+                                   wi_double[ix[1]], wi_double[ix[0]]);
+        __m256i ki = _mm256_set_epi64x((long long)ki_double[ix[3]],
+                                       (long long)ki_double[ix[2]],
+                                       (long long)ki_double[ix[1]],
+                                       (long long)ki_double[ix[0]]);
+        __m256d x = _mm256_xor_pd(_mm256_mul_pd(d, wi),
+                                  _mm256_castsi256_pd(sign));
+        _mm256_storeu_pd(o + j, x);
+        int accept = _mm256_movemask_pd(
+            _mm256_castsi256_pd(_mm256_cmpgt_epi64(ki, rabs)));
+        if (R123_BUILTIN_EXPECT(accept != 0xf, 0)) {
+            for (int l = 0; l < 4; l++)
+                if (!(accept & (1 << l)))
+                    o[j + l] = ZE_N(zig_normal_slow)(key, w0 + (uint64_t)(j + l),
+                                                     buf[j + l]);
+        }
+    }
+    for (; j < m; j++)
+        o[j] = ZE_N(zig_normal_at)(key, w0 + (uint64_t)j, buf[j]);
+}
+#endif
+
 /* Each Philox block yields four outputs and depends only on its counter,
  * so the block loops below parallelize with bit-identical results.
  * `threads` gates the inner parallel region; callers pass 0 when they
@@ -238,6 +303,12 @@ static void ZE_N(fill_normal_column)(double *out, R_xlen_t n,
         ZE_N(chunk_words)(key, (uint64_t)c, ZURAND_PURPOSE_NORMAL, buf, m);
 
         double *o = out + w0;
+#ifdef ZURAND_X86_DISPATCH
+        if (zurand_use_avx2()) {
+            ZE_N(normal_transform_avx2)(key, (uint64_t)w0, buf, o, m);
+            continue;
+        }
+#endif
         for (int j = 0; j < m; j++)
             o[j] = ZE_N(zig_normal_at)(key, (uint64_t)(w0 + j), buf[j]);
     }
