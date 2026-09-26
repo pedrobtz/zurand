@@ -62,7 +62,10 @@ TRNG_GRAIN <- 65536L  # rTRNG chunk size; parallelGrain = 0 runs it serially
 key <- rng_key(seed, engine = "philox4x64")
 key_tf <- rng_key(seed, engine = "threefry4x64")
 key_xo <- rng_key(seed, engine = "xoshiro256pp")
-rp <- randompack::randompack_rng("philox")
+# randompack's default engine is its fastest, an 8-lane SIMD xoshiro256++;
+# its philox engine is kept as the counter-based comparison.
+rp <- randompack::randompack_rng()
+rp_philox <- randompack::randompack_rng("philox")
 set.seed(seed)
 dqset.seed(seed)
 zsetseed(seed)
@@ -103,6 +106,7 @@ uniform_bench <- function(trng_grain) mark(
   zurand_threefry = rng_uniform(key_tf, n),
   zurand      = rng_uniform(key, n),
   randompack = rp$unif(len = n),
+  randompack_philox = rp_philox$unif(len = n),
   dqrng      = dqrunif(n),
   base_R     = runif(n),
   sitmo      = runif_sitmo(n, 0, 1, seed),
@@ -129,6 +133,7 @@ normal_bench <- function(trng_grain) mark(
   zurand_threefry = rng_normal(key_tf, n),
   zurand          = rng_normal(key, n),
   randompack     = rp$normal(len = n),
+  randompack_philox = rp_philox$normal(len = n),
   dqrng          = dqrnorm(n),
   base_inversion = rnorm(n),
   RcppZig_LZLLV  = zrnorm(n),
