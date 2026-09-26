@@ -18,6 +18,14 @@ threads the machine has.
 
 ## Installation
 
+From CRAN, once released:
+
+```r
+install.packages("zurand")
+```
+
+The development version from GitHub:
+
 ```r
 # install.packages("pak")
 pak::pak("pedrobtz/zurand")
@@ -135,7 +143,7 @@ Every engine gives the same guarantees: the same key gives the same values
 on every platform and thread count, and draw `i` does not depend on how
 many values you ask for. The default passed a PractRand audit to 1 TB,
 including interleaved streams of sibling and folded keys
-([dev/statistical-audit.md](dev/statistical-audit.md)). Changing engine
+([dev/statistical-audit.md](https://github.com/pedrobtz/zurand/blob/main/dev/statistical-audit.md)). Changing engine
 changes every value, so name it explicitly if you need the stream to
 survive a change of default:
 
@@ -160,7 +168,7 @@ zr->key_get(keys, 0, &k);                     /* keys: an rng_key from R */
 if (zr->fill_normal(k, n, 0.0, 1.0, buf) != ZURAND_OK) { /* bad arguments */ }
 ```
 
-The header, [inst/include/zurand.h](inst/include/zurand.h), documents the
+The header, [inst/include/zurand.h](https://github.com/pedrobtz/zurand/blob/main/inst/include/zurand.h), documents the
 rest: uniform, integer and 64-bit fills, and `fold_int()`, which derives a
 key exactly as `rng_fold(key, i)` does.
 
@@ -195,10 +203,10 @@ a `libomp` installation.
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](https://github.com/pedrobtz/zurand/blob/main/LICENSE).
 
 This package bundles three third-party components, credited in
-[inst/COPYRIGHTS](inst/COPYRIGHTS): the Random123 library (D. E. Shaw
+[inst/COPYRIGHTS](https://github.com/pedrobtz/zurand/blob/main/inst/COPYRIGHTS): the Random123 library (D. E. Shaw
 Research, BSD 3-clause), NumPy's ziggurat constant tables (NumPy Developers,
 BSD 3-clause), and fdlibm's `exp` and `log1p` (Sun Microsystems, permissive
 notice), which keep normal draws identical across platforms.

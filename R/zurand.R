@@ -62,6 +62,14 @@ rng_key <- function(seed, n = 1L,
 #' @inheritParams rng_key
 #' @return An object of class `rng_key` containing `n` keys.
 #' @export
+#' @examples
+#' set.seed(1)
+#' key <- rng_key_from_r()
+#' rng_uniform(key, 3L)
+#'
+#' # The same seed gives the same key.
+#' set.seed(1)
+#' identical(rng_key_from_r(), key)
 rng_key_from_r <- function(n = 1L,
                            engine = c("xoshiro256pp", "philox4x64",
                                "threefry4x64")) {

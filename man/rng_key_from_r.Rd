@@ -42,3 +42,12 @@ intentionally consumes R's global RNG state. Use it when you want a fresh
 stateless key from the current \code{.Random.seed}; all other functions in this
 package leave \code{.Random.seed} untouched.
 }
+\examples{
+set.seed(1)
+key <- rng_key_from_r()
+rng_uniform(key, 3L)
+
+# The same seed gives the same key.
+set.seed(1)
+identical(rng_key_from_r(), key)
+}
