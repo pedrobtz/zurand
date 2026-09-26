@@ -2,8 +2,9 @@ The zurand package as a whole is distributed under the MIT license, with
 Pedro Baltazar as copyright holder (see the LICENSE file).
 
 It bundles the following third-party components, which carry their own
-copyright and license terms. Both are BSD 3-clause licensed and are
-redistributed here unmodified.
+copyright and license terms. Random123 and the NumPy tables are BSD
+3-clause licensed and redistributed unmodified; the fdlibm functions carry
+Sun's permissive notice and are modified, as described below.
 
 
 -------------------------------------------------------------------------
@@ -44,6 +45,24 @@ Source:     https://github.com/numpy/numpy
 
 Provides the lookup tables and layer layout for the ziggurat normal
 sampler in rng_normal(). Only the normal-double tables are used.
+
+
+-------------------------------------------------------------------------
+fdlibm (exp and log1p)
+-------------------------------------------------------------------------
+
+Files:      src/zurand_fdlibm.h (derived from e_exp.c and s_log1p.c)
+Copyright:  Copyright (C) 1993, 2004 by Sun Microsystems, Inc.
+            All rights reserved.
+License:    Permission to use, copy, modify, and distribute this software
+            is freely granted, provided that this notice is preserved.
+Source:     https://www.netlib.org/fdlibm/
+
+Provides exp() and log1p() for the ziggurat's slow path, so that
+rng_normal() does not depend on the platform's libm. Modified: products
+that feed an addition are kept from fusing into a multiply-add, word
+access uses memcpy instead of pointer casts, and a negative left shift is
+done in unsigned arithmetic. The notices are preserved in the file.
 
 
 -------------------------------------------------------------------------

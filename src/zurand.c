@@ -442,6 +442,10 @@ static int lemire_accept(uint32_t x, uint32_t range, uint32_t threshold,
  * buffer is sized for the widest, so one constant governs stack use. */
 #define ZURAND_MAX_CHUNK_WORDS (ZURAND_CHUNK_WORDS * 4)
 
+/* exp() and log1p() for the ziggurat's slow path: fdlibm, so the result
+ * does not depend on the platform's libm. See the file for why. */
+#include "zurand_fdlibm.h"
+
 #define ZE_SUFFIX philox
 #define ZE_KEY_T  philox4x64_key_t
 #define ZE_GEN(c, k) philox4x64_R(10, (c), (k))
@@ -737,6 +741,7 @@ static uint64_t hash_data(SEXP data) {
  * passes; elementwise, so the threaded result equals the serial one. */
 static void affine_pass(double *out, R_xlen_t total, double a, double s,
                         int nt) {
+    (void)nt;  /* the thread count, used only by the OpenMP pragmas */
 #ifdef ZURAND_HAVE_V2D
     const R_xlen_t npair = total / 2;
     const zurand_v2d av = {a, a}, sv = {s, s};

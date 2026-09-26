@@ -6,7 +6,9 @@ Authors@R: c(
     person("D. E. Shaw Research", role = "cph",
            comment = "Random123 library, src/Random123/"),
     person("NumPy Developers", role = "cph",
-           comment = "Ziggurat constant tables, src/numpyzig/")
+           comment = "Ziggurat constant tables, src/numpyzig/"),
+    person("Sun Microsystems, Inc.", role = "cph",
+           comment = "fdlibm exp() and log1p(), src/zurand_fdlibm.h")
   )
 Description: Stateless deterministic random number generation using the Philox
     counter-based generator from the 'Random123' library by Salmon, Moraes,
