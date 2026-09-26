@@ -54,20 +54,23 @@ in the same `bench::mark()` call:
 
 | | EPYC 7763, 1 thread | EPYC, 4 threads | Apple M1, 1 thread |
 |---|---:|---:|---:|
-| uniform: zurand `xoshiro256pp` | **884** | **1911** | **1837** |
-| uniform: randompack `x256++simd` | 691 | 689 | 1274 |
-| uniform: dqrng | 369 | 369 | 248 |
-| Gaussian: zurand `xoshiro256pp` | **358** | **877** | **661** |
-| Gaussian: randompack `x256++simd` | **357** | 356 | 559 |
-| Gaussian: RcppZiggurat MT | 125 | 125 | 200 |
+| uniform: zurand `xoshiro256pp` | **864** | **1801** | **1364** |
+| uniform: randompack `x256++simd` | 688 | 684 | 1087 |
+| uniform: dqrng | 368 | 367 | 230 |
+| Gaussian: zurand `xoshiro256pp` | **366** | **919** | **624** |
+| Gaussian: randompack `x256++simd` | 355 | 355 | 503 |
+| Gaussian: RcppZiggurat MT | 125 | 124 | 193 |
 
 After the fused AVX2 uniform (#34), the NEON path (#35, #38), `DC ZVA` on
-Apple (#39) and the signed-table ziggurat (#40). zurand now leads
-randompack on every row but x86 Gaussian, which is level. The M1 margins
-in this run (1.44x uniform, 1.18x Gaussian) are the fast end: same-machine
-A/Bs on three M1 runners gave 1.05-1.15x and 1.05-1.20x. Both packages'
-normals are bounded by the scalar ziggurat's table lookups, and the
-ziggurat implementation is frozen (below).
+Apple (#39), the signed-table ziggurat (#40), huge pages (#42, no effect
+on these runners, whose kernels use them anyway) and the slow path's
+codegen (#43). zurand leads randompack on every row; x86 Gaussian by 3%
+on this Zen 3 and 8% on a Xeon 6973P (the A/B behind #43). The M1 runner
+is a noisy VM: the same code measured 1837/661 M/s in the morning and
+1364/624 here; same-machine A/Bs on three M1 runners gave 1.05-1.15x
+(uniform) and 1.05-1.20x (Gaussian). Both packages' normals are bounded
+by the scalar ziggurat's table lookups; the ziggurat implementation is
+frozen (below), its compiler attributes are not.
 
 Done: KAT against Random123 for both counter engines; golden values in hex
 floats; threads = serial and SIMD = scalar identity tests; two-pass uniform

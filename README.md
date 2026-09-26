@@ -160,29 +160,30 @@ measured in the same `bench::mark()` call on the same machine.
 | | Linux x86_64, 1 thread | Linux x86_64, 4 threads | macOS arm64, 1 thread |
 |---|---:|---:|---:|
 | **uniform** | | | |
-| zurand (`xoshiro256pp`) | **884** | **1911** | **1837** |
-| zurand (`philox4x64`) | 276 | 598 | 486 |
-| randompack (`x256++simd`) | 691 | 689 | 1274 |
-| dqrng | 369 | 369 | 248 |
-| base R `runif()` | 104 | 104 | 177 |
+| zurand (`xoshiro256pp`) | **864** | **1801** | **1364** |
+| zurand (`philox4x64`) | 276 | 594 | 356 |
+| randompack (`x256++simd`) | 688 | 684 | 1087 |
+| dqrng | 368 | 367 | 230 |
+| base R `runif()` | 104 | 104 | 148 |
 | **normal** | | | |
-| zurand (`xoshiro256pp`) | **358** | **877** | **661** |
-| zurand (`philox4x64`) | 210 | 486 | 341 |
-| randompack (`x256++simd`) | **357** | 356 | 559 |
-| RcppZiggurat (MT) | 125 | 125 | 200 |
-| dqrng | 143 | 143 | 209 |
+| zurand (`xoshiro256pp`) | **366** | **919** | **624** |
+| zurand (`philox4x64`) | 215 | 501 | 297 |
+| randompack (`x256++simd`) | 355 | 355 | 503 |
+| RcppZiggurat (MT) | 125 | 124 | 193 |
+| dqrng | 143 | 143 | 189 |
 | base R `rnorm()` | 28 | 28 | 39 |
 
 Linux: AMD EPYC 7763, AVX2, OpenMP, and a kernel that uses 2 MiB pages for
 everything; on Linux kernels in the default `madvise` mode zurand requests
 them itself for large outputs, which doubles large fills there (see the
 article). macOS: Apple M1, NEON, no OpenMP, as in the CRAN binary. On one thread zurand leads dqrng and RcppZiggurat by
-2.4-7x. Against randompack's SIMD engine, the fastest single-threaded
-alternative, it leads on uniform (1.3x on x86_64; 1.05-1.4x on Apple
-Silicon, depending on the runner) and on normal on Apple Silicon
-(1.05-1.2x), and is level on normal on x86_64. With threads zurand is
-2.5-2.8x randompack, and its output is still bit-identical to one thread;
-none of the others parallelizes at the R level. The
+2.3-6x. Against randompack's SIMD engine, the fastest single-threaded
+alternative, it leads on every row: uniform by 1.26x on x86_64 and
+1.05-1.4x on Apple Silicon depending on the runner; normal by 1.03x on
+this Zen 3 (1.08x on a Xeon 6973P, from the same-machine A/B in #43) and
+1.05-1.25x on Apple Silicon. With threads zurand is 2.6x randompack, and
+its output is still bit-identical to one thread; none of the others
+parallelizes at the R level. The
 [performance article](https://github.com/pedrobtz/zurand/blob/main/vignettes/performance.Rmd)
 has the method and how to reproduce these numbers.
 

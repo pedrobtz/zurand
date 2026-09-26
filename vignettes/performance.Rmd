@@ -23,19 +23,19 @@ the package's `benchmark` workflow on GitHub-hosted runners, 2026-09-26.
 | | Linux x86_64, 1 thread | Linux x86_64, 4 threads | macOS arm64, 1 thread |
 |---|---:|---:|---:|
 | **uniform** | | | |
-| zurand (`xoshiro256pp`) | **884** | **1911** | **1837** |
-| zurand (`philox4x64`) | 276 | 598 | 486 |
-| randompack (`x256++simd`) | 691 | 689 | 1274 |
-| randompack (`philox`) | 252 | 252 | 484 |
-| dqrng | 369 | 369 | 248 |
-| base R `runif()` | 104 | 104 | 177 |
+| zurand (`xoshiro256pp`) | **864** | **1801** | **1364** |
+| zurand (`philox4x64`) | 276 | 594 | 356 |
+| randompack (`x256++simd`) | 688 | 684 | 1087 |
+| randompack (`philox`) | 252 | 252 | 419 |
+| dqrng | 368 | 367 | 230 |
+| base R `runif()` | 104 | 104 | 148 |
 | **normal** | | | |
-| zurand (`xoshiro256pp`) | **358** | **877** | **661** |
-| zurand (`philox4x64`) | 210 | 486 | 341 |
-| randompack (`x256++simd`) | **357** | 356 | 559 |
-| randompack (`philox`) | 185 | 185 | 325 |
-| RcppZiggurat (MT) | 125 | 125 | 200 |
-| dqrng | 143 | 143 | 209 |
+| zurand (`xoshiro256pp`) | **366** | **919** | **624** |
+| zurand (`philox4x64`) | 215 | 501 | 297 |
+| randompack (`x256++simd`) | 355 | 355 | 503 |
+| randompack (`philox`) | 184 | 184 | 303 |
+| RcppZiggurat (MT) | 125 | 124 | 193 |
+| dqrng | 143 | 143 | 189 |
 | base R `rnorm()` | 28 | 28 | 39 |
 
 - **Linux:** AMD EPYC 7763, 4 cores, AVX2, OpenMP.
@@ -45,20 +45,21 @@ the package's `benchmark` workflow on GitHub-hosted runners, 2026-09-26.
 
 ## Reading the table
 
-- **Against dqrng and RcppZiggurat**, zurand's default engine is 2.4-7x
-  faster on uniform and 2.5-3.3x on normal, single-threaded.
+- **Against dqrng and RcppZiggurat**, zurand's default engine is 2.3-6x
+  faster on uniform and 2.9-3.2x on normal, single-threaded.
 - **Against randompack's SIMD engine**, the fastest single-threaded
-  competitor, zurand leads on uniform: 1.3x on x86_64, and 1.05-1.4x on
-  Apple Silicon depending on the runner (the table's M1 is the fast end;
-  same-machine A/Bs on three M1 runners gave 1.05-1.15x for fills of 2e5
-  values or more, and about 0.95x for fills small enough to stay in
-  cache). On normal it leads on Apple Silicon (1.05-1.2x) and is level on
-  x86_64. Both vectorise the generator (AVX2 on x86_64, NEON on arm64),
-  and both use NumPy's ziggurat, scalar, for normals; zurand's takes the
-  sign from a signed table and is unrolled by four.
+  competitor, zurand leads on every row. Uniform: 1.26x on x86_64, and
+  1.05-1.4x on Apple Silicon depending on the runner (same-machine A/Bs on
+  three M1 runners gave 1.05-1.15x for fills of 2e5 values or more, and
+  about 0.95x for fills small enough to stay in cache). Normal: 1.03x on
+  this Zen 3, 1.08x on a Xeon 6973P (the same-machine A/B behind #43) and
+  1.05-1.25x on Apple Silicon. Both vectorise the generator (AVX2 on
+  x86_64, NEON on arm64), and both use NumPy's ziggurat, scalar, for
+  normals; zurand's takes the sign from a signed table, is unrolled by
+  four, and keeps its rare slow path as plain out-of-line code.
 - **With threads**, zurand is the only package here that parallelizes at the
   R level, and the threaded output is bit-identical to the serial one. On
-  four cores it is 2.8x randompack on uniform and 2.5x on normal.
+  four cores it is 2.6x randompack on both.
 - **The engines differ in speed, not in guarantees.** Philox and Threefry
   are counter-based: each value is computed from its position. The default
   xoshiro256pp reseeds a cheap recurrence from Philox every 512 values.
