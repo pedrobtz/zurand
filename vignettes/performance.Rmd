@@ -82,6 +82,14 @@ the package's `benchmark` workflow on GitHub-hosted runners, 2026-09-26.
   pay was fewer instructions per draw: the sign folded into a signed table
   and the loop unrolled by four. The ziggurat's implementation is now
   frozen; a faster Gaussian would be a different method.
+- **Fusing the generator with the ziggurat transform**, so no word buffer
+  exists: slower on every CPU tried (i5, Zen 3, Zen 4, Xeon 6973P), by
+  12-95%. The 32 KiB buffer costs nothing; the transform is the cost.
+- **Non-temporal stores, again**, this time on freshly allocated memory
+  with R's 16-byte alignment: 1.3-3.3x slower than ordinary stores on
+  every CPU. Closed.
+- **Pre-faulting the output** (`MADV_POPULATE_WRITE`): no gain. The page
+  size is what matters; see *Page size on Linux* below.
 - **`DC ZVA` for normals on Apple Silicon.** It is what lets zurand's
   uniform fill beat randompack there, because that fill writes ten
   interleaved streams. Normals write one sequential stream, which the core

@@ -138,6 +138,7 @@ or claims a new argument, purpose value or engine name.
 | C9 | Split `src/zurand.c` along engine and sampler lines | neutral | 1,050 lines and three engines |
 | C10 | Make `src/zigbounds.h` platform-independent (exact rationals or `Rmpfr`) | build only | old 0.4 |
 | C11 | `RNGkind("user-supplied")` bridge | additive, opt-in | only if users ask; stateful by nature |
+| C12 | AVX-512 path for `xoshiro256pp` (8 lanes, `vprolq`) | neutral | randompack has one; +12-15% uniform on Xeon 6973P, Zen 4 inconsistent in one sample (`dev/simd/avx512.c`); needs three Zen 4 and three Intel samples before deciding |
 
 ---
 
@@ -172,6 +173,30 @@ which is additive: C7), never to tune this one again.
 
 What remains is the table lookups, the same in every ziggurat, and memory.
 
+### x86 analysis, second pass (2026-09-26)
+
+Asked: with the ziggurat frozen, is anything left to beat randompack
+comfortably on every architecture, x86 in particular? Everything below was
+measured, bit-identical, on the machines named; harnesses in `dev/simd/`.
+
+| idea | result | outcome |
+|---|---|---|
+| **Transparent huge pages** for large outputs (`madvise(MADV_HUGEPAGE)`, Linux) | a fresh 80 MB vector on 4 KiB pages costs 2.6-3.9 ns/value in faults, more than the generation; on the ubuntu-24.04-arm runner (THP `madvise`, the Ubuntu default) the hint took uniform 268 -> 532 M/s and normal 214 -> 344, against randompack's 271 / 200; in `always` mode the explicit request costs 6-9% (compaction), so it is made only in `madvise` mode | **#42** |
+| **Slow path codegen**: fdlibm `exp`/`log1p` as calls, no `cold` | the slow path compiled badly, not computed slowly: stubs of every kind "gained" 15-19% on the i5, and so did simply not inlining `zurand_exp()`; `exp()` runs on ~6% of wedge tests (`zig_slow.c`); GCC compiles `cold` for size (2-5% on Zen 3) | **#43**: +7-9% normals on Xeon 6973P, +15-19% with Apple clang, level on Neoverse |
+| fused generator + transform (no word buffer) | slower everywhere: i5 2.04 vs 1.81 ns, Zen 3 2.82 vs 1.75, Zen 4 2.99 vs 1.53, Xeon 2.01 vs 1.42 (`fuse_normal.c`) | rejected |
+| strip-mined 2 KiB word buffer | level to 10% slower | rejected |
+| non-temporal stores on fresh memory (128-bit, R's alignment) | slower everywhere, 1.3-3.3x on fresh pages (`fuse_normal.c` UN) | rejected, closes the earlier question |
+| `MADV_POPULATE_WRITE` pre-faulting | no gain (`pagefault.c`) | rejected |
+| BMI2 `bextr` field extraction | +3-7% on the transform on Zen 3/4 only, level on Intel | not adopted (AMD-only, needs dispatch) |
+| batched retry blocks | +2.5% xoshiro, -2% threefry, measured before #43 | not adopted |
+| **AVX-512 generator** (8 lanes, `vprolq`, 8x8 transpose; `avx512.c`) | Intel Xeon 6973P: uniform +12-15%, normal +2%; Zen 4 (one sample): uniform slower in cache (0.65 vs 0.51 ns), normal faster (0.96 vs 1.27) -- inconsistent, needs more samples. randompack ships an AVX-512 path (`-mavx512f -mavx512dq` via configure) | **open**, C12 |
+| other Gaussian methods (vectorised Box-Muller or inversion) | ~5-7 cycles/value on AVX2 against the scalar ziggurat's 3.7; only AVX-512 with full-width units comes close; would need deterministic vector `log`/`sincos` and a new purpose value | not pursued |
+| where the time goes now, one thread, EPYC 7763, n = 1e7 (`fuse_normal.c`, `pagefault.c`) | words 0.54 ns, uniform conversion+store 0.13, ziggurat transform 1.03, fresh pages 0.35-0.5 (2 MiB) or 2.6-3.9 (4 KiB); the R level matches the harness for uniform exactly | -- |
+
+Note on the i5-8500B: small (<10%) effects there are unreliable until
+compared on a second machine -- the three slow-path stubs all measured
++17% for reasons that turned out to be codegen, not the work removed.
+
 ## Retired
 
 | item | why |
@@ -199,6 +224,8 @@ What remains is the table lookups, the same in every ziggurat, and memory.
 | 2026-09-26 | fdlibm `exp`/`log1p` instead of the platform libm | platforms disagreed; deterministic beats correctly rounded here; #20 |
 | 2026-09-26 | 32-bit x87 outside the reproducibility contract | double rounding on every add; no CRAN platform since R 4.2.0 |
 | 2026-09-26 | **default engine becomes `xoshiro256pp`** (was proposed 2026-09-25) | 2.4x dqrng on uniform versus 0.96x today; conditional on A6 and A8 |
+| 2026-09-26 | huge pages requested only in THP `madvise` mode, never in `always` | 2x on large fills where it applies; 6-9% compaction cost where it does not; #42 |
+| 2026-09-26 | the ziggurat's slow path stays plain `noinline`, never `cold`; fdlibm `exp`/`log1p` stay calls | attributes are not the algorithm; #43 |
 | 2026-09-26 | **ziggurat implementation frozen at #40** | every remaining angle measured level or worse on some engine or CPU; see "Ziggurat implementation frozen" |
 
 ## Open questions
