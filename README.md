@@ -182,6 +182,56 @@ none of the others parallelizes at the R level. The
 [performance article](https://github.com/pedrobtz/zurand/blob/main/vignettes/performance.Rmd)
 has the method and how to reproduce these numbers.
 
+The same comparison on your own machine, one call per distribution:
+
+```r
+library(zurand)
+library(bench)
+
+n <- 1e7
+key <- rng_key(42L)                    # zurand's default engine, xoshiro256pp
+rp <- randompack::randompack_rng()     # randompack's fastest engine
+dqrng::dqset.seed(42L)
+
+bench::mark(
+  zurand     = rng_uniform(key, n),
+  dqrng      = dqrng::dqrunif(n),
+  randompack = rp$unif(len = n),
+  base       = runif(n),
+  check = FALSE
+)
+#> # A tibble: 4 × 13
+#>   expression      min   median `itr/sec` mem_alloc `gc/sec` n_itr  n_gc total_time result
+#>   <bch:expr> <bch:tm> <bch:tm>     <dbl> <bch:byt>    <dbl> <int> <dbl>   <bch:tm> <list>
+#> 1 zurand       12.7ms   12.8ms     77.5     76.3MB    96.9     12    15      155ms <NULL>
+#> 2 dqrng        30.1ms   31.3ms     32.2     76.3MB    32.2      7     7      218ms <NULL>
+#> 3 randompack   21.9ms     22ms     45.5     76.3MB    40.9     10     9      220ms <NULL>
+#> 4 base        125.7ms  126.1ms      7.93    76.3MB     7.93     2     2      252ms <NULL>
+#> # ℹ 3 more variables: memory <list>, time <list>, gc <list>
+
+bench::mark(
+  zurand       = rng_normal(key, n),
+  dqrng        = dqrng::dqrnorm(n),
+  RcppZiggurat = RcppZiggurat::zrnormMT(n),
+  randompack   = rp$normal(len = n),
+  base         = rnorm(n),
+  check = FALSE
+)
+#> # A tibble: 5 × 13
+#>   expression        min  median `itr/sec` mem_alloc `gc/sec` n_itr  n_gc total_time result
+#>   <bch:expr>   <bch:tm> <bch:t>     <dbl> <bch:byt>    <dbl> <int> <dbl>   <bch:tm> <list>
+#> 1 zurand           26ms  26.2ms     38.0     76.3MB    38.0      8     8      211ms <NULL>
+#> 2 dqrng          66.9ms    67ms     14.5     76.3MB    19.4      3     4      206ms <NULL>
+#> 3 RcppZiggurat   50.6ms  51.1ms     19.4     76.5MB    19.4      5     5      258ms <NULL>
+#> 4 randompack     37.3ms  37.6ms     26.5     76.3MB    26.5      6     6      226ms <NULL>
+#> 5 base          418.7ms 418.7ms      2.39    76.3MB     2.39     1     1      419ms <NULL>
+#> # ℹ 3 more variables: memory <list>, time <list>, gc <list>
+```
+
+That output is from an Intel Core i5-8500B (x86_64, macOS, one thread, R
+4.5.2), where zurand leads both calls. Which package is fastest on one
+thread depends on the processor, as the table above shows.
+
 ## Using zurand from C
 
 Packages can draw from zurand in C, into buffers they own and from their
