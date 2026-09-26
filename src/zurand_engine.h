@@ -267,8 +267,9 @@ static void ZE_N(fill_uniform_column)(double *out, R_xlen_t n,
         int m = (int)(n - w0 < ZE_CHUNK_WORDS ? n - w0 : ZE_CHUNK_WORDS);
         double *o = out + w0;
 #ifdef ZE_UNIFORM_FAST
-        /* An engine may write a whole chunk of uniforms itself. */
-        if (ZE_UNIFORM_FAST(key, (uint64_t)c, o, m))
+        /* An engine may write a whole chunk of uniforms itself. `large`
+         * is decided on the whole column, not on one thread's share. */
+        if (ZE_UNIFORM_FAST(key, (uint64_t)c, o, m, n >= ZURAND_ZVA_MIN_VALUES))
             continue;
 #endif
         uint64_t buf[ZURAND_MAX_CHUNK_WORDS + ZURAND_CHUNK_SLACK];

@@ -487,7 +487,7 @@ static int lemire_accept(uint32_t x, uint32_t range, uint32_t threshold,
 /* An engine may take a wider chunk than the default: xoshiro groups four
  * 512-word sub-chunks so four can run in parallel SIMD lanes. Every chunk
  * buffer is sized for the widest, so one constant governs stack use. */
-#define ZURAND_MAX_CHUNK_WORDS (ZURAND_CHUNK_WORDS * 8)
+#define ZURAND_MAX_CHUNK_WORDS (ZURAND_CHUNK_WORDS * 10)
 
 /* exp() and log1p() for the ziggurat's slow path: fdlibm, so the result
  * does not depend on the platform's libm. See the file for why. */
@@ -542,7 +542,13 @@ R123_STATIC_INLINE uint64_t zurand_rotl64(uint64_t x, int k) {
  * a vector path gets at once: two AVX2 calls of 4 lanes, or one NEON call
  * of 8 (four 2-lane registers, which 32 vector registers hold without
  * spilling). Was 4 until the NEON path; output did not change. */
-#define ZURAND_XOSHIRO_LANES 8
+#if defined(__aarch64__) && defined(__ARM_NEON)
+/* NEON: eight sub-chunks in four registers plus two on the scalar ALUs,
+ * which are otherwise idle while the vector pipes work (see below). */
+#  define ZURAND_XOSHIRO_LANES 10
+#else
+#  define ZURAND_XOSHIRO_LANES 8
+#endif
 #define ZURAND_AVX2_LANES 4
 
 R123_STATIC_INLINE void xoshiro_seed(philox4x64_key_t key, uint64_t sub,
@@ -707,8 +713,15 @@ static void xoshiro_group_avx2_u01(philox4x64_key_t key, uint64_t sub0,
  * Eight sub-chunks per call, two per 128-bit register, four registers --
  * randompack's width, which on arm64 does not spill. After two steps a
  * register holds [x0 y0], [x1 y1] for sub-chunks (p, p+1); zip1/zip2 turn
- * that into [x0 x1] and [y0 y1], contiguous in each sub-chunk. Rotations
- * are SHL + SRI, two instructions instead of three.
+ * that into [x0 x1] and [y0 y1], contiguous in each sub-chunk.
+ *
+ * Two further sub-chunks run on the scalar integer ALUs in the same loop:
+ * an Apple core has six of them, idle while four vector pipes do the
+ * work, so they add throughput almost for free.
+ *
+ * Rotations are SHL, USHR, ORR. SHL + SRI is one instruction shorter and
+ * about 30% slower on Apple M1 (dev/simd/m1_compare.c): SRI reads its
+ * destination, which lengthens the loop-carried chain of the recurrence.
  *
  * Measured on GitHub's macos-26-arm64 runner, dev/simd/neon.c: uniform
  * 2.06-2.27x the scalar path (1300-1500 M/s), and bit-identical to it. On
@@ -718,7 +731,7 @@ static void xoshiro_group_avx2_u01(philox4x64_key_t key, uint64_t sub0,
 #  define ZURAND_NEON 1
 #  include <arm_neon.h>
 
-#define ZR_NROTL(x, k) vsriq_n_u64(vshlq_n_u64((x), (k)), (x), 64 - (k))
+#define ZR_NROTL(x, k) vorrq_u64(vshlq_n_u64((x), (k)), vshrq_n_u64((x), 64 - (k)))
 #define ZR_NSTEP(s0, s1, s2, s3, r) do {                                   \
         (r) = vaddq_u64(ZR_NROTL(vaddq_u64((s0), (s3)), 23), (s0));         \
         uint64x2_t t_ = vshlq_n_u64((s1), 17);                             \
@@ -737,26 +750,40 @@ static void xoshiro_group_avx2_u01(philox4x64_key_t key, uint64_t sub0,
         l_[0] = a_[3]; l_[1] = b_[3]; p##3 = vld1q_u64(l_);                \
     } while (0)
 
+#define ZR_SSTEP(s, r) do {                                                \
+        (r) = zurand_rotl64((s)[0] + (s)[3], 23) + (s)[0];                  \
+        uint64_t t_ = (s)[1] << 17;                                        \
+        (s)[2] ^= (s)[0]; (s)[3] ^= (s)[1]; (s)[1] ^= (s)[2];              \
+        (s)[0] ^= (s)[3]; (s)[2] ^= t_; (s)[3] = zurand_rotl64((s)[3], 45); \
+    } while (0)
+
 static inline float64x2_t zr_neon_u01(uint64x2_t w) {
     uint64x2_t m = vorrq_u64(vshrq_n_u64(w, 12),
                              vdupq_n_u64(UINT64_C(0x3ff0000000000000)));
     return vsubq_f64(vreinterpretq_f64_u64(m), vdupq_n_f64(1.0 - 0x1.0p-53));
 }
 
-/* Words for 8 sub-chunks into buf (sub-chunk l at buf + l * SUB). */
+/* Words for 10 sub-chunks into buf (sub-chunk l at buf + l * SUB). */
 static void xoshiro_group_neon(philox4x64_key_t key, uint64_t sub0,
                                uint64_t purpose, uint64_t *buf) {
     uint64x2_t a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2, c3, d0, d1, d2, d3;
     ZR_NSEED(a, sub0);     ZR_NSEED(b, sub0 + 2);
     ZR_NSEED(c, sub0 + 4); ZR_NSEED(d, sub0 + 6);
+    uint64_t e[4], f[4];
+    xoshiro_seed(key, sub0 + 8, purpose, e);
+    xoshiro_seed(key, sub0 + 9, purpose, f);
 #define ZR_NPAIR(p, l) do { uint64x2_t r0_, r1_;                             \
         ZR_NSTEP(p##0, p##1, p##2, p##3, r0_);                             \
         ZR_NSTEP(p##0, p##1, p##2, p##3, r1_);                             \
         vst1q_u64(buf + (l) * ZURAND_XOSHIRO_SUB + j, vzip1q_u64(r0_, r1_)); \
         vst1q_u64(buf + ((l) + 1) * ZURAND_XOSHIRO_SUB + j, vzip2q_u64(r0_, r1_)); \
     } while (0)
+    uint64_t *be = buf + 8 * ZURAND_XOSHIRO_SUB, *bf = buf + 9 * ZURAND_XOSHIRO_SUB;
     for (int j = 0; j < ZURAND_XOSHIRO_SUB; j += 2) {
-        ZR_NPAIR(a, 0); ZR_NPAIR(b, 2); ZR_NPAIR(c, 4); ZR_NPAIR(d, 6);
+        ZR_SSTEP(e, be[j]); ZR_SSTEP(f, bf[j]);
+        ZR_NPAIR(a, 0); ZR_NPAIR(b, 2);
+        ZR_SSTEP(e, be[j + 1]); ZR_SSTEP(f, bf[j + 1]);
+        ZR_NPAIR(c, 4); ZR_NPAIR(d, 6);
     }
 #undef ZR_NPAIR
 }
@@ -767,6 +794,10 @@ static void xoshiro_group_neon_u01(philox4x64_key_t key, uint64_t sub0,
     uint64x2_t a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2, c3, d0, d1, d2, d3;
     ZR_NSEED(a, sub0);     ZR_NSEED(b, sub0 + 2);
     ZR_NSEED(c, sub0 + 4); ZR_NSEED(d, sub0 + 6);
+    uint64_t e[4], f[4];
+    xoshiro_seed(key, sub0 + 8, purpose, e);
+    xoshiro_seed(key, sub0 + 9, purpose, f);
+    double *oe = out + 8 * ZURAND_XOSHIRO_SUB, *of = out + 9 * ZURAND_XOSHIRO_SUB;
 #define ZR_NPAIR(p, l) do { uint64x2_t r0_, r1_;                             \
         ZR_NSTEP(p##0, p##1, p##2, p##3, r0_);                             \
         ZR_NSTEP(p##0, p##1, p##2, p##3, r1_);                             \
@@ -776,14 +807,69 @@ static void xoshiro_group_neon_u01(philox4x64_key_t key, uint64_t sub0,
                   zr_neon_u01(vzip2q_u64(r0_, r1_)));                      \
     } while (0)
     for (int j = 0; j < ZURAND_XOSHIRO_SUB; j += 2) {
-        ZR_NPAIR(a, 0); ZR_NPAIR(b, 2); ZR_NPAIR(c, 4); ZR_NPAIR(d, 6);
+        uint64_t e0, e1, f0, f1;
+        ZR_SSTEP(e, e0); ZR_SSTEP(f, f0);
+        ZR_NPAIR(a, 0); ZR_NPAIR(b, 2);
+        ZR_SSTEP(e, e1); ZR_SSTEP(f, f1);
+        ZR_NPAIR(c, 4); ZR_NPAIR(d, 6);
+        oe[j] = u01_open(e0); oe[j + 1] = u01_open(e1);
+        of[j] = u01_open(f0); of[j + 1] = u01_open(f1);
     }
 #undef ZR_NPAIR
 }
+#undef ZR_SSTEP
 #undef ZR_NSEED
 #undef ZR_NSTEP
 #undef ZR_NROTL
 #endif /* NEON */
+
+/* DC ZVA on arm64: zero whole cache blocks without reading them first.
+ *
+ * zurand's stream puts each 512-value sub-chunk in its own contiguous
+ * 4 KiB block, so a NEON group writes ten blocks at once. That pattern
+ * does not get the "whole line is being overwritten, skip the read" path a
+ * single sequential stream gets on Apple cores, so every output line was
+ * first read from memory. Zeroing the group's region with DC ZVA first
+ * gives each store a line it already owns. Measured on the macos-latest
+ * (Apple M1) runner, dev/simd/m1_compare.c: 23-25% less time per value on
+ * large fills, reused or freshly allocated; ~20% more in cache, where the
+ * lines never left anyway -- hence the size threshold. Apple only: on
+ * the ubuntu-24.04-arm runner (Neoverse N2) it measured level or slower,
+ * so other arm64 cores keep ordinary stores.
+ *
+ * Only blocks lying entirely inside the region are zeroed. R aligns vector
+ * data to 16 bytes, not to the block, and a partial block at either end
+ * holds bytes of the neighbouring chunk or of the vector's header; those
+ * edges keep ordinary stores. Whole blocks inside one chunk are never
+ * touched by another thread. The block size is read once at load (0 if
+ * DC ZVA is prohibited), so worker threads only read it. */
+static size_t zurand_zva_bytes = 0;
+
+#ifndef ZURAND_ZVA_MIN_VALUES
+#  define ZURAND_ZVA_MIN_VALUES ((R_xlen_t)1 << 17)   /* 1 MiB of doubles */
+#endif
+
+static void zurand_zva_init(void) {
+#if defined(__APPLE__) && defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))
+    uint64_t v;
+    __asm__ volatile("mrs %0, dczid_el0" : "=r"(v));
+    zurand_zva_bytes = (v & 16) ? 0 : (size_t)4 << (v & 15);
+#endif
+}
+
+static inline void zurand_zva_region(double *p, size_t bytes) {
+#if defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))
+    size_t b = zurand_zva_bytes;
+    if (!b)
+        return;
+    uintptr_t lo = ((uintptr_t)p + b - 1) & ~(uintptr_t)(b - 1);
+    uintptr_t hi = ((uintptr_t)p + bytes) & ~(uintptr_t)(b - 1);
+    for (uintptr_t c = lo; c < hi; c += b)
+        __asm__ volatile("dc zva, %0" : : "r"(c) : "memory");
+#else
+    (void)p; (void)bytes;
+#endif
+}
 
 static int zurand_avx2_available = -1;
 static int zurand_simd_off = 0;
@@ -856,7 +942,7 @@ static void chunk_words_xoshiro(philox4x64_key_t key, uint64_t c,
 /* One full xoshiro chunk of uniforms, written straight into `o` when the
  * AVX2 path is on; returns 0 to fall back to words-then-convert. */
 static int uniform_chunk_xoshiro_fast(philox4x64_key_t key, uint64_t c,
-                                      double *o, int m) {
+                                      double *o, int m, int large) {
     if (m != ZURAND_XOSHIRO_SUB * ZURAND_XOSHIRO_LANES)
         return 0;
     uint64_t sub0 = c * ZURAND_XOSHIRO_LANES;
@@ -871,17 +957,19 @@ static int uniform_chunk_xoshiro_fast(philox4x64_key_t key, uint64_t c,
 #endif
 #ifdef ZURAND_NEON
     if (zurand_use_neon()) {
+        if (large)
+            zurand_zva_region(o, (size_t)m * sizeof(double));
         xoshiro_group_neon_u01(key, sub0, ZURAND_PURPOSE_UNIFORM, o);
         return 1;
     }
 #endif
-    (void)key; (void)o; (void)sub0;
+    (void)key; (void)o; (void)sub0; (void)large;
     return 0;
 }
 
 /* Philox for the key type and for the retry paths; xoshiro for bulk words. */
-#define ZE_UNIFORM_FAST(key, c, o, m) \
-    uniform_chunk_xoshiro_fast((key), (c), (o), (m))
+#define ZE_UNIFORM_FAST(key, c, o, m, large) \
+    uniform_chunk_xoshiro_fast((key), (c), (o), (m), (large))
 #define ZE_SUFFIX xoshiro
 #define ZE_KEY_T  philox4x64_key_t
 #define ZE_CHUNK_WORDS (ZURAND_CHUNK_WORDS * ZURAND_XOSHIRO_LANES)
@@ -1534,4 +1622,5 @@ void R_init_zurand(DllInfo *dll) {
     /* Settle the SIMD dispatch now, on the main thread, so C API calls from
      * worker threads only ever read it. */
     (void) zurand_use_avx2();
+    zurand_zva_init();
 }
