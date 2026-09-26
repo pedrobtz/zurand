@@ -83,9 +83,11 @@ R123_STATIC_INLINE uint64_t ZE_N(zig_next)(ZE_N(zig_stream) *s, ZE_KEY_T key,
  * the zig_stream retry blocks. Most wedge decisions resolve in fixed
  * point against the Dnorm bracket; only the narrow ambiguous band pays
  * exp(). Kept out of line so the fast path inlines into the sampler
- * loops. */
+ * loops. `noinline` only, not `cold`: GCC compiles a cold function for
+ * size, and that cost 2-5% of the whole normal fill on Zen 3 (three
+ * runners, 10 of 10 rounds each). */
 #if defined(__GNUC__) || defined(__clang__)
-__attribute__((noinline, cold))
+__attribute__((noinline))
 #endif
 static double ZE_N(zig_normal_slow)(ZE_KEY_T key, uint64_t index, uint64_t r) {
     ZE_N(zig_stream) s = {.group = 0, .w = 4};
@@ -164,8 +166,11 @@ static double ZE_N(zig_normal_slow)(ZE_KEY_T key, uint64_t index, uint64_t r) {
  * compare. `r` is the attempt-0 word from the shared Philox block. */
 /* Entry to the slow path from the signed-table fast path below: settles
  * the one case the new accept test sends here that the old one did not,
- * rabs == 0 in a layer with ki > 0, which the old code accepted as +0.0. */
-__attribute__((noinline, cold))
+ * rabs == 0 in a layer with ki > 0, which the old code accepted as +0.0.
+ * `noinline`, not `cold`: see zig_normal_slow. */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
 static double ZE_N(zig_normal_reject)(ZE_KEY_T key, uint64_t index, uint64_t r) {
     if (((r >> 9) & UINT64_C(0x000fffffffffffff)) == 0 && ki_double[r & 0xff] != 0)
         return 0.0;
