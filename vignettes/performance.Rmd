@@ -23,20 +23,20 @@ the package's `benchmark` workflow on GitHub-hosted runners, 2026-09-26.
 | | Linux x86_64, 1 thread | Linux x86_64, 4 threads | macOS arm64, 1 thread |
 |---|---:|---:|---:|
 | **uniform** | | | |
-| zurand (`xoshiro256pp`) | **887** | **1928** | 1208 |
-| zurand (`philox4x64`) | 282 | 623 | 421 |
-| randompack (`x256++simd`) | 693 | 696 | **1226** |
-| randompack (`philox`) | 252 | 253 | 367 |
-| dqrng | 369 | 370 | 234 |
-| base R `runif()` | 104 | 104 | 144 |
+| zurand (`xoshiro256pp`) | **884** | **1911** | **1837** |
+| zurand (`philox4x64`) | 276 | 598 | 486 |
+| randompack (`x256++simd`) | 691 | 689 | 1274 |
+| randompack (`philox`) | 252 | 252 | 484 |
+| dqrng | 369 | 369 | 248 |
+| base R `runif()` | 104 | 104 | 177 |
 | **normal** | | | |
-| zurand (`xoshiro256pp`) | 346 | **856** | **471** |
-| zurand (`philox4x64`) | 207 | 476 | 280 |
-| randompack (`x256++simd`) | **360** | 360 | 461 |
-| randompack (`philox`) | 185 | 185 | 271 |
-| RcppZiggurat (MT) | 125 | 125 | 182 |
-| dqrng | 143 | 143 | 189 |
-| base R `rnorm()` | 28 | 28 | 33 |
+| zurand (`xoshiro256pp`) | **358** | **877** | **661** |
+| zurand (`philox4x64`) | 210 | 486 | 341 |
+| randompack (`x256++simd`) | **357** | 356 | 559 |
+| randompack (`philox`) | 185 | 185 | 325 |
+| RcppZiggurat (MT) | 125 | 125 | 200 |
+| dqrng | 143 | 143 | 209 |
+| base R `rnorm()` | 28 | 28 | 39 |
 
 - **Linux:** AMD EPYC 7763, 4 cores, AVX2, OpenMP.
 - **macOS:** Apple M1 (virtualised), 3 cores, NEON, no OpenMP. That is
@@ -45,16 +45,20 @@ the package's `benchmark` workflow on GitHub-hosted runners, 2026-09-26.
 
 ## Reading the table
 
-- **Against dqrng and RcppZiggurat**, zurand's default engine is 2.4-5x
-  faster on uniform and 2.5-2.8x on normal, single-threaded.
+- **Against dqrng and RcppZiggurat**, zurand's default engine is 2.4-7x
+  faster on uniform and 2.5-3.3x on normal, single-threaded.
 - **Against randompack's SIMD engine**, the fastest single-threaded
-  competitor, zurand leads by 1.3x on uniform on x86_64 and is level with
-  it otherwise: within 1% on uniform on Apple Silicon, within 4% on normal
-  on both. Both vectorise the generator (AVX2 on x86_64, NEON on arm64),
-  and both use NumPy's ziggurat, scalar, for normals.
+  competitor, zurand leads on uniform: 1.3x on x86_64, and 1.05-1.4x on
+  Apple Silicon depending on the runner (the table's M1 is the fast end;
+  same-machine A/Bs on three M1 runners gave 1.05-1.15x for fills of 2e5
+  values or more, and about 0.95x for fills small enough to stay in
+  cache). On normal it leads on Apple Silicon (1.05-1.2x) and is level on
+  x86_64. Both vectorise the generator (AVX2 on x86_64, NEON on arm64),
+  and both use NumPy's ziggurat, scalar, for normals; zurand's takes the
+  sign from a signed table and is unrolled by four.
 - **With threads**, zurand is the only package here that parallelizes at the
   R level, and the threaded output is bit-identical to the serial one. On
-  four cores it is 2.8x randompack on uniform and 2.4x on normal.
+  four cores it is 2.8x randompack on uniform and 2.5x on normal.
 - **The engines differ in speed, not in guarantees.** Philox and Threefry
   are counter-based: each value is computed from its position. The default
   xoshiro256pp reseeds a cheap recurrence from Philox every 512 values.
@@ -70,6 +74,18 @@ the package's `benchmark` workflow on GitHub-hosted runners, 2026-09-26.
   plain loads it gained up to 9% on some Intel CPUs, nothing on AMD, and
   lost 6% for philox on another. The table lookups, not the arithmetic,
   are the cost.
+- **Other ziggurat restructurings**, all bit-identical: branch-free with a
+  fix-up pass (1.4-1.6x slower; the ~1% reject branch is nearly free),
+  randompack's in-place structure, a packed `{ki, wi}` table (both tables
+  already sit in L1 cache), and computing the rejected draws' retry blocks
+  four at a time (+2% for xoshiro, but 2% slower for threefry). What did
+  pay was fewer instructions per draw: the sign folded into a signed table
+  and the loop unrolled by four. The ziggurat's implementation is now
+  frozen; a faster Gaussian would be a different method.
+- **`DC ZVA` for normals on Apple Silicon.** It is what lets zurand's
+  uniform fill beat randompack there, because that fill writes ten
+  interleaved streams. Normals write one sequential stream, which the core
+  already handles, and zeroing first made them slower.
 
 ## Method
 

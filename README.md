@@ -160,25 +160,27 @@ measured in the same `bench::mark()` call on the same machine.
 | | Linux x86_64, 1 thread | Linux x86_64, 4 threads | macOS arm64, 1 thread |
 |---|---:|---:|---:|
 | **uniform** | | | |
-| zurand (`xoshiro256pp`) | **887** | **1928** | 1208 |
-| zurand (`philox4x64`) | 282 | 623 | 421 |
-| randompack (`x256++simd`) | 693 | 696 | **1226** |
-| dqrng | 369 | 370 | 234 |
-| base R `runif()` | 104 | 104 | 144 |
+| zurand (`xoshiro256pp`) | **884** | **1911** | **1837** |
+| zurand (`philox4x64`) | 276 | 598 | 486 |
+| randompack (`x256++simd`) | 691 | 689 | 1274 |
+| dqrng | 369 | 369 | 248 |
+| base R `runif()` | 104 | 104 | 177 |
 | **normal** | | | |
-| zurand (`xoshiro256pp`) | 346 | **856** | **471** |
-| zurand (`philox4x64`) | 207 | 476 | 280 |
-| randompack (`x256++simd`) | **360** | 360 | 461 |
-| RcppZiggurat (MT) | 125 | 125 | 182 |
-| dqrng | 143 | 143 | 189 |
-| base R `rnorm()` | 28 | 28 | 33 |
+| zurand (`xoshiro256pp`) | **358** | **877** | **661** |
+| zurand (`philox4x64`) | 210 | 486 | 341 |
+| randompack (`x256++simd`) | **357** | 356 | 559 |
+| RcppZiggurat (MT) | 125 | 125 | 200 |
+| dqrng | 143 | 143 | 209 |
+| base R `rnorm()` | 28 | 28 | 39 |
 
 Linux: AMD EPYC 7763, AVX2, OpenMP. macOS: Apple M1, NEON, no OpenMP, as in
-the CRAN binary. On one thread zurand leads dqrng and RcppZiggurat by 2-5x,
-leads randompack's SIMD engine by 1.3x on uniform on x86_64, and is level
-with it elsewhere (within 4%). With threads zurand is 2.4-2.8x the fastest
-single-threaded alternative, and its output is still bit-identical to one
-thread; none of the others parallelizes at the R level. The
+the CRAN binary. On one thread zurand leads dqrng and RcppZiggurat by
+2.4-7x. Against randompack's SIMD engine, the fastest single-threaded
+alternative, it leads on uniform (1.3x on x86_64; 1.05-1.4x on Apple
+Silicon, depending on the runner) and on normal on Apple Silicon
+(1.05-1.2x), and is level on normal on x86_64. With threads zurand is
+2.5-2.8x randompack, and its output is still bit-identical to one thread;
+none of the others parallelizes at the R level. The
 [performance article](https://github.com/pedrobtz/zurand/blob/main/vignettes/performance.Rmd)
 has the method and how to reproduce these numbers.
 

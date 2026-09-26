@@ -106,6 +106,11 @@ per-element formula is evaluated in IEEE binary64 **without contraction**
 | integer | Lemire bounded 32-bit on the low word, retries at `(position, g >= 1)` | inclusive `[min, max]` |
 | exponential (additive) | ziggurat on NumPy's exponential tables, purpose 5 | `rate` |
 
+The normal sampler's implementation is also frozen (#40; the roadmap's
+"Ziggurat implementation frozen" lists what was measured and why). A faster
+Gaussian would be a new method under a new purpose value, not a retuned
+ziggurat.
+
 `uniform`'s interval is stated the way base R states `runif`'s: strictly
 inside `(min, max)` for the default bounds, and able to return a bound only
 when `max - min` is small relative to `|min|`. That is a documentation
