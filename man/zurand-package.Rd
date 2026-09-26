@@ -6,7 +6,15 @@
 \alias{zurand-package}
 \title{zurand: Fast Stateless Random Number Generation}
 \description{
-Fast, stateless, deterministic random number generation. Random values are pure functions of immutable keys and sampler arguments, so sampling never reads or mutates '.Random.seed', and output is bit-identical across platforms and thread counts. The default engine is xoshiro256++ reseeded from the Philox counter-based generator of the 'Random123' library by Salmon, Moraes, Dror and Shaw (2011) \doi{10.1145/2063384.2063405}; Philox and Threefry are also available directly. Independent substreams are requested as key vectors with rng_key(seed, n) or derived explicitly with rng_fold().
+Fast, stateless, deterministic random number generation. Random values are pure functions of immutable keys and sampler arguments, so sampling never reads or mutates '.Random.seed', and output is bit-identical across platforms and thread counts. The default engine is xoshiro256++ (Blackman and Vigna, 2021) \doi{10.1145/3460772}, reseeded from the Philox counter-based generator of the 'Random123' library (Salmon, Moraes, Dror and Shaw, 2011) \doi{10.1145/2063384.2063405}; Philox and Threefry are also available directly. Normal deviates use the ziggurat method (Marsaglia and Tsang, 2000) \doi{10.18637/jss.v005.i08}. Independent substreams are requested as key vectors with rng_key(seed, n) or derived explicitly with rng_fold().
+}
+\seealso{
+Useful links:
+\itemize{
+  \item \url{https://github.com/pedrobtz/zurand}
+  \item Report bugs at \url{https://github.com/pedrobtz/zurand/issues}
+}
+
 }
 \author{
 \strong{Maintainer}: Pedro Baltazar \email{pedrobtz@gmail.com} [copyright holder]
