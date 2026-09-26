@@ -9,7 +9,7 @@ skip_if_no_simd <- function() {
 
 with_simd <- function(on, code) {
   old <- rng_simd()
-  on.exit(rng_simd(identical(old, "avx2")), add = TRUE)
+  on.exit(rng_simd(!identical(old, "none")), add = TRUE)
   rng_simd(on)
   force(code)
 }
@@ -64,11 +64,11 @@ test_that("multi-key and threaded fills are path-independent too", {
 })
 
 test_that("rng_simd() validates and round-trips", {
-  expect_true(rng_simd() %in% c("avx2", "none"))
+  expect_true(rng_simd() %in% c("avx2", "neon", "none"))
   old <- rng_simd()
   expect_identical(rng_simd(FALSE), old)      # returns the previous value
   expect_identical(rng_simd(), "none")
-  rng_simd(identical(old, "avx2"))
+  rng_simd(!identical(old, "none"))
   expect_identical(rng_simd(), old)
   expect_error(rng_simd(NA), "TRUE or FALSE")
 })

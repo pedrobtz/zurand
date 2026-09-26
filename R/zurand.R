@@ -320,8 +320,9 @@ c.rng_key <- function(..., recursive = FALSE) {
 #' is using; `rng_simd(FALSE)` forces the portable one.
 #'
 #' This is a performance control and nothing else. Both paths emit the same
-#' values: the vectorised one runs four independent 512-value sub-chunks in
-#' four lanes, each executing the same recurrence as the scalar path, so
+#' values: the vectorised one runs several independent 512-value sub-chunks
+#' side by side -- four per AVX2 register on x86_64, two per NEON register
+#' on arm64 -- each executing the same recurrence as the scalar path, so
 #' output does not depend on the instruction set, the CPU, or this setting.
 #' It is exposed because that claim is worth being able to check, and the
 #' package's own tests check it by running both and comparing.
@@ -331,14 +332,15 @@ c.rng_key <- function(..., recursive = FALSE) {
 #'
 #' @param enable `NULL` to query, `FALSE` to force the portable path, or
 #'   `TRUE` to go back to using whatever the CPU supports.
-#' @return A string: `"avx2"` if the vectorised path is active, otherwise
-#'   `"none"`. When setting, the previous value, invisibly.
+#' @return A string: `"avx2"` (x86_64 with AVX2) or `"neon"` (arm64) if the
+#'   vectorised path is active, otherwise `"none"`. When setting, the
+#'   previous value, invisibly.
 #' @export
 #' @examples
 #' rng_simd()
 #' old <- rng_simd(FALSE)
 #' identical(rng_uniform(rng_key(1L, engine = "xoshiro256pp"), 4L),
-#'           { rng_simd(old == "avx2"); rng_uniform(rng_key(1L, engine = "xoshiro256pp"), 4L) })
+#'           { rng_simd(old != "none"); rng_uniform(rng_key(1L, engine = "xoshiro256pp"), 4L) })
 rng_simd <- function(enable = NULL) {
   prev <- .Call(C_rng_simd, enable)
   if (is.null(enable)) prev else invisible(prev)
