@@ -173,8 +173,10 @@ measured in the same `bench::mark()` call on the same machine.
 | dqrng | 143 | 143 | 209 |
 | base R `rnorm()` | 28 | 28 | 39 |
 
-Linux: AMD EPYC 7763, AVX2, OpenMP. macOS: Apple M1, NEON, no OpenMP, as in
-the CRAN binary. On one thread zurand leads dqrng and RcppZiggurat by
+Linux: AMD EPYC 7763, AVX2, OpenMP, and a kernel that uses 2 MiB pages for
+everything; on Linux kernels in the default `madvise` mode zurand requests
+them itself for large outputs, which doubles large fills there (see the
+article). macOS: Apple M1, NEON, no OpenMP, as in the CRAN binary. On one thread zurand leads dqrng and RcppZiggurat by
 2.4-7x. Against randompack's SIMD engine, the fastest single-threaded
 alternative, it leads on uniform (1.3x on x86_64; 1.05-1.4x on Apple
 Silicon, depending on the runner) and on normal on Apple Silicon
