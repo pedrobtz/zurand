@@ -94,6 +94,12 @@ rng_fold <- function(key, data) {
 #' Stateless uniform sampling. `rng_uniform(key, n, min, max)` is a pure
 #' function of its arguments and returns ordinary numeric vectors or matrices.
 #'
+#' With the default bounds every value lies strictly inside \eqn{(0, 1)}: it
+#' is \eqn{(m + 1/2) 2^{-52}} for a 52-bit integer \eqn{m}, so neither
+#' endpoint can occur. Other bounds are applied as `min + (max - min) * u`,
+#' which, as with [stats::runif()], will not return either extreme value
+#' unless `max = min` or `max - min` is small compared with `min`.
+#'
 #' @param key An `rng_key` vector.
 #' @param n A single non-negative whole number. Defaults to one draw per key.
 #' @param min,max Single finite numeric bounds.
