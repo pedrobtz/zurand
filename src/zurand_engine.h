@@ -263,12 +263,17 @@ static void ZE_N(fill_uniform_column)(double *out, R_xlen_t n,
     shared(out, n, nchunk, key) schedule(static)
 #endif
     for (R_xlen_t c = 0; c < nchunk; c++) {
-        uint64_t buf[ZURAND_MAX_CHUNK_WORDS + ZURAND_CHUNK_SLACK];
         R_xlen_t w0 = c * ZE_CHUNK_WORDS;
         int m = (int)(n - w0 < ZE_CHUNK_WORDS ? n - w0 : ZE_CHUNK_WORDS);
+        double *o = out + w0;
+#ifdef ZE_UNIFORM_FAST
+        /* An engine may write a whole chunk of uniforms itself. */
+        if (ZE_UNIFORM_FAST(key, (uint64_t)c, o, m))
+            continue;
+#endif
+        uint64_t buf[ZURAND_MAX_CHUNK_WORDS + ZURAND_CHUNK_SLACK];
         ZE_N(chunk_words)(key, (uint64_t)c, ZURAND_PURPOSE_UNIFORM, buf, m);
 
-        double *o = out + w0;
         for (int j = 0; j < m; j++)
             o[j] = u01_open(buf[j]);
     }
@@ -323,3 +328,4 @@ static void ZE_N(fill_integer_column)(int *out, R_xlen_t n, ZE_KEY_T key,
 #undef ZE_CUSTOM_CHUNK
 #undef ZE_CHUNK_WORDS
 #undef ZE_TAG
+#undef ZE_UNIFORM_FAST

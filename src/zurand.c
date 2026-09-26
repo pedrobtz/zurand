@@ -630,6 +630,67 @@ static void xoshiro_group_avx2(philox4x64_key_t key, uint64_t sub0,
     }
 #undef ZR_VROTL
 }
+
+/* The same four sub-chunks, converted to uniforms in registers and stored
+ * straight into the output: no word buffer, and no second pass reading it
+ * back. The conversion is u01_open() lane by lane -- the same shift, OR and
+ * subtraction -- so the values are identical to the scalar path.
+ *
+ * Measured (2026-09-26, uniform, ratio to dqrng in the same bench::mark()):
+ * +17% at n = 1e7 on an i5-8500B; on an EPYC 7763 900 M/s one thread and
+ * 1995 M/s on four, from 569 and 1370. Non-temporal stores on top were
+ * tried and dropped: slower at the R level on both machines, one thread
+ * and four, because at these sizes the cost is page faults on freshly
+ * allocated vectors, which streaming stores do not avoid. */
+__attribute__((target("avx2")))
+static void xoshiro_group_avx2_u01(philox4x64_key_t key, uint64_t sub0,
+                                   uint64_t purpose, double *out) {
+    uint64_t st[ZURAND_XOSHIRO_LANES][4];
+    for (int l = 0; l < ZURAND_XOSHIRO_LANES; l++)
+        xoshiro_seed(key, sub0 + (uint64_t)l, purpose, st[l]);
+
+    __m256i s0 = _mm256_set_epi64x((long long)st[3][0], (long long)st[2][0],
+                                   (long long)st[1][0], (long long)st[0][0]);
+    __m256i s1 = _mm256_set_epi64x((long long)st[3][1], (long long)st[2][1],
+                                   (long long)st[1][1], (long long)st[0][1]);
+    __m256i s2 = _mm256_set_epi64x((long long)st[3][2], (long long)st[2][2],
+                                   (long long)st[1][2], (long long)st[0][2]);
+    __m256i s3 = _mm256_set_epi64x((long long)st[3][3], (long long)st[2][3],
+                                   (long long)st[1][3], (long long)st[0][3]);
+    const __m256i exponent = _mm256_set1_epi64x(0x3ff0000000000000LL);
+    const __m256d bias = _mm256_set1_pd(1.0 - 0x1.0p-53);
+#define ZR_VROTL(x, k) _mm256_or_si256(_mm256_slli_epi64((x), (k)), \
+                                       _mm256_srli_epi64((x), 64 - (k)))
+#define ZR_U01(w) _mm256_sub_pd(_mm256_castsi256_pd(_mm256_or_si256( \
+                      _mm256_srli_epi64((w), 12), exponent)), bias)
+#define ZR_STORE(p, v) _mm256_storeu_pd((p), (v))
+    for (int j = 0; j < ZURAND_XOSHIRO_SUB; j += 4) {
+        __m256i v[4];
+        for (int k = 0; k < 4; k++) {
+            v[k] = _mm256_add_epi64(
+                ZR_VROTL(_mm256_add_epi64(s0, s3), 23), s0);
+            __m256i t = _mm256_slli_epi64(s1, 17);
+            s2 = _mm256_xor_si256(s2, s0); s3 = _mm256_xor_si256(s3, s1);
+            s1 = _mm256_xor_si256(s1, s2); s0 = _mm256_xor_si256(s0, s3);
+            s2 = _mm256_xor_si256(s2, t);  s3 = ZR_VROTL(s3, 45);
+        }
+        __m256i t0 = _mm256_unpacklo_epi64(v[0], v[1]);
+        __m256i t1 = _mm256_unpackhi_epi64(v[0], v[1]);
+        __m256i t2 = _mm256_unpacklo_epi64(v[2], v[3]);
+        __m256i t3 = _mm256_unpackhi_epi64(v[2], v[3]);
+        ZR_STORE(out + 0 * ZURAND_XOSHIRO_SUB + j,
+                 ZR_U01(_mm256_permute2x128_si256(t0, t2, 0x20)));
+        ZR_STORE(out + 1 * ZURAND_XOSHIRO_SUB + j,
+                 ZR_U01(_mm256_permute2x128_si256(t1, t3, 0x20)));
+        ZR_STORE(out + 2 * ZURAND_XOSHIRO_SUB + j,
+                 ZR_U01(_mm256_permute2x128_si256(t0, t2, 0x31)));
+        ZR_STORE(out + 3 * ZURAND_XOSHIRO_SUB + j,
+                 ZR_U01(_mm256_permute2x128_si256(t1, t3, 0x31)));
+    }
+#undef ZR_STORE
+#undef ZR_U01
+#undef ZR_VROTL
+}
 #endif
 
 /* What the CPU offers (-1 until probed) and whether the user has turned it
@@ -684,7 +745,25 @@ static void chunk_words_xoshiro(philox4x64_key_t key, uint64_t c,
     }
 }
 
+/* One full xoshiro chunk of uniforms, written straight into `o` when the
+ * AVX2 path is on; returns 0 to fall back to words-then-convert. */
+static int uniform_chunk_xoshiro_fast(philox4x64_key_t key, uint64_t c,
+                                      double *o, int m) {
+#ifdef ZURAND_X86_DISPATCH
+    if (m == ZURAND_XOSHIRO_SUB * ZURAND_XOSHIRO_LANES && zurand_use_avx2()) {
+        xoshiro_group_avx2_u01(key, c * ZURAND_XOSHIRO_LANES,
+                               ZURAND_PURPOSE_UNIFORM, o);
+        return 1;
+    }
+#else
+    (void)key; (void)c; (void)o; (void)m;
+#endif
+    return 0;
+}
+
 /* Philox for the key type and for the retry paths; xoshiro for bulk words. */
+#define ZE_UNIFORM_FAST(key, c, o, m) \
+    uniform_chunk_xoshiro_fast((key), (c), (o), (m))
 #define ZE_SUFFIX xoshiro
 #define ZE_KEY_T  philox4x64_key_t
 #define ZE_CHUNK_WORDS (ZURAND_CHUNK_WORDS * ZURAND_XOSHIRO_LANES)
