@@ -49,3 +49,15 @@ self-contained C except the two R scripts; build lines are in each header.
   (`lib-a`, `lib-b`), one thread, ten alternating rounds.
 - `ab_thp.R`: the huge-page experiment at the R level, one build run with
   `ZURAND_THP=off|no|huge` (the switch existed only on that branch).
+
+## Normal methods (2026-09-27)
+
+- `mcfarland.c`: McFarland's modified-ziggurat fast path against the
+  shipped NumPy-table one, words in cache, with branch-free and vector
+  (NEON, AVX-512DQ) variants. Behind `rng_normal(method = "mcfarland")`.
+- `boxmuller.c`: vectorised Box-Muller made deterministic (fdlibm log,
+  fitted sine polynomial, no FMA), scalar/AVX2/AVX-512/NEON asserted
+  bit-identical, plus the same code with FMA to price what reproducibility
+  costs. Not adopted (roadmap C14).
+- `ab_methods.R`: the two normal methods and randompack in one
+  `bench::mark()` call, R level, one thread.

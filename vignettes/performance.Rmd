@@ -91,6 +91,13 @@ the package's `benchmark` workflow on GitHub-hosted runners, 2026-09-26.
   every CPU. Closed.
 - **Pre-faulting the output** (`MADV_POPULATE_WRITE`): no gain. The page
   size is what matters; see *Page size on Linux* below.
+- **Vectorised Box-Muller** (VectorizedRNG.jl's approach), made
+  reproducible by evaluating `log`, `sin` and `cos` without fused
+  multiply-add, so every vector lane and platform agrees with the scalar
+  path. It was 3.5-13x slower per value than McFarland's method on every
+  CPU tried; allowing fused multiply-add gained at most 1.33x and changed
+  7% of values in the last bits. A divide, a square root and two
+  polynomials cost more than one table load.
 - **`DC ZVA` for normals on Apple Silicon.** It is what lets zurand's
   uniform fill beat randompack there, because that fill writes ten
   interleaved streams. Normals write one sequential stream, which the core
