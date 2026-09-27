@@ -1,9 +1,14 @@
 # Same-machine A/B against randompack: `main` in lib-a, a candidate in lib-b,
 # alternating processes; each times zurand and randompack's fastest engine
 # in the same bench::mark() call and reports zurand's speed-up over it.
+# One thread (rng_threads(1L)): randompack has no threads, so this is
+# algorithm against algorithm. Before 2026-09-27 the script did not pin the
+# thread count, so on OpenMP builds (the Linux runners) its ratios compared
+# 4-thread zurand with serial randompack.
 args <- commandArgs(TRUE)
 if (length(args) && args[1] == "child") {
   suppressMessages({library(zurand); library(bench)})
+  rng_threads(1L)
   rp <- randompack::randompack_rng()
   key <- rng_key(7L)
   for (n in c(1e5, 1e6, 1e7)) {
