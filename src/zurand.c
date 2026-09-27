@@ -1101,11 +1101,9 @@ static void fill_uniform_key(zurand_engine_t eng, philox4x64_key_t kp,
         fill_uniform_column_philox(out, n, kp, par_rows);
 }
 
-/* Normal methods: the argument of rng_normal(method =) and of the C API's
- * fill_normal_method(). Each has its own purpose value. */
-#define ZURAND_NORMAL_ZIGGURAT  0
-#define ZURAND_NORMAL_MCFARLAND 1
-
+/* Normal methods (ZURAND_NORMAL_*, from zurand.h): the argument of
+ * rng_normal(method =) and of the C API's fill_normal_method(). Each has its
+ * own purpose value. */
 static void fill_normal_key(zurand_engine_t eng, philox4x64_key_t kp,
                             double *out, R_xlen_t n, int par_rows,
                             int method) {
@@ -1661,11 +1659,13 @@ static int api_fill_uniform(zurand_key k, size_t n, double min, double max,
     return ZURAND_OK;
 }
 
-static int api_fill_normal(zurand_key k, size_t n, double mean, double sd,
-                           double *out) {
+static int api_fill_normal_method(zurand_key k, size_t n, double mean,
+                                  double sd, int method, double *out) {
     if (!api_key_ok(k))
         return ZURAND_EKEY;
-    if (!isfinite(mean) || !isfinite(sd) || sd < 0 || n > (size_t)R_XLEN_T_MAX)
+    if (!isfinite(mean) || !isfinite(sd) || sd < 0 ||
+        n > (size_t)R_XLEN_T_MAX ||
+        (method != ZURAND_NORMAL_ZIGGURAT && method != ZURAND_NORMAL_MCFARLAND))
         return ZURAND_EINVAL;
     R_xlen_t nn = (R_xlen_t)n;
     if (sd == 0.0) {
@@ -1674,10 +1674,15 @@ static int api_fill_normal(zurand_key k, size_t n, double mean, double sd,
         return ZURAND_OK;
     }
     fill_normal_key((zurand_engine_t)k.engine, api_philox_key(k), out, nn, 0,
-                    ZURAND_NORMAL_ZIGGURAT);
+                    method);
     if (mean != 0.0 || sd != 1.0)
         affine_pass(out, nn, mean, sd, 1);
     return ZURAND_OK;
+}
+
+static int api_fill_normal(zurand_key k, size_t n, double mean, double sd,
+                           double *out) {
+    return api_fill_normal_method(k, n, mean, sd, ZURAND_NORMAL_ZIGGURAT, out);
 }
 
 static int api_fill_integer(zurand_key k, size_t n, int min, int max,
@@ -1723,7 +1728,8 @@ static const zurand_api zurand_api_table = {
     api_fill_uniform,
     api_fill_normal,
     api_fill_integer,
-    api_fill_bits64
+    api_fill_bits64,
+    api_fill_normal_method
 };
 
 static const zurand_api *zurand_api_get(void) {

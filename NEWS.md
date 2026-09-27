@@ -56,3 +56,6 @@ across platforms, thread counts, SIMD paths and call order.
 * `inst/include/zurand.h` lets packages that `LinkingTo: zurand` fill
   their own buffers, from their own threads, with exactly the values the R
   functions return.
+* API version 2 adds `fill_normal_method()`, which takes the normal method
+  as `ZURAND_NORMAL_ZIGGURAT` or `ZURAND_NORMAL_MCFARLAND`, the C side of
+  `rng_normal(method =)`.
