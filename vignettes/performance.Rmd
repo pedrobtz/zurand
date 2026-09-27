@@ -39,9 +39,9 @@ the package's `benchmark` workflow on GitHub-hosted runners, 2026-09-26.
 | base R `rnorm()` | 28 | 28 | 39 |
 
 - **Linux:** AMD EPYC 7763, 4 cores, AVX2, OpenMP.
-- **macOS:** Apple M1 (virtualised), 3 cores, NEON, no OpenMP. That is
-  also what the CRAN binary for macOS gets, because R's macOS configuration
-  leaves `SHLIB_OPENMP_CFLAGS` empty.
+- **macOS:** Apple M1 (virtualised), 3 cores, NEON, one thread: the
+  benchmark runner lacks the OpenMP headers, so the build is serial (see
+  *Threads* for how macOS builds get OpenMP).
 
 ## Reading the table
 
@@ -152,6 +152,13 @@ identical(one, all)
 
 Fills go parallel above 32,768 values. With several keys the threads split
 the keys; with one key they split its positions.
+
+On macOS R does not set OpenMP compiler flags, so the package's
+`configure` script tries the OpenMP runtime that R itself ships
+(`libomp.dylib` in `R.home("lib")`, see https://mac.r-project.org/openmp),
+the same route data.table's CRAN binaries take. It needs the OpenMP headers
+at build time, which CRAN's build machines have; without them the build is
+single-threaded, and `rng_threads()` reports 1.
 
 ## Two normal methods
 
