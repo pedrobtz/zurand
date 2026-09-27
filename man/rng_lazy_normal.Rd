@@ -70,7 +70,7 @@ values.
 Engines. The vector uses its key's engine, so its values are that
 engine's. For scattered reads, \code{x[sample(n, k)]} or random indices in a
 loop, key it with \code{rng_key(seed, engine = "philox4x64")}: Philox computes
-any single value directly, about 10x faster per read than
+any single value directly, 7-11x faster per read than
 \code{"xoshiro256pp"}, which reaches it through its 512-value block. For scans
 and sequential loops the default is faster.
 }

@@ -158,7 +158,7 @@ hundred bytes. Two costs, plainly:
 
 For scattered reads (`x[sample(n, k)]`, random indices in a loop), key the
 vector with `rng_key(seed, engine = "philox4x64")`: Philox computes any
-single value directly, about 10x faster per read than the default
+single value directly, 7-11x faster per read (i5, M1) than the default
 `xoshiro256pp`, which reaches it through its 512-value block. For scans and
 sequential loops keep the default.
 
