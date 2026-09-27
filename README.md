@@ -158,15 +158,20 @@ Millions of values per second for `n = 1e7`, median of five rounds, from the
 (2026-09-26), and run locally on an Apple M1 (2026-09-27). Every package is
 measured in the same `bench::mark()` call on the same machine.
 
+**Uniform**
+
 | | Linux x86_64, 1 thread | Linux x86_64, 4 threads | Apple M1, 1 thread | Apple M1, 8 threads |
 |---|---:|---:|---:|---:|
-| **uniform** | | | | |
 | zurand (`xoshiro256pp`) | **864** | **1801** | **2196** | **4984** |
 | zurand (`philox4x64`) | 276 | 594 | 574 | 2404 |
 | randompack (`x256++simd`) | 688 | 684 | 1918 | 1888 |
 | dqrng | 368 | 367 | 311 | 310 |
 | base R `runif()` | 104 | 104 | 213 | 210 |
-| **normal** | | | | |
+
+**Gaussian**
+
+| | Linux x86_64, 1 thread | Linux x86_64, 4 threads | Apple M1, 1 thread | Apple M1, 8 threads |
+|---|---:|---:|---:|---:|
 | zurand (`xoshiro256pp`) | **366** | **919** | **739** | **3143** |
 | zurand (`philox4x64`) | 215 | 501 | 377 | 1622 |
 | randompack (`x256++simd`) | 355 | 355 | 718 | 708 |
