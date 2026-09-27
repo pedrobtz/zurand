@@ -36,6 +36,9 @@ test_that("the vectorised and portable paths produce identical values", {
     expect_identical(with_simd(TRUE,  rng_normal(key, n)),
                      with_simd(FALSE, rng_normal(key, n)),
                      info = paste("normal, n =", n))
+    expect_identical(with_simd(TRUE,  rng_normal(key, n, method = "mcfarland")),
+                     with_simd(FALSE, rng_normal(key, n, method = "mcfarland")),
+                     info = paste("normal, mcfarland, n =", n))
     expect_identical(with_simd(TRUE,  rng_integer(key, n, 1L, 6L)),
                      with_simd(FALSE, rng_integer(key, n, 1L, 6L)),
                      info = paste("integer, n =", n))

@@ -189,6 +189,108 @@ R123_STATIC_INLINE double ZE_N(zig_normal_at)(ZE_KEY_T key, uint64_t index,
     return ZE_N(zig_normal_reject)(key, index, r);
 }
 
+/* ---- McFarland's modified ziggurat: rng_normal(method = "mcfarland") ----
+ *
+ * C. D. McFarland (2016), "A modified ziggurat algorithm for generating
+ * exponentially and normally distributed pseudorandom numbers", J. Stat.
+ * Comput. Simul. 86(7), 1281-1294; https://github.com/cd-mcfarland/fast_prng
+ * (MIT). Tables and bounds: mcfarland_normal.h.
+ *
+ * Fast path, 253/256 of draws: the word's low byte picks layer i; below
+ * ZURAND_MCF_LAYERS the draw is X_i * (the word as a signed integer). The
+ * accept test needs no table load and the sign comes with the word; the
+ * low byte is squashed by the conversion to double. Measured 21-39% less
+ * time per draw than the NumPy-table fast path on eight CPUs
+ * (dev/simd/mcfarland.c).
+ *
+ * Edge, 3/256: alias sampling picks the tail (j = 0) or overhang j, then
+ * rejection inside it. Every word after the first comes from retry blocks
+ * at (index, attempt >= 1) under this method's own purpose value, so draw
+ * i is a pure function of (key, i), as for the NumPy-table sampler. The
+ * sign is the first word's top bit. Uniforms u in [0, 2^63) are a word's
+ * top 63 bits. */
+R123_STATIC_INLINE uint64_t ZE_N(mcf_next)(ZE_N(zig_stream) *s, ZE_KEY_T key,
+                                     uint64_t index) {
+    if (s->w == 4) {
+        s->blk = ZE_N(zurand_block)(key, index, ++s->group, ZURAND_PURPOSE_NORMAL_MCF);
+        s->w = 0;
+    }
+    return s->blk.v[s->w++];
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))   /* not cold: see zig_normal_slow */
+#endif
+static double ZE_N(mcf_normal_edge)(ZE_KEY_T key, uint64_t index, uint64_t w) {
+    ZE_N(zig_stream) s = {.group = 0, .w = 4};
+    const double *X = zurand_mcf_x, *Y = zurand_mcf_y;
+    double sign = (w >> 63) ? -1.0 : 1.0;
+
+    uint64_t a = ZE_N(mcf_next)(&s, key, index);
+    unsigned j = (unsigned)(a & 0xff);
+    if ((a >> 8) >= zurand_mcf_alias_t[j])
+        j = zurand_mcf_alias_j[j];
+
+    double x;
+    if (j > ZURAND_MCF_J_INFLECTION) {
+        /* x < 1, the curve above the chord: below the chord (u2 >= u1) is
+         * inside; far above it is outside; the band between asks exp(). */
+        for (;;) {
+            uint64_t u1 = ZE_N(mcf_next)(&s, key, index) >> 1;
+            uint64_t u2 = ZE_N(mcf_next)(&s, key, index) >> 1;
+            x = zurand_mcf_interp(X, j, u1);
+            if (u2 >= u1)
+                break;
+            if (u1 - u2 <= ZURAND_MCF_E_CONVEX &&
+                zurand_mcf_interp(Y, j, u2) < zurand_exp(-0.5 * x * x))
+                break;
+        }
+    } else if (j == 0) {
+        /* tail beyond X_0: Marsaglia's method, as the NumPy-table sampler */
+        for (;;) {
+            double xx = zurand_rounded(-zurand_mcf_inv_x0 *
+                zurand_log1p(-ZURAND_U64_TO_DOUBLE(ZE_N(mcf_next)(&s, key, index))));
+            double yy = -zurand_log1p(-ZURAND_U64_TO_DOUBLE(ZE_N(mcf_next)(&s, key, index)));
+            if (yy + yy > xx * xx) {
+                x = zurand_mcf_x0 + xx;
+                break;
+            }
+        }
+    } else if (j < ZURAND_MCF_J_INFLECTION) {
+        /* x > 1, the curve below the chord: reflect into the lower
+         * triangle; well below the chord is inside. */
+        for (;;) {
+            uint64_t u1 = ZE_N(mcf_next)(&s, key, index) >> 1;
+            uint64_t u2 = ZE_N(mcf_next)(&s, key, index) >> 1;
+            if (u2 < u1) {
+                uint64_t t = u1; u1 = u2; u2 = t;
+            }
+            x = zurand_mcf_interp(X, j, u1);
+            if (u2 - u1 > ZURAND_MCF_E_CONCAVE ||
+                zurand_mcf_interp(Y, j, u2) < zurand_exp(-0.5 * x * x))
+                break;
+        }
+    } else {
+        /* the overhang straddling x = 1: the whole rectangle */
+        for (;;) {
+            uint64_t u1 = ZE_N(mcf_next)(&s, key, index) >> 1;
+            uint64_t u2 = ZE_N(mcf_next)(&s, key, index) >> 1;
+            x = zurand_mcf_interp(X, j, u1);
+            if (zurand_mcf_interp(Y, j, u2) < zurand_exp(-0.5 * x * x))
+                break;
+        }
+    }
+    return sign * x;
+}
+
+R123_STATIC_INLINE double ZE_N(mcf_normal_at)(ZE_KEY_T key, uint64_t index,
+                                        uint64_t w) {
+    unsigned i = (unsigned)(w & 0xff);
+    if (R123_BUILTIN_EXPECT(i < ZURAND_MCF_LAYERS, 1))
+        return zurand_mcf_x[i] * (double)(int64_t)w;
+    return ZE_N(mcf_normal_edge)(key, index, w);
+}
+
 /* Each Philox block yields four outputs and depends only on its counter,
  * so the block loops below parallelize with bit-identical results.
  * `threads` gates the inner parallel region; callers pass 0 when they
@@ -259,6 +361,35 @@ static void ZE_N(fill_normal_column)(double *out, R_xlen_t n,
         }
         for (; j < m; j++)
             o[j] = ZE_N(zig_normal_at)(key, (uint64_t)(w0 + j), buf[j]);
+    }
+}
+
+/* The same fill for McFarland's method, under its own purpose value. */
+static void ZE_N(fill_normal_mcf_column)(double *out, R_xlen_t n,
+                                   ZE_KEY_T key, int threads) {
+    R_xlen_t nchunk = (n + ZE_CHUNK_WORDS - 1) / ZE_CHUNK_WORDS;
+#ifdef ZURAND_OPENMP
+#pragma omp parallel for if(threads > 1) \
+    num_threads(threads > 0 ? threads : 1) default(none) \
+    shared(out, n, nchunk, key) schedule(static)
+#endif
+    for (R_xlen_t c = 0; c < nchunk; c++) {
+        uint64_t buf[ZURAND_MAX_CHUNK_WORDS + ZURAND_CHUNK_SLACK];
+        R_xlen_t w0 = c * ZE_CHUNK_WORDS;
+        int m = (int)(n - w0 < ZE_CHUNK_WORDS ? n - w0 : ZE_CHUNK_WORDS);
+        ZE_N(chunk_words)(key, (uint64_t)c, ZURAND_PURPOSE_NORMAL_MCF, buf, m);
+
+        double *o = out + w0;
+        /* Unrolled by four: 12-20% faster on arm64, level on x86. */
+        int j = 0;
+        for (; j + 4 <= m; j += 4) {
+            o[j]     = ZE_N(mcf_normal_at)(key, (uint64_t)(w0 + j),     buf[j]);
+            o[j + 1] = ZE_N(mcf_normal_at)(key, (uint64_t)(w0 + j + 1), buf[j + 1]);
+            o[j + 2] = ZE_N(mcf_normal_at)(key, (uint64_t)(w0 + j + 2), buf[j + 2]);
+            o[j + 3] = ZE_N(mcf_normal_at)(key, (uint64_t)(w0 + j + 3), buf[j + 3]);
+        }
+        for (; j < m; j++)
+            o[j] = ZE_N(mcf_normal_at)(key, (uint64_t)(w0 + j), buf[j]);
     }
 }
 

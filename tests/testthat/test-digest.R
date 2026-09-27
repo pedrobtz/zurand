@@ -43,6 +43,15 @@ digest_normal <- c(
   threefry4x64 = "257bbe55425f91e66d2302cd6b3660fe"
 )
 digest_normal_scaled  <- "3db5888105cfe7d7d34d1c01491dd4fc"
+# rng_normal(method = "mcfarland"), computed 2026-09-27 on macOS x86_64.
+# Per 1e6 draws its edge takes ~11,700 of them through every overhang kind
+# and ~280 through the tail (log1p), and calls exp() about 3,000 times.
+digest_mcfarland <- c(
+  xoshiro256pp = "9be3044655f42d10880b356c1a9b3893",
+  philox4x64   = "f33798e82d32ccd1fb93e5658a31d3d1",
+  threefry4x64 = "9933f335a92089260b61642a1ef23772"
+)
+digest_mcfarland_scaled <- "161bf094e17d8ab3f1d936e0efce178d"
 digest_uniform_scaled <- "685b24f007ecea32b544a1cb9495699f"
 digest_integer        <- "e76d991a8fbdce2645b8f69bf06f6852"
 
@@ -57,6 +66,20 @@ test_that("rng_normal() streams agree bit for bit, libm paths included", {
   key <- rng_key(20260926L, engine = "xoshiro256pp")
   expect_identical(stream_md5(rng_normal(key, n, mean = 0.3, sd = 1.7)),
                    digest_normal_scaled)
+})
+
+test_that("rng_normal(method = \"mcfarland\") streams agree bit for bit", {
+  skip_if_x87()
+  n <- 1e6
+  for (engine in names(digest_mcfarland)) {
+    key <- rng_key(20260926L, engine = engine)
+    expect_identical(stream_md5(rng_normal(key, n, method = "mcfarland")),
+                     digest_mcfarland[[engine]],
+                     label = paste("rng_normal(method = \"mcfarland\") digest,", engine))
+  }
+  key <- rng_key(20260926L, engine = "xoshiro256pp")
+  expect_identical(stream_md5(rng_normal(key, n, mean = 0.3, sd = 1.7, method = "mcfarland")),
+                   digest_mcfarland_scaled)
 })
 
 test_that("rng_uniform() and rng_integer() streams agree bit for bit", {

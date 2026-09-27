@@ -146,6 +146,27 @@ identical(one, all)
 Fills go parallel above 32,768 values. With several keys the threads split
 the keys; with one key they split its positions.
 
+## Two normal methods
+
+`rng_normal()` has a second method, McFarland's (2016) modified ziggurat,
+selected with `method = "mcfarland"`. Its common case (253 draws in 256)
+uses the word's low byte as the layer and returns
+`X[i] * (the word as a signed integer)`. That needs no table comparison,
+and the sign comes free. It is about 8 instructions per value where the
+NumPy-table ziggurat needs 13. One thread, default engine, M/s relative
+to the default method in the same `bench::mark()` call:
+
+| | 1e5 | 1e6 | 1e7 |
+|---|---:|---:|---:|
+| EPYC 7763 (Zen 3) | 1.08 | 1.15 | 1.17 |
+| EPYC 9V74 (Zen 4) | 1.07 | 1.16 | 1.25 |
+| Neoverse N2 | 1.04 | 1.07 | 1.10 |
+| Apple M1 | 1.02-1.03 | 1.06-1.08 | 1.05-1.07 |
+
+The default stays the NumPy-table ziggurat: changing it would change
+every existing normal stream. The two methods are separate streams: the
+same key gives unrelated values under each.
+
 ## Page size on Linux
 
 R serves a large vector from `malloc()`, which glibc maps fresh, so the

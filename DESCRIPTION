@@ -8,7 +8,9 @@ Authors@R: c(
     person("NumPy Developers", role = "cph",
            comment = "Ziggurat constant tables, src/numpyzig/"),
     person("Sun Microsystems, Inc.", role = "cph",
-           comment = "fdlibm exp() and log1p(), src/zurand_fdlibm.h")
+           comment = "fdlibm exp() and log1p(), src/zurand_fdlibm.h"),
+    person("Christopher D.", "McFarland", role = "cph",
+           comment = "modified ziggurat (fast_prng), from which tools/generate-mcfarland-tables.py and rng_normal(method = 'mcfarland') derive")
   )
 Description: Fast, stateless, deterministic random number generation.
     Random values are pure functions of immutable keys and sampler

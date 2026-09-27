@@ -166,6 +166,14 @@ test_that("rng_normal() draws from the normal distribution", {
   # proves the tail branch runs
   expect_gt(max(abs(z)), 3.6542)
   expect_lt(min(z), -3.6542)
+
+  # McFarland's layers end at X_0 = 3.636; beyond it is the tail branch
+  for (engine in c("xoshiro256pp", "philox4x64", "threefry4x64")) {
+    z <- rng_normal(rng_key(2024L, engine = engine), 50000L, method = "mcfarland")
+    ks <- suppressWarnings(stats::ks.test(z, "pnorm"))
+    expect_gt(ks$p.value, 0.001, label = engine)
+    expect_gt(max(abs(z)), 3.6361)
+  }
 })
 
 test_that("rng_integer() returns integers in the inclusive range", {
@@ -229,6 +237,16 @@ test_that("large draws extend small draws bit-for-bit, including parallel paths"
   expect_identical(um[1:9, 3L], rng_uniform(keys[3], 9L))
   zm <- rng_normal(keys, n_big)
   expect_identical(zm[, 1L], rng_normal(keys[1], n_big))
+  for (engine in c("xoshiro256pp", "philox4x64", "threefry4x64")) {
+    k <- rng_key(99L, engine = engine)
+    ks <- rng_key(99L, n = 3L, engine = engine)
+    zc <- rng_normal(k, n_big, method = "mcfarland")
+    expect_identical(zc[1:257], rng_normal(k, 257L, method = "mcfarland"), label = engine)
+    zcm <- rng_normal(ks, n_big, method = "mcfarland")
+    expect_identical(zcm[, 2L], rng_normal(ks[2], n_big, method = "mcfarland"), label = engine)
+    expect_identical(rng_normal(ks, 5L, mean = 0.3, sd = 1.7, method = "mcfarland"),
+                     0.3 + 1.7 * rng_normal(ks, 5L, method = "mcfarland"))
+  }
   xm <- rng_integer(keys, n_big, 0L, 9L)
   expect_identical(xm[, 3L], rng_integer(keys[3], n_big, 0L, 9L))
 })
@@ -242,6 +260,8 @@ test_that("rng_threads() caps parallelism without changing results", {
   u <- rng_uniform(key, 70001L)
   z <- rng_normal(keys, 40001L)
   x <- rng_integer(key, 70001L, -9L, 9L)
+  mk <- rng_normal(key, 70001L, method = "mcfarland")
+  mm <- rng_normal(keys, 40001L, method = "mcfarland")
 
   raw <- rng_threads(1L)
   on.exit(rng_threads(raw))
@@ -250,11 +270,14 @@ test_that("rng_threads() caps parallelism without changing results", {
   expect_identical(rng_uniform(key, 70001L), u)
   expect_identical(rng_normal(keys, 40001L), z)
   expect_identical(rng_integer(key, 70001L, -9L, 9L), x)
+  expect_identical(rng_normal(key, 70001L, method = "mcfarland"), mk)
+  expect_identical(rng_normal(keys, 40001L, method = "mcfarland"), mm)
 
   # Two threads, the most CRAN allows, and the same values again.
   rng_threads(2L)
   expect_identical(rng_uniform(key, 70001L), u)
   expect_identical(rng_normal(keys, 40001L), z)
+  expect_identical(rng_normal(key, 70001L, method = "mcfarland"), mk)
 
   # Setting returns the raw previous cap, so restores round-trip exactly,
   # including to and from the uncapped state. No draws happen uncapped

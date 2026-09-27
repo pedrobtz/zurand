@@ -4,7 +4,7 @@
 \alias{rng_normal}
 \title{Draw normal random values}
 \usage{
-rng_normal(key, n = 1L, mean = 0, sd = 1)
+rng_normal(key, n = 1L, mean = 0, sd = 1, method = c("ziggurat", "mcfarland"))
 }
 \arguments{
 \item{key}{An \code{rng_key} vector.}
@@ -14,6 +14,22 @@ rng_normal(key, n = 1L, mean = 0, sd = 1)
 \item{mean}{A single finite numeric mean.}
 
 \item{sd}{A single non-negative finite numeric standard deviation.}
+
+\item{method}{The sampling algorithm:
+\itemize{
+\item \code{"ziggurat"} (the default): Marsaglia and Tsang's ziggurat on NumPy's
+256-layer tables.
+\item \code{"mcfarland"}: McFarland's modified ziggurat (2016). Its common case
+needs no table comparison: 20-35\% less time per value in the
+transform on every CPU measured, and for large fills with the default
+engine 1.15-1.25x the default method's throughput on x86_64 and
+1.05-1.10x on arm64.
+}
+
+Both are exact samplers of the standard normal (to double precision)
+and both are bit-reproducible across platforms. They are different
+streams: the same key gives unrelated values under the two methods, and
+changing the method changes every value. The default never changes.}
 }
 \value{
 A numeric vector of length \code{n} for one key, or an \code{n} by
@@ -27,4 +43,15 @@ of its arguments and returns ordinary numeric vectors or matrices.
 key <- rng_key(42L)
 rng_normal(key)
 rng_normal(key, 5L)
+rng_normal(key, 5L, method = "mcfarland")
+}
+\references{
+Marsaglia, G. and Tsang, W. W. (2000). The ziggurat method for generating
+random variables. \emph{Journal of Statistical Software}, 5(8), 1-7.
+\doi{10.18637/jss.v005.i08}
+
+McFarland, C. D. (2016). A modified ziggurat algorithm for generating
+exponentially and normally distributed pseudorandom numbers. \emph{Journal of
+Statistical Computation and Simulation}, 86(7), 1281-1294.
+\doi{10.1080/00949655.2015.1060234}
 }
