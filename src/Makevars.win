@@ -1,3 +1,6 @@
+# Windows does not run ./configure; this is src/Makevars.in with R's own
+# OpenMP flags filled in.
+#
 # Portable pure-C fallback for 64-bit mulhilo on platforms without
 # __uint128_t (e.g. 32-bit builds). On x86_64/aarch64 the faster
 # __uint128_t path is still selected automatically by philox.h.

@@ -1,0 +1,60 @@
+# OpenMP on macOS the way CRAN builds it. R leaves SHLIB_OPENMP_CFLAGS empty
+# on macOS; ./configure links the libomp R ships in $(R_HOME)/lib when the
+# headers are present, which CRAN's build machines provide as
+# https://mac.r-project.org/openmp instructs. This job installs those
+# headers the same way, asserts that configure took the OpenMP path, runs
+# R CMD check with threads on, and prints the speed-up.
+#
+# The plain macos-latest leg of R-CMD-check has no headers and so covers
+# the serial fallback.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+name: macos-openmp
+
+permissions: read-all
+
+jobs:
+  macos-openmp:
+    runs-on: macos-latest
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      _R_CHECK_FORCE_SUGGESTS_: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: OpenMP headers (LLVM 19.1.5, for Xcode 16.3+), as CRAN's machines
+        run: |
+          curl -sSL -o "$RUNNER_TEMP/openmp.tar.gz" https://mac.r-project.org/openmp/openmp-19.1.5-darwin20-Release.tar.gz
+          sudo tar fxz "$RUNNER_TEMP/openmp.tar.gz" -C /
+          ls -l /usr/local/include/omp.h
+      - uses: r-lib/actions/setup-r@v2
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::rcmdcheck any::bench
+          needs: check
+      - name: configure takes the OpenMP path and links R's libomp
+        run: |
+          ./configure | tee "$RUNNER_TEMP/configure.out"
+          grep -q "OpenMP works with -Xclang -fopenmp -lomp... yes" "$RUNNER_TEMP/configure.out"
+          R CMD INSTALL .
+          ./cleanup
+          otool -L "$(Rscript -e 'cat(system.file("libs", package = "zurand"))')/zurand.so" | tee "$RUNNER_TEMP/otool.out"
+          grep -q "R.framework/.*/libomp.dylib" "$RUNNER_TEMP/otool.out"
+          git status --porcelain --ignored
+          Rscript -e 'n <- zurand::rng_threads(); cat("rng_threads():", n, "\n"); stopifnot(n > 1)'
+      - name: speed-up with threads (one run, informational)
+        run: |
+          Rscript -e '
+            library(zurand); k <- rng_key(1L); n <- 1e7
+            b <- function(th) { rng_threads(th); bench::mark(uniform = rng_uniform(k, n), normal = rng_normal(k, n),
+                  mcfarland = rng_normal(k, n, method = "mcfarland"), check = FALSE, min_iterations = 15) }
+            s <- b(1L); p <- b(0L)
+            cat(sprintf("%-10s 1 thread %6.0f M/s   %d threads %6.0f M/s   x%.2f\n", as.character(s$expression),
+                n / as.numeric(s$median) / 1e6, rng_threads(), n / as.numeric(p$median) / 1e6,
+                as.numeric(s$median) / as.numeric(p$median)), sep = "")'
+      - uses: r-lib/actions/check-r-package@v2
+        with:
+          args: 'c("--no-manual", "--as-cran")'
+          error-on: '"warning"'

@@ -176,7 +176,8 @@ measured in the same `bench::mark()` call on the same machine.
 Linux: AMD EPYC 7763, AVX2, OpenMP, and a kernel that uses 2 MiB pages for
 everything; on Linux kernels in the default `madvise` mode zurand requests
 them itself for large outputs, which doubles large fills there (see the
-article). macOS: Apple M1, NEON, no OpenMP, as in the CRAN binary. On one thread zurand leads dqrng and RcppZiggurat by
+article). macOS: Apple M1, NEON, one thread (the runner lacks the OpenMP
+headers; see below). On one thread zurand leads dqrng and RcppZiggurat by
 2.3-6x. Against randompack's SIMD engine, the fastest single-threaded
 alternative, it leads on every row: uniform by 1.26x on x86_64 and
 1.05-1.4x on Apple Silicon depending on the runner; normal by 1.03x on
@@ -283,11 +284,13 @@ old <- rng_threads(1L)
 rng_threads(old)     # restore
 ```
 
-On macOS, Apple clang ships without OpenMP, and R's macOS configuration
-leaves `SHLIB_OPENMP_CFLAGS` empty, so the CRAN binary for macOS is
-single-threaded. On a Mac the single-thread speed is the speed. A source
-build gets threads if `~/.R/Makevars` defines `SHLIB_OPENMP_CFLAGS` against
-a `libomp` installation.
+On macOS R leaves `SHLIB_OPENMP_CFLAGS` empty, so the package's `configure`
+script links the OpenMP runtime that R itself ships (`libomp.dylib` in
+`R.home("lib")`), as CRAN's macOS binaries of data.table do. That needs the
+OpenMP headers when the package is built: CRAN's build machines have them,
+and for a source build on your own Mac they come from
+<https://mac.r-project.org/openmp>. Without them the build is
+single-threaded and `rng_threads()` reports 1.
 
 ## License
 

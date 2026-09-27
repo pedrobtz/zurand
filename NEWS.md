@@ -42,7 +42,10 @@ across platforms, thread counts, SIMD paths and call order.
   (fdlibm `exp()`/`log1p()` as calls, no `cold` attribute): 7-9% faster
   normals on a Xeon 6973P and 15-19% with Apple clang, same values.
 * Large fills use OpenMP threads where R was built with it; `rng_threads()`
-  caps them, and the values do not depend on the thread count.
+  caps them, and the values do not depend on the thread count. On macOS,
+  where R does not set OpenMP flags, `configure` links the OpenMP runtime
+  that R ships, as CRAN's macOS binaries of data.table do, and falls back
+  to one thread when the OpenMP headers are missing.
 * On Linux kernels with transparent huge pages in `madvise` mode, output
   vectors of 4 MiB and more are filled on 2 MiB pages, which about halves
   the time of large fills there. `options(zurand.hugepages = FALSE)` turns
