@@ -28,6 +28,12 @@ across platforms, thread counts, SIMD paths and call order.
   offset = k)` returns positions `k` to `k + n - 1`, exactly
   `rng_normal(key, k + n)[(k + 1):(k + n)]`, so a long simulation can draw
   its next batch, or resume from a checkpoint, without the earlier values.
+* `rng_lazy_uniform()` and `rng_lazy_normal()` return lazy vectors (ALTREP):
+  created instantly, with each value computed only when read and exactly
+  equal to the matching sampler's. `sum()` over 1e9 lazy normals runs in
+  the memory R itself uses; saving one stores only the key and arguments.
+  Arithmetic and C code that asks for the data pointer fill the vector
+  once. For scattered reads, key it with the `philox4x64` engine.
 * `rng_normal(method = "mcfarland")` samples with McFarland's (2016)
   modified ziggurat, whose common case needs no table comparison. Large
   fills run 1.15-1.25x faster than the default method on x86_64 and

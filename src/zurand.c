@@ -1962,6 +1962,8 @@ static const zurand_api *zurand_api_get(void) {
     return &zurand_api_table;
 }
 
+#include "zurand_lazy.h"
+
 /* ---- registration ---- */
 
 static const R_CallMethodDef CallEntries[] = {
@@ -1971,6 +1973,9 @@ static const R_CallMethodDef CallEntries[] = {
     {"C_rng_fold",       (DL_FUNC) &C_rng_fold,       2},
     {"C_rng_uniform",    (DL_FUNC) &C_rng_uniform,    5},
     {"C_rng_normal",     (DL_FUNC) &C_rng_normal,     6},
+    {"C_rng_lazy",       (DL_FUNC) &C_rng_lazy,       5},
+    {"C_rng_lazy_materialised", (DL_FUNC) &C_rng_lazy_materialised, 1},
+    {"C_rng_lazy_cache", (DL_FUNC) &C_rng_lazy_cache, 1},
     {"C_rng_integer",    (DL_FUNC) &C_rng_integer,    4},
     {"C_rng_bits",       (DL_FUNC) &C_rng_bits,       3},
     {"C_rng_threads",    (DL_FUNC) &C_rng_threads,    1},
@@ -1982,6 +1987,7 @@ void R_init_zurand(DllInfo *dll) {
     R_registerRoutines(dll, NULL, CallEntries, NULL, NULL);
     R_useDynamicSymbols(dll, FALSE);
     R_RegisterCCallable("zurand", "zurand_api", (DL_FUNC) &zurand_api_get);
+    zurand_lazy_init(dll);
     /* Settle the SIMD dispatch now, on the main thread, so C API calls from
      * worker threads only ever read it. */
     zurand_zig_tables_init();
