@@ -143,7 +143,7 @@ or claims a new argument, purpose value or engine name.
 | C11 | `RNGkind("user-supplied")` bridge | additive, opt-in | only if users ask; stateful by nature |
 | C13 | ~~`rng_normal(method = "mcfarland")`~~ **DONE**: McFarland's modified ziggurat, purpose 7; tables from `tools/generate-mcfarland-tables.py` (mpmath) | additive | transform -21..-39% per value on eight CPUs (`dev/simd/mcfarland.c`); R level, one thread, xoshiro, 1e7: 1.17x the default on Zen 3, 1.25x Zen 4, 1.10x Neoverse N2, 1.05-1.07x M1; 1.2-1.7x randompack; 1e9-draw chi-square clean on two engines |
 | C14 | ~~`rng_normal(method = "boxmuller")`, vectorised Box-Muller (VectorizedRNG.jl)~~ **TRIED, NOT ADDED** | additive | deterministic version built (`dev/simd/boxmuller.c`: fdlibm log, fitted sine polynomial, no FMA; AVX2/AVX-512/NEON bit-identical to scalar), ns per normal with words in cache vs McFarland: Xeon 8573C AVX-512 2.41 vs 0.61, Zen 3/4 AVX2 3.45 vs 0.80-0.85, M1 NEON 5.69 vs 0.53, Neoverse N2 NEON 7.96 vs 0.63. With FMA, as VectorizedRNG uses: 1.81 / 2.76-2.92 / 4.27 / 8.22 -- 0.97-1.33x faster, still 3-13x slower, and 7% of values change by up to 9e-16, i.e. no cross-platform identity. Divide, sqrt and two polynomials cost more than a table lookup; VectorizedRNG's 2x is against Julia's buffered scalar randn |
-| C12 | ~~AVX-512 path for `xoshiro256pp` (8 lanes, `vprolq`)~~ **CLOSED** 2026-09-27 | neutral | zurand already leads randompack's AVX-512 path on the AVX-512 runners (Zen 4/5: 1.3-2.0x uniform, 1.1-2.2x normal, same-machine A/B); the prototype (`dev/simd/avx512.c`) gained +12-15% uniform on one Xeon 6973P, was contradictory on Zen 4, ~+2% on normals; costs a third bit-identical SIMD path, dispatch, CI legs, and the MinGW zmm alignment hazard (GCC 54412). Reopen only if a CPU class appears where randompack leads |
+| C12 | ~~AVX-512 path for `xoshiro256pp` (8 lanes, `vprolq`)~~ **CLOSED** 2026-09-27 | neutral | one thread against randompack's AVX-512 path (corrected 2026-09-27; the first figures came from `dev/simd/ab_randompack.R` before it pinned one thread, so they compared 4-thread zurand with serial randompack): uniform 1.09-1.16x on Zen 5, 1.09-1.39x Zen 4, 1.11-1.21x Xeon 6973P; normals with the default method 0.96-1.00x on Zen 5, 0.97-1.07x Zen 4, 1.11-1.13x Xeon; with `"mcfarland"` 1.08-1.09x Zen 5, 1.30x Xeon 8370C. AVX-512 would not fix the normals (the prototype (`dev/simd/avx512.c`) gained +12-15% uniform on one Xeon 6973P, was contradictory on Zen 4, ~+2% on normals), `method = "mcfarland"` already does; costs a third bit-identical SIMD path, dispatch, CI legs, and the MinGW zmm alignment hazard (GCC 54412). Reopen only if a CPU class appears where randompack leads |
 
 ---
 
@@ -165,9 +165,11 @@ path codegen #43) and McFarland's (#45, word reuse #48) -- and the
 integer and bits samplers. Reopen only for a new method (an additive
 purpose value) or for a CPU class on which zurand loses to the fastest
 competitor; not for tuning. Where it stands, one thread, same-machine
-A/Bs: ahead of randompack on every CPU measured, on uniform and on both
-normal methods (x86 Gaussian with the default method by 3-8%, with
-`"mcfarland"` by 20-30%).
+A/Bs: ahead of randompack on every CPU measured on uniform (1.09-1.40x)
+and on normals with `"mcfarland"` (1.08-1.30x). Normals with the default
+method are ahead on Zen 3 and Intel (1.03-1.13x) and level to 3-5% behind
+on AVX-512 AMD (Zen 4 at 1e7, Zen 5); that is the default stream's price,
+and the reason `"mcfarland"` exists, not a tuning target.
 
 What remains open is not per-thread: threads for the CRAN macOS binary
 (pthreads, no OpenMP there), ALTREP lazy vectors, and a C API member for
@@ -248,7 +250,7 @@ compared on a second machine -- the three slow-path stubs all measured
 | 2026-09-26 | **default engine becomes `xoshiro256pp`** (was proposed 2026-09-25) | 2.4x dqrng on uniform versus 0.96x today; conditional on A6 and A8 |
 | 2026-09-26 | huge pages requested only in THP `madvise` mode, never in `always` | 2x on large fills where it applies; 6-9% compaction cost where it does not; #42 |
 | 2026-09-26 | the ziggurat's slow path stays plain `noinline`, never `cold`; fdlibm `exp`/`log1p` stay calls | attributes are not the algorithm; #43 |
-| 2026-09-27 | AVX-512 path not pursued (C12 closed) | already ahead of randompack's AVX-512 path on Zen 4/5; narrow gain, real cost |
+| 2026-09-27 | AVX-512 path not pursued (C12 closed) | one thread, uniform already ahead of randompack's AVX-512 path (1.09-1.39x); it would not help normals, where `"mcfarland"` is the answer; narrow gain, real cost. Rationale corrected the same day: the first figures were 4-thread zurand vs serial randompack |
 | 2026-09-27 | **single-threaded implementation frozen** | ahead of the fastest competitor on every CPU measured; see "Single-threaded implementation frozen" |
 | 2026-09-26 | **ziggurat implementation frozen at #40** | every remaining angle measured level or worse on some engine or CPU; see "Ziggurat implementation frozen" |
 
