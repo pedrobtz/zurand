@@ -269,6 +269,26 @@ rest: uniform, integer and 64-bit fills, `fill_normal_method()` for
 `rng_normal(method = "mcfarland")`, and `fold_int()`, which derives a key
 exactly as `rng_fold(key, i)` does.
 
+A long simulation need not hold its random numbers in memory at all.
+`fill_normal_at(k, start, n, ...)` fills any stretch of a key's stream,
+so the caller can pull the next piece when it needs it; `stream_normal()`
+(and `stream_uniform()`) runs the loop for you, handing a callback one
+cache-sized chunk at a time through a buffer you own:
+
+```c
+static int step(void *ctx, const double *x, size_t n, uint64_t start) {
+    /* consume x[0 .. n-1], positions start .. start + n - 1 */
+    return 0;                                  /* nonzero stops the stream */
+}
+
+double buf[16384];                             /* 128 KB: stays in cache */
+zr->stream_normal(k, 1000000000, 0.0, 1.0, ZURAND_NORMAL_ZIGGURAT,
+                  buf, 16384, step, &state);
+```
+
+The chunks are exactly `rng_normal(k, 1e9)`, in order. From R, the same
+walk is `rng_normal(key, n, offset = k)`.
+
 ## Interop with R's RNG
 
 `rng_key_from_r()` is the one function here that deliberately consumes R's

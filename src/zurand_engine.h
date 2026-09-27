@@ -343,6 +343,32 @@ static void ZE_N(chunk_words)(ZE_KEY_T key, uint64_t c, uint64_t purpose,
 }
 #endif
 
+/* One chunk of a sampler: positions c * ZE_CHUNK_WORDS onward, m of them
+ * (m < ZE_CHUNK_WORDS only for the last chunk of a fill), into o[0 .. m-1].
+ * Every fill -- a whole column, a range from an offset, a stream -- is a
+ * loop over these, so all of them give the same value at each position.
+ * Forced inline so the column loops compile exactly as they did when the
+ * body was written in them. */
+R123_STATIC_INLINE R123_FORCE_INLINE(void ZE_N(normal_chunk)(
+    ZE_KEY_T key, uint64_t c, double *o, int m));
+R123_STATIC_INLINE void ZE_N(normal_chunk)(ZE_KEY_T key, uint64_t c,
+                                           double *o, int m) {
+    uint64_t buf[ZURAND_MAX_CHUNK_WORDS + ZURAND_CHUNK_SLACK];
+    uint64_t w0 = c * (uint64_t)ZE_CHUNK_WORDS;
+    ZE_N(chunk_words)(key, c, ZURAND_PURPOSE_NORMAL, buf, m);
+
+    /* Unrolled by four: measured ~20% faster on Apple M1, level on x86. */
+    int j = 0;
+    for (; j + 4 <= m; j += 4) {
+        o[j]     = ZE_N(zig_normal_at)(key, w0 + (uint64_t)j,       buf[j]);
+        o[j + 1] = ZE_N(zig_normal_at)(key, w0 + (uint64_t)j + 1,   buf[j + 1]);
+        o[j + 2] = ZE_N(zig_normal_at)(key, w0 + (uint64_t)j + 2,   buf[j + 2]);
+        o[j + 3] = ZE_N(zig_normal_at)(key, w0 + (uint64_t)j + 3,   buf[j + 3]);
+    }
+    for (; j < m; j++)
+        o[j] = ZE_N(zig_normal_at)(key, w0 + (uint64_t)j, buf[j]);
+}
+
 static void ZE_N(fill_normal_column)(double *out, R_xlen_t n,
                                ZE_KEY_T key, int threads) {
     R_xlen_t nchunk = (n + ZE_CHUNK_WORDS - 1) / ZE_CHUNK_WORDS;
@@ -352,26 +378,34 @@ static void ZE_N(fill_normal_column)(double *out, R_xlen_t n,
     shared(out, n, nchunk, key) schedule(static)
 #endif
     for (R_xlen_t c = 0; c < nchunk; c++) {
-        uint64_t buf[ZURAND_MAX_CHUNK_WORDS + ZURAND_CHUNK_SLACK];
         R_xlen_t w0 = c * ZE_CHUNK_WORDS;
         int m = (int)(n - w0 < ZE_CHUNK_WORDS ? n - w0 : ZE_CHUNK_WORDS);
-        ZE_N(chunk_words)(key, (uint64_t)c, ZURAND_PURPOSE_NORMAL, buf, m);
-
-        double *o = out + w0;
-        /* Unrolled by four: measured ~20% faster on Apple M1, level on x86. */
-        int j = 0;
-        for (; j + 4 <= m; j += 4) {
-            o[j]     = ZE_N(zig_normal_at)(key, (uint64_t)(w0 + j),     buf[j]);
-            o[j + 1] = ZE_N(zig_normal_at)(key, (uint64_t)(w0 + j + 1), buf[j + 1]);
-            o[j + 2] = ZE_N(zig_normal_at)(key, (uint64_t)(w0 + j + 2), buf[j + 2]);
-            o[j + 3] = ZE_N(zig_normal_at)(key, (uint64_t)(w0 + j + 3), buf[j + 3]);
-        }
-        for (; j < m; j++)
-            o[j] = ZE_N(zig_normal_at)(key, (uint64_t)(w0 + j), buf[j]);
+        ZE_N(normal_chunk)(key, (uint64_t)c, out + w0, m);
     }
 }
 
-/* The same fill for McFarland's method, under its own purpose value. */
+/* The same chunk and fill for McFarland's method, under its own purpose
+ * value. */
+R123_STATIC_INLINE R123_FORCE_INLINE(void ZE_N(normal_mcf_chunk)(
+    ZE_KEY_T key, uint64_t c, double *o, int m));
+R123_STATIC_INLINE void ZE_N(normal_mcf_chunk)(ZE_KEY_T key, uint64_t c,
+                                               double *o, int m) {
+    uint64_t buf[ZURAND_MAX_CHUNK_WORDS + ZURAND_CHUNK_SLACK];
+    uint64_t w0 = c * (uint64_t)ZE_CHUNK_WORDS;
+    ZE_N(chunk_words)(key, c, ZURAND_PURPOSE_NORMAL_MCF, buf, m);
+
+    /* Unrolled by four: 12-20% faster on arm64, level on x86. */
+    int j = 0;
+    for (; j + 4 <= m; j += 4) {
+        o[j]     = ZE_N(mcf_normal_at)(key, w0 + (uint64_t)j,     buf[j]);
+        o[j + 1] = ZE_N(mcf_normal_at)(key, w0 + (uint64_t)j + 1, buf[j + 1]);
+        o[j + 2] = ZE_N(mcf_normal_at)(key, w0 + (uint64_t)j + 2, buf[j + 2]);
+        o[j + 3] = ZE_N(mcf_normal_at)(key, w0 + (uint64_t)j + 3, buf[j + 3]);
+    }
+    for (; j < m; j++)
+        o[j] = ZE_N(mcf_normal_at)(key, w0 + (uint64_t)j, buf[j]);
+}
+
 static void ZE_N(fill_normal_mcf_column)(double *out, R_xlen_t n,
                                    ZE_KEY_T key, int threads) {
     R_xlen_t nchunk = (n + ZE_CHUNK_WORDS - 1) / ZE_CHUNK_WORDS;
@@ -381,22 +415,9 @@ static void ZE_N(fill_normal_mcf_column)(double *out, R_xlen_t n,
     shared(out, n, nchunk, key) schedule(static)
 #endif
     for (R_xlen_t c = 0; c < nchunk; c++) {
-        uint64_t buf[ZURAND_MAX_CHUNK_WORDS + ZURAND_CHUNK_SLACK];
         R_xlen_t w0 = c * ZE_CHUNK_WORDS;
         int m = (int)(n - w0 < ZE_CHUNK_WORDS ? n - w0 : ZE_CHUNK_WORDS);
-        ZE_N(chunk_words)(key, (uint64_t)c, ZURAND_PURPOSE_NORMAL_MCF, buf, m);
-
-        double *o = out + w0;
-        /* Unrolled by four: 12-20% faster on arm64, level on x86. */
-        int j = 0;
-        for (; j + 4 <= m; j += 4) {
-            o[j]     = ZE_N(mcf_normal_at)(key, (uint64_t)(w0 + j),     buf[j]);
-            o[j + 1] = ZE_N(mcf_normal_at)(key, (uint64_t)(w0 + j + 1), buf[j + 1]);
-            o[j + 2] = ZE_N(mcf_normal_at)(key, (uint64_t)(w0 + j + 2), buf[j + 2]);
-            o[j + 3] = ZE_N(mcf_normal_at)(key, (uint64_t)(w0 + j + 3), buf[j + 3]);
-        }
-        for (; j < m; j++)
-            o[j] = ZE_N(mcf_normal_at)(key, (uint64_t)(w0 + j), buf[j]);
+        ZE_N(normal_mcf_chunk)(key, (uint64_t)c, out + w0, m);
     }
 }
 
@@ -411,29 +432,43 @@ static void ZE_N(fill_normal_mcf_column)(double *out, R_xlen_t n,
  * `threads` is the thread count for the inner parallel region; callers
  * pass 0 to keep the column serial (e.g. when parallelizing over key
  * columns). */
+R123_STATIC_INLINE R123_FORCE_INLINE(void ZE_N(uniform_chunk)(
+    ZE_KEY_T key, uint64_t c, double *o, int m, int large));
+R123_STATIC_INLINE void ZE_N(uniform_chunk)(ZE_KEY_T key, uint64_t c,
+                                            double *o, int m, int large) {
+#ifdef ZE_UNIFORM_FAST
+    /* An engine may write a whole chunk of uniforms itself. `large` is
+     * decided on the whole fill, not on one thread's share, and only
+     * chooses how the stores are made. */
+    if (ZE_UNIFORM_FAST(key, c, o, m, large))
+        return;
+#else
+    (void)large;
+#endif
+    uint64_t buf[ZURAND_MAX_CHUNK_WORDS + ZURAND_CHUNK_SLACK];
+    ZE_N(chunk_words)(key, c, ZURAND_PURPOSE_UNIFORM, buf, m);
+
+    for (int j = 0; j < m; j++)
+        o[j] = u01_open(buf[j]);
+}
+
 static void ZE_N(fill_uniform_column)(double *out, R_xlen_t n,
                                 ZE_KEY_T key, int threads) {
     R_xlen_t nchunk = (n + ZE_CHUNK_WORDS - 1) / ZE_CHUNK_WORDS;
+#ifdef ZE_UNIFORM_FAST
+    int large = n >= ZURAND_ZVA_MIN_VALUES;
+#else
+    int large = 0;
+#endif
 #ifdef ZURAND_OPENMP
 #pragma omp parallel for if(threads > 1) \
     num_threads(threads > 0 ? threads : 1) default(none) \
-    shared(out, n, nchunk, key) schedule(static)
+    shared(out, n, nchunk, key, large) schedule(static)
 #endif
     for (R_xlen_t c = 0; c < nchunk; c++) {
         R_xlen_t w0 = c * ZE_CHUNK_WORDS;
         int m = (int)(n - w0 < ZE_CHUNK_WORDS ? n - w0 : ZE_CHUNK_WORDS);
-        double *o = out + w0;
-#ifdef ZE_UNIFORM_FAST
-        /* An engine may write a whole chunk of uniforms itself. `large`
-         * is decided on the whole column, not on one thread's share. */
-        if (ZE_UNIFORM_FAST(key, (uint64_t)c, o, m, n >= ZURAND_ZVA_MIN_VALUES))
-            continue;
-#endif
-        uint64_t buf[ZURAND_MAX_CHUNK_WORDS + ZURAND_CHUNK_SLACK];
-        ZE_N(chunk_words)(key, (uint64_t)c, ZURAND_PURPOSE_UNIFORM, buf, m);
-
-        for (int j = 0; j < m; j++)
-            o[j] = u01_open(buf[j]);
+        ZE_N(uniform_chunk)(key, (uint64_t)c, out + w0, m, large);
     }
 }
 
@@ -474,6 +509,58 @@ static void ZE_N(fill_integer_column)(int *out, R_xlen_t n, ZE_KEY_T key,
              * itself lies in [min, max], so widen, add, then narrow. */
             o[j] = (int)((int64_t)min + (int64_t)offset);
         }
+    }
+}
+
+/* One chunk of any double sampler (ZURAND_DIST_*). */
+static void ZE_N(dist_chunk)(ZE_KEY_T key, uint64_t c, double *o, int m,
+                             int dist, int large) {
+    if (dist == ZURAND_DIST_NORMAL)
+        ZE_N(normal_chunk)(key, c, o, m);
+    else if (dist == ZURAND_DIST_NORMAL_MCF)
+        ZE_N(normal_mcf_chunk)(key, c, o, m);
+    else
+        ZE_N(uniform_chunk)(key, c, o, m, large);
+}
+
+/* Positions start .. start + n - 1 of a double sampler into out[0 .. n-1]:
+ * the column fill from an offset. Chunks are generated from their first
+ * position, so a range that starts inside a chunk generates that chunk's
+ * head into a stack buffer and copies the part it needs; every later chunk
+ * is written in place, and the last may be short, as in a column fill.
+ * `stage` holds ZE_CHUNK_WORDS doubles. */
+static void ZE_N(fill_range)(double *out, uint64_t start, R_xlen_t n,
+                             ZE_KEY_T key, int dist, int threads,
+                             double *stage) {
+    if (n <= 0)
+        return;
+    uint64_t c0 = start / (uint64_t)ZE_CHUNK_WORDS;
+    int head = (int)(start % (uint64_t)ZE_CHUNK_WORDS);
+    R_xlen_t done = 0;
+#ifdef ZE_UNIFORM_FAST
+    int large = n >= ZURAND_ZVA_MIN_VALUES;
+#else
+    int large = 0;
+#endif
+    if (head) {
+        R_xlen_t room = ZE_CHUNK_WORDS - head;
+        done = n < room ? n : room;
+        ZE_N(dist_chunk)(key, c0, stage, head + (int)done, dist, 0);
+        memcpy(out, stage + head, (size_t)done * sizeof(double));
+        c0++;
+    }
+    double *rest = out + done;
+    R_xlen_t nrest = n - done;
+    R_xlen_t nchunk = (nrest + ZE_CHUNK_WORDS - 1) / ZE_CHUNK_WORDS;
+#ifdef ZURAND_OPENMP
+#pragma omp parallel for if(threads > 1) \
+    num_threads(threads > 0 ? threads : 1) default(none) \
+    shared(rest, nrest, nchunk, key, dist, large, c0) schedule(static)
+#endif
+    for (R_xlen_t k = 0; k < nchunk; k++) {
+        R_xlen_t w0 = k * ZE_CHUNK_WORDS;
+        int m = (int)(nrest - w0 < ZE_CHUNK_WORDS ? nrest - w0 : ZE_CHUNK_WORDS);
+        ZE_N(dist_chunk)(key, c0 + (uint64_t)k, rest + w0, m, dist, large);
     }
 }
 

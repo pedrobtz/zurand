@@ -4,7 +4,7 @@
 \alias{rng_uniform}
 \title{Draw uniform random values}
 \usage{
-rng_uniform(key, n = 1L, min = 0, max = 1)
+rng_uniform(key, n = 1L, min = 0, max = 1, offset = 0)
 }
 \arguments{
 \item{key}{An \code{rng_key} vector.}
@@ -12,6 +12,13 @@ rng_uniform(key, n = 1L, min = 0, max = 1)
 \item{n}{A single non-negative whole number. Defaults to one draw per key.}
 
 \item{min, max}{Single finite numeric bounds.}
+
+\item{offset}{A single non-negative whole number: the draws start at
+position \code{offset} of each key's stream, so the result holds positions
+\code{offset} to \code{offset + n - 1}. \code{f(key, n, offset = k)} equals
+\code{f(key, k + n)[(k + 1):(k + n)]} exactly, which lets a long simulation
+draw its next batch, or resume from a checkpoint, without holding the
+earlier values. \code{offset + n} must not exceed \eqn{2^{53}}.}
 }
 \value{
 A numeric vector of length \code{n} for one key, or an \code{n} by
@@ -33,4 +40,6 @@ key <- rng_key(42L)
 rng_uniform(key)
 rng_uniform(key, 5L)
 rng_uniform(rng_key(42L, n = 3L), 5L)
+# the next five, on their own
+identical(rng_uniform(key, 5L, offset = 5), rng_uniform(key, 10L)[6:10])
 }

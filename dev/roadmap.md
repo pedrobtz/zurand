@@ -135,7 +135,7 @@ or claims a new argument, purpose value or engine name.
 
 | # | task | kind | note |
 |--:|---|---|---|
-| C1 | `offset = 0` on every sampler (and in the C API from B1) | additive | counter engines: O(1); xoshiro: at most 511 steps |
+| C1 | `offset = 0` on every sampler (and in the C API from B1) -- **PARTLY DONE** #55: `rng_uniform()`, `rng_normal()`, C API `fill_*_at()` and `stream_*()`; still open for `rng_integer()` and `rng_bits()`, both position-local (integer retries sit at `(position, g >= 1)`), so the same range fill applies | additive | a range that starts inside an engine chunk regenerates that chunk's head: at most 511 values for the counter engines, a chunk (4096 or 5120) for xoshiro |
 | C2 | Vector `mean`/`sd`/`min`/`max`, recycled | additive | same per-element formula as the scalar case |
 | C3 | Fuse the `mean`/`sd` and `min`/`max` scaling into the per-chunk transform; ~~packed `{ki, wi}` ziggurat table~~ | neutral | old item 1.3; the packed table (old 1.2) was remeasured at the R level on x86 and M1 and gave nothing -- both tables sit in L1 -- so it is dropped with the ziggurat freeze below |
 | C4 | ~~NEON path for `xoshiro256pp`~~ **DONE** #35: 8 sub-chunks in four 2-lane registers; M1 uniform 632 -> 1208 M/s, level with randompack | neutral | **highest priority after release**: on Apple M1 randompack's SIMD engine is 2x zurand on uniform (1309 vs 638 M/s) and CRAN's macOS binary has no threads to make up for it; the M-series baseline now exists (2026-09-26 CI benchmark) |
@@ -177,10 +177,13 @@ on Zen 3, Intel and the M1 (1.01-1.13x) and level to 3-5% behind
 on AVX-512 AMD (Zen 4 at 1e7, Zen 5); that is the default stream's price,
 and the reason `"mcfarland"` exists, not a tuning target.
 
-What remains open is not per-thread: ALTREP lazy vectors and a C API
-member for `rng_normal(method =)`. Threads on macOS came with #50
-(`./configure` links the libomp R ships; validated on an M1 MacBook Air,
-8 threads).
+What remains open is not per-thread: ALTREP lazy vectors. Threads on
+macOS came with #50 (`./configure` links the libomp R ships; validated on
+an M1 MacBook Air, 8 threads); the C API member for `rng_normal(method =)`
+with #53; `offset =` on `rng_uniform()`/`rng_normal()` (design.md section 4)
+and C API version 3 -- positional fills and callback streams through a
+caller-owned buffer, so a simulation consumes its numbers from cache --
+with feat/stream. `offset` for `rng_integer()`/`rng_bits()` is still open.
 
 ### Ziggurat implementation frozen (2026-09-26)
 

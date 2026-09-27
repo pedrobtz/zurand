@@ -4,7 +4,14 @@
 \alias{rng_normal}
 \title{Draw normal random values}
 \usage{
-rng_normal(key, n = 1L, mean = 0, sd = 1, method = c("ziggurat", "mcfarland"))
+rng_normal(
+  key,
+  n = 1L,
+  mean = 0,
+  sd = 1,
+  method = c("ziggurat", "mcfarland"),
+  offset = 0
+)
 }
 \arguments{
 \item{key}{An \code{rng_key} vector.}
@@ -30,6 +37,13 @@ Both are exact samplers of the standard normal (to double precision)
 and both are bit-reproducible across platforms. They are different
 streams: the same key gives unrelated values under the two methods, and
 changing the method changes every value. The default never changes.}
+
+\item{offset}{A single non-negative whole number: the draws start at
+position \code{offset} of each key's stream, so the result holds positions
+\code{offset} to \code{offset + n - 1}. \code{f(key, n, offset = k)} equals
+\code{f(key, k + n)[(k + 1):(k + n)]} exactly, which lets a long simulation
+draw its next batch, or resume from a checkpoint, without holding the
+earlier values. \code{offset + n} must not exceed \eqn{2^{53}}.}
 }
 \value{
 A numeric vector of length \code{n} for one key, or an \code{n} by
@@ -44,6 +58,7 @@ key <- rng_key(42L)
 rng_normal(key)
 rng_normal(key, 5L)
 rng_normal(key, 5L, method = "mcfarland")
+identical(rng_normal(key, 5L, offset = 5), rng_normal(key, 10L)[6:10])
 }
 \references{
 Marsaglia, G. and Tsang, W. W. (2000). The ziggurat method for generating
