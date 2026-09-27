@@ -19,6 +19,11 @@
  *       if (zr->fill_normal(k, n, 0.0, 1.0, buf) != ZURAND_OK) ...
  *   }
  *
+ * Stack: a fill uses about 40 KB of the calling thread's stack; the
+ * positional fills and the streams about 100 KB, plus what the consumer
+ * uses. Every platform's default thread stack has room (macOS gives
+ * secondary threads 512 KB), but size smaller ones accordingly.
+ *
  * zurand.h includes <Rinternals.h>. With OpenMP, include <omp.h> first or
  * define R_NO_REMAP: R's `match` macro breaks the `declare variant` pragmas
  * in LLVM's omp.h.
