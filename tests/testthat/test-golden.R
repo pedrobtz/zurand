@@ -207,3 +207,58 @@ test_that("draw i does not depend on n", {
     }
   }
 })
+
+test_that("rng_normal(method = \"mcfarland\") is bit-stable, edge paths included", {
+  mcf <- function(engine, ...) rng_normal(rng_key(42L, engine = engine), ..., method = "mcfarland")
+  expect_identical(mcf("philox4x64", 12L),
+    c(
+      -0x1.245e8956e7064p-3, -0x1.95646f452c84dp+0, -0x1.e96d2711e426bp-2,
+      -0x1.1721238b1d248p-3, -0x1.14c08b26c2526p+0, -0x1.cc43053a8fe13p-1,
+      -0x1.1a6f98896b652p+0, 0x1.048a9f2d89b0cp+0, 0x1.3336efa7f1498p-8,
+      0x1.6ead0f3360585p+0, 0x1.34454bf574336p-1, -0x1.a62ec28b78276p+0
+    ))
+  expect_identical(mcf("threefry4x64", 8L),
+    c(
+      -0x1.d2fe5bbdba261p+0, 0x1.d242d443f2c45p+0, -0x1.249d67e997f94p-2,
+      -0x1.881e8c803cfb3p+0, 0x1.0e6ac1008d4acp+0, -0x1.925d25347257ep-2,
+      -0x1.8ad7546e96c7fp-1, -0x1.65550ff1cdda2p-6
+    ))
+  expect_identical(mcf("xoshiro256pp", 8L),
+    c(
+      -0x1.c7fd467c4a1f4p-4, 0x1.bcc72b05b2394p-2, 0x1.3c1f9bd8e1c22p+0,
+      -0x1.1d933bb4cba7ap-1, 0x1.254b37d69bdp-7, 0x1.c58050c8955e1p-2,
+      0x1.894ec158c3d95p-1, 0x1.9438f3d05ae0bp+0
+    ))
+
+  # |z| > X_0 = 3.636: only the tail branch of the edge produces these
+  tail_idx <- c(2388L, 4427L, 9183L, 11815L, 13785L, 23529L)
+  expect_identical(mcf("philox4x64", 200000L)[tail_idx],
+    c(
+      -0x1.f04a15d38da05p+1, 0x1.e9b8e929a1853p+1, -0x1.09917210fd9ccp+2,
+      0x1.d67fb10e965d8p+1, 0x1.e5c2c82c789c4p+1, 0x1.002c25baf422fp+2
+    ))
+  tail_idx <- c(7368L, 8185L, 9905L, 12626L, 16123L, 17131L)
+  expect_identical(mcf("xoshiro256pp", 200000L)[tail_idx],
+    c(
+      0x1.ffd63b8aff8e1p+1, -0x1.e6b6b77f4b3b8p+1, -0x1.da7644c7470c2p+1,
+      -0x1.fa8717a73914ap+1, -0x1.d7496000c03cep+1, -0x1.febe984beb2a9p+1
+    ))
+
+  expect_identical(mcf("philox4x64", 4L, mean = 2, sd = 3),
+    c(
+      0x1.925c8c7f695dap+0, -0x1.6016a6e7c2c74p+1, 0x1.21dc456529c6p-1,
+      0x1.975392abd5125p+0
+    ))
+})
+
+test_that("the two normal methods are separate streams", {
+  for (engine in c("philox4x64", "threefry4x64", "xoshiro256pp")) {
+    key <- rng_key(42L, engine = engine)
+    z <- rng_normal(key, 64L)
+    m <- rng_normal(key, 64L, method = "mcfarland")
+    expect_false(any(z == m), label = engine)
+  }
+  expect_identical(rng_normal(rng_key(1L), 5L),
+                   rng_normal(rng_key(1L), 5L, method = "ziggurat"))
+  expect_error(rng_normal(rng_key(1L), 5L, method = "boxmuller"), "should be one of")
+})

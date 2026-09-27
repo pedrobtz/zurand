@@ -24,6 +24,11 @@ across platforms, thread counts, SIMD paths and call order.
 * `rng_key()`, `rng_key_from_r()` and `rng_fold()` create and derive keys.
 * `rng_uniform()`, `rng_normal()`, `rng_integer()` and `rng_bits()` sample;
   with a vector of keys they return one column per key.
+* `rng_normal(method = "mcfarland")` samples with McFarland's (2016)
+  modified ziggurat, whose common case needs no table comparison. Large
+  fills run 1.15-1.25x faster than the default method on x86_64 and
+  1.05-1.10x on arm64. It is a separate, equally reproducible stream; the
+  default method is unchanged.
 * `rng_threads()` caps OpenMP use; `rng_simd()` reports or disables the
   AVX2 path. Neither changes any value.
 

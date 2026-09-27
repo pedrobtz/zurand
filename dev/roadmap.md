@@ -141,6 +141,8 @@ or claims a new argument, purpose value or engine name.
 | C9 | Split `src/zurand.c` along engine and sampler lines | neutral | 1,050 lines and three engines |
 | C10 | Make `src/zigbounds.h` platform-independent (exact rationals or `Rmpfr`) | build only | old 0.4 |
 | C11 | `RNGkind("user-supplied")` bridge | additive, opt-in | only if users ask; stateful by nature |
+| C13 | ~~`rng_normal(method = "mcfarland")`~~ **DONE**: McFarland's modified ziggurat, purpose 7; tables from `tools/generate-mcfarland-tables.py` (mpmath) | additive | transform -21..-39% per value on eight CPUs (`dev/simd/mcfarland.c`); R level, one thread, xoshiro, 1e7: 1.17x the default on Zen 3, 1.25x Zen 4, 1.10x Neoverse N2, 1.05-1.07x M1; 1.2-1.7x randompack; 1e9-draw chi-square clean on two engines |
+| C14 | `rng_normal(method = "boxmuller")`, vectorised Box-Muller (VectorizedRNG.jl) | additive, purpose 8 | needs `log` and `sin`/`cos` polynomials evaluated without FMA so every lane and platform agrees; worth it only if it beats C13 somewhere |
 | C12 | AVX-512 path for `xoshiro256pp` (8 lanes, `vprolq`) | neutral | randompack has one; +12-15% uniform on Xeon 6973P, Zen 4 inconsistent in one sample (`dev/simd/avx512.c`); needs three Zen 4 and three Intel samples before deciding |
 
 ---

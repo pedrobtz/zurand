@@ -83,7 +83,7 @@ per word:
 |---|---|
 | 0 | block index (`position >> 2` for the counter engines; sub-chunk index for xoshiro seeding) |
 | 1 | domain: 0 on the fast path; attempt number `g >= 1` for ziggurat and integer retry words; `h ^ 0x9e37...` for fold (whose word 0 is `h`) |
-| 2 | purpose: 0 bits, 1 uniform, 2 normal, 3 integer, 4 fold; 5 exponential and 6 normal-by-inversion reserved; 7+ free |
+| 2 | purpose: 0 bits, 1 uniform, 2 normal, 3 integer, 4 fold; 5 exponential and 6 normal-by-inversion reserved; 7 normal by McFarland's method; 8+ free |
 | 3 | **engine tag**: 0 for the philox engine's own output, **1 for every Philox evaluation made on behalf of `xoshiro256pp`** (sub-chunk seeds and ziggurat retry words) |
 
 Word 3 is the one change from today. At present `xoshiro256pp` seeds
@@ -103,6 +103,7 @@ per-element formula is evaluated in IEEE binary64 **without contraction**
 | bits | the 64-bit word; `bits = 32` takes the low half | -- |
 | uniform | `u = ((w >> 12) \| 0x3ff0...) as double - (1 - 2^-53)`, exactly `(m + 0.5) 2^-52`, so `u` is in (0, 1) | `min + (max - min) * u` when non-default |
 | normal | ziggurat on NumPy's 256-layer tables: word -> layer, sign, 52-bit `rabs`; accept `rabs < ki` gives `z = ±rabs * wi`; wedge and tail draw words at `(position, g >= 1)` | `mean + sd * z` when non-default |
+| normal, `method = "mcfarland"` (additive, purpose 7) | McFarland's modified ziggurat, tables from `tools/generate-mcfarland-tables.py`: low byte `i < 253` gives `z = X_i * (int64)w`; otherwise the sign is `w`'s top bit, alias sampling over 256 cells picks the tail or an overhang, rejection inside it, all further words at `(position, g >= 1)` under purpose 7; tail by Marsaglia's method | as above |
 | integer | Lemire bounded 32-bit on the low word, retries at `(position, g >= 1)` | inclusive `[min, max]` |
 | exponential (additive) | ziggurat on NumPy's exponential tables, purpose 5 | `rate` |
 
