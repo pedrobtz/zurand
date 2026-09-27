@@ -177,10 +177,13 @@ on Zen 3, Intel and the M1 (1.01-1.13x) and level to 3-5% behind
 on AVX-512 AMD (Zen 4 at 1e7, Zen 5); that is the default stream's price,
 and the reason `"mcfarland"` exists, not a tuning target.
 
-What remains open is not per-thread: ALTREP lazy vectors and a C API
-member for `rng_normal(method =)`. Threads on macOS came with #50
-(`./configure` links the libomp R ships; validated on an M1 MacBook Air,
-8 threads).
+What remains open is not per-thread: ALTREP lazy vectors. Threads on
+macOS came with #50 (`./configure` links the libomp R ships; validated on
+an M1 MacBook Air, 8 threads); the C API member for `rng_normal(method =)`
+with #53; `offset =` on `rng_uniform()`/`rng_normal()` (design.md section 4)
+and C API version 3 -- positional fills and callback streams through a
+caller-owned buffer, so a simulation consumes its numbers from cache --
+with feat/stream. `offset` for `rng_integer()`/`rng_bits()` is still open.
 
 ### Ziggurat implementation frozen (2026-09-26)
 

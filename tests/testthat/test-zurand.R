@@ -371,3 +371,48 @@ test_that("the xoshiro engine's stream is not a function of philox's", {
   x <- rng_bits(rng_key(42L, engine = "xoshiro256pp"), 1L, bits = 64L)
   expect_false(identical(x, "1b56f8cdd2f1eb5e"))
 })
+
+test_that("offset draws the same positions as a longer fill", {
+  N <- 30000L
+  for (engine in c("xoshiro256pp", "philox4x64", "threefry4x64")) {
+    keys <- rng_key(99L, n = 2L, engine = engine)
+    full_u <- rng_uniform(keys, N, -1, 2)
+    full_z <- rng_normal(keys, N, 0.5, 3)
+    full_m <- rng_normal(keys, N, method = "mcfarland")
+    # Around the engine chunks: 512 words, 4096 or 5120 for xoshiro256pp.
+    for (offset in c(0, 1, 3, 511, 512, 513, 4095, 4096, 4097, 5119, 5120,
+                     5121, 10240, 20000)) {
+      for (n in c(0L, 1L, 7L, 5121L, 9999L)) {
+        i <- offset + seq_len(n)
+        expect_identical(rng_uniform(keys, n, -1, 2, offset = offset),
+                         full_u[i, , drop = FALSE])
+        expect_identical(rng_normal(keys, n, 0.5, 3, offset = offset),
+                         full_z[i, , drop = FALSE])
+        expect_identical(rng_normal(keys, n, method = "mcfarland",
+                                    offset = offset),
+                         full_m[i, , drop = FALSE])
+      }
+    }
+  }
+})
+
+test_that("offset fills are the same with threads", {
+  key <- rng_key(5L)
+  full <- rng_normal(key, 3e5)
+  old <- rng_threads(1L)
+  one <- rng_normal(key, 2e5, offset = 777)
+  rng_threads(0L)
+  all <- rng_normal(key, 2e5, offset = 777)
+  rng_threads(old)
+  expect_identical(one, full[777 + seq_len(2e5)])
+  expect_identical(all, one)
+})
+
+test_that("offset is validated", {
+  key <- rng_key(1L)
+  expect_error(rng_normal(key, 2L, offset = -1), "non-negative whole number")
+  expect_error(rng_uniform(key, 2L, offset = 1.5), "non-negative whole number")
+  expect_error(rng_uniform(key, 2L, offset = NA), "offset")
+  expect_error(rng_uniform(key, 2L, offset = 2^53), "2\\^53")
+  expect_identical(rng_uniform(key, 0L, offset = 2^53), numeric())
+})

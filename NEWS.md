@@ -24,6 +24,10 @@ across platforms, thread counts, SIMD paths and call order.
 * `rng_key()`, `rng_key_from_r()` and `rng_fold()` create and derive keys.
 * `rng_uniform()`, `rng_normal()`, `rng_integer()` and `rng_bits()` sample;
   with a vector of keys they return one column per key.
+* `rng_uniform()` and `rng_normal()` take `offset`: `rng_normal(key, n,
+  offset = k)` returns positions `k` to `k + n - 1`, exactly
+  `rng_normal(key, k + n)[(k + 1):(k + n)]`, so a long simulation can draw
+  its next batch, or resume from a checkpoint, without the earlier values.
 * `rng_normal(method = "mcfarland")` samples with McFarland's (2016)
   modified ziggurat, whose common case needs no table comparison. Large
   fills run 1.15-1.25x faster than the default method on x86_64 and
@@ -59,3 +63,11 @@ across platforms, thread counts, SIMD paths and call order.
 * API version 2 adds `fill_normal_method()`, which takes the normal method
   as `ZURAND_NORMAL_ZIGGURAT` or `ZURAND_NORMAL_MCFARLAND`, the C side of
   `rng_normal(method =)`.
+* API version 3 draws from any position, in two ways. `fill_uniform_at()`
+  and `fill_normal_at()` fill positions `start` to `start + n - 1`, so the
+  caller pulls the next piece whenever it wants it. `stream_uniform()` and
+  `stream_normal()` run the loop instead: they pour positions `0` to
+  `total - 1` through a small buffer the caller owns, calling a consumer
+  function on each chunk in order, so a long simulation consumes its
+  numbers from cache without the whole stream ever being in memory. Either
+  way the values are those of `rng_uniform()` and `rng_normal()`.

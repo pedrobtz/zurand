@@ -111,6 +111,12 @@ rng_fold <- function(key, data) {
 #' @param key An `rng_key` vector.
 #' @param n A single non-negative whole number. Defaults to one draw per key.
 #' @param min,max Single finite numeric bounds.
+#' @param offset A single non-negative whole number: the draws start at
+#'   position `offset` of each key's stream, so the result holds positions
+#'   `offset` to `offset + n - 1`. `f(key, n, offset = k)` equals
+#'   `f(key, k + n)[(k + 1):(k + n)]` exactly, which lets a long simulation
+#'   draw its next batch, or resume from a checkpoint, without holding the
+#'   earlier values. `offset + n` must not exceed \eqn{2^{53}}.
 #' @return A numeric vector of length `n` for one key, or an `n` by
 #'   `length(key)` numeric matrix for multiple keys.
 #' @export
@@ -119,8 +125,10 @@ rng_fold <- function(key, data) {
 #' rng_uniform(key)
 #' rng_uniform(key, 5L)
 #' rng_uniform(rng_key(42L, n = 3L), 5L)
-rng_uniform <- function(key, n = 1L, min = 0, max = 1) {
-  .Call(C_rng_uniform, key, n, min, max)
+#' # the next five, on their own
+#' identical(rng_uniform(key, 5L, offset = 5), rng_uniform(key, 10L)[6:10])
+rng_uniform <- function(key, n = 1L, min = 0, max = 1, offset = 0) {
+  .Call(C_rng_uniform, key, n, min, max, offset)
 }
 
 #' Draw normal random values
@@ -161,11 +169,12 @@ rng_uniform <- function(key, n = 1L, min = 0, max = 1) {
 #' rng_normal(key)
 #' rng_normal(key, 5L)
 #' rng_normal(key, 5L, method = "mcfarland")
+#' identical(rng_normal(key, 5L, offset = 5), rng_normal(key, 10L)[6:10])
 rng_normal <- function(key, n = 1L, mean = 0, sd = 1,
-                       method = c("ziggurat", "mcfarland")) {
+                       method = c("ziggurat", "mcfarland"), offset = 0) {
   method <- match.arg(method)
   .Call(C_rng_normal, key, n, mean, sd,
-        if (method == "mcfarland") 1L else 0L)
+        if (method == "mcfarland") 1L else 0L, offset)
 }
 
 #' Draw integer random values

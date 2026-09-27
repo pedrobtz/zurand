@@ -441,6 +441,17 @@ static R_xlen_t length_scalar(SEXP x, const char *what) {
     return (R_xlen_t)value;
 }
 
+/* The first position a sampler returns. Doubles are exact to 2^53, which
+ * also bounds offset + n. */
+static uint64_t offset_scalar(SEXP x, R_xlen_t n) {
+    double value = numeric_scalar(x, "offset");
+    if (value != trunc(value) || value < 0)
+        Rf_error("`offset` must be a single non-negative whole number");
+    if (value + (double)n > 9007199254740992.0)
+        Rf_error("`offset + n` must not exceed 2^53");
+    return (uint64_t)value;
+}
+
 static int bits_scalar(SEXP x) {
     double value = numeric_scalar(x, "bits");
     if (value != 32.0 && value != 64.0)
@@ -527,6 +538,11 @@ static int lemire_accept(uint32_t x, uint32_t range, uint32_t threshold,
  * 512-word sub-chunks so four can run in parallel SIMD lanes. Every chunk
  * buffer is sized for the widest, so one constant governs stack use. */
 #define ZURAND_MAX_CHUNK_WORDS (ZURAND_CHUNK_WORDS * 10)
+
+/* The double samplers a range fill or a stream can run. */
+#define ZURAND_DIST_UNIFORM    0
+#define ZURAND_DIST_NORMAL     1
+#define ZURAND_DIST_NORMAL_MCF 2
 
 /* exp() and log1p() for the ziggurat's slow path: fdlibm, so the result
  * does not depend on the platform's libm. See the file for why. */
@@ -1047,9 +1063,14 @@ static void chunk_words_xoshiro(philox4x64_key_t key, uint64_t c,
 }
 
 /* One full xoshiro chunk of uniforms, written straight into `o` when the
- * AVX2 path is on; returns 0 to fall back to words-then-convert. */
-static int uniform_chunk_xoshiro_fast(philox4x64_key_t key, uint64_t c,
-                                      double *o, int m, int large) {
+ * AVX2 path is on; returns 0 to fall back to words-then-convert. Forced
+ * inline: it is used from more than one fill, and clang then stops
+ * inlining it on its own. */
+R123_STATIC_INLINE R123_FORCE_INLINE(int uniform_chunk_xoshiro_fast(
+    philox4x64_key_t key, uint64_t c, double *o, int m, int large));
+R123_STATIC_INLINE int uniform_chunk_xoshiro_fast(philox4x64_key_t key,
+                                                  uint64_t c, double *o,
+                                                  int m, int large) {
     if (m != ZURAND_XOSHIRO_SUB * ZURAND_XOSHIRO_LANES)
         return 0;
     uint64_t sub0 = c * ZURAND_XOSHIRO_LANES;
@@ -1134,6 +1155,34 @@ static void fill_integer_key(zurand_engine_t eng, philox4x64_key_t kp,
         fill_integer_column_xoshiro(out, n, kp, min, range, threshold, par_rows);
     else
         fill_integer_column_philox(out, n, kp, min, range, threshold, par_rows);
+}
+
+/* Positions start .. start + n - 1 of a double sampler (ZURAND_DIST_*),
+ * unscaled: rng_uniform(offset =), rng_normal(offset =) and the C API's
+ * positional fills. With start = 0 it gives the column fill's values. */
+static void fill_range_key(zurand_engine_t eng, philox4x64_key_t kp,
+                           double *out, uint64_t start, R_xlen_t n, int dist,
+                           int par_rows) {
+    double stage[ZURAND_MAX_CHUNK_WORDS];
+    if (eng == ZURAND_ENG_THREEFRY)
+        fill_range_threefry(out, start, n, threefry_key_from_philox(kp), dist,
+                            par_rows, stage);
+    else if (eng == ZURAND_ENG_XOSHIRO)
+        fill_range_xoshiro(out, start, n, kp, dist, par_rows, stage);
+    else
+        fill_range_philox(out, start, n, kp, dist, par_rows, stage);
+}
+
+/* One engine chunk c of a double sampler, m values, unscaled. */
+static void dist_chunk_key(zurand_engine_t eng, philox4x64_key_t kp,
+                           threefry4x64_key_t kt, uint64_t c, double *o,
+                           int m, int dist) {
+    if (eng == ZURAND_ENG_THREEFRY)
+        dist_chunk_threefry(kt, c, o, m, dist, 0);
+    else if (eng == ZURAND_ENG_XOSHIRO)
+        dist_chunk_xoshiro(kp, c, o, m, dist, 0);
+    else
+        dist_chunk_philox(kp, c, o, m, dist, 0);
 }
 
 
@@ -1366,10 +1415,11 @@ SEXP C_rng_threads(SEXP threads_) {
 
 /* ---- .Call entry points: samplers ---- */
 
-SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
+SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_, SEXP offset_) {
     R_xlen_t nkey = key_count(key);
     zurand_engine_t eng = key_engine_code(key);
     R_xlen_t n = length_scalar(n_, "n");
+    uint64_t offset = offset_scalar(offset_, n);
     R_xlen_t total = checked_product(n, nkey, "sample");
     double min = finite_scalar(min_, "min");
     double max = finite_scalar(max_, "max");
@@ -1397,21 +1447,28 @@ SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     int par_rows = !par_cols && n >= ZURAND_OMP_MIN_VALUES ? nt : 0;
 #ifdef ZURAND_OPENMP
 #pragma omp parallel for if(par_cols) num_threads(nt) default(none) \
-    shared(kw, out, n, nkey, par_rows, eng) schedule(static)
+    shared(kw, out, n, nkey, par_rows, eng, offset) schedule(static)
 #endif
-    for (R_xlen_t col = 0; col < nkey; col++)
-        fill_uniform_key(eng, key_from_words(kw, nkey, col), out + n * col, n,
-                         par_rows);
+    for (R_xlen_t col = 0; col < nkey; col++) {
+        if (offset == 0)
+            fill_uniform_key(eng, key_from_words(kw, nkey, col), out + n * col,
+                             n, par_rows);
+        else
+            fill_range_key(eng, key_from_words(kw, nkey, col), out + n * col,
+                           offset, n, ZURAND_DIST_UNIFORM, par_rows);
+    }
     if (min != 0.0 || span != 1.0)
         affine_pass(out, total, min, span, nt);
     UNPROTECT(1);
     return ans;
 }
 
-SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_, SEXP method_) {
+SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_, SEXP method_,
+                  SEXP offset_) {
     R_xlen_t nkey = key_count(key);
     zurand_engine_t eng = key_engine_code(key);
     R_xlen_t n = length_scalar(n_, "n");
+    uint64_t offset = offset_scalar(offset_, n);
     R_xlen_t total = checked_product(n, nkey, "sample");
     double mean = finite_scalar(mean_, "mean");
     double sd = finite_scalar(sd_, "sd");
@@ -1442,11 +1499,19 @@ SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_, SEXP method_) {
     int par_rows = !par_cols && n >= ZURAND_OMP_MIN_VALUES ? nt : 0;
 #ifdef ZURAND_OPENMP
 #pragma omp parallel for if(par_cols) num_threads(nt) default(none) \
-    shared(kw, out, n, nkey, par_rows, eng, method) schedule(static)
+    shared(kw, out, n, nkey, par_rows, eng, method, offset) schedule(static)
 #endif
-    for (R_xlen_t col = 0; col < nkey; col++)
-        fill_normal_key(eng, key_from_words(kw, nkey, col), out + n * col, n,
-                        par_rows, method);
+    for (R_xlen_t col = 0; col < nkey; col++) {
+        if (offset == 0)
+            fill_normal_key(eng, key_from_words(kw, nkey, col), out + n * col,
+                            n, par_rows, method);
+        else
+            fill_range_key(eng, key_from_words(kw, nkey, col), out + n * col,
+                           offset, n,
+                           method == ZURAND_NORMAL_MCFARLAND
+                               ? ZURAND_DIST_NORMAL_MCF : ZURAND_DIST_NORMAL,
+                           par_rows);
+    }
     if (mean != 0.0 || sd != 1.0)
         affine_pass(out, total, mean, sd, nt);
     UNPROTECT(1);
@@ -1720,6 +1785,163 @@ static int api_fill_bits64(zurand_key k, size_t n, uint64_t *out) {
     return ZURAND_OK;
 }
 
+/* A double sampler's arguments, checked once: `dist`, and the scaling
+ * a + s * x (skipped when a = 0 and s = 1), or the constant a when s = 0.
+ * Returns ZURAND_OK or ZURAND_EINVAL. */
+typedef struct {
+    int dist;
+    double a, s;
+} api_dist;
+
+static int api_uniform_args(double min, double max, api_dist *d) {
+    if (!isfinite(min) || !isfinite(max) || min > max)
+        return ZURAND_EINVAL;
+    d->dist = ZURAND_DIST_UNIFORM;
+    d->a = min;
+    d->s = max - min;
+    return ZURAND_OK;
+}
+
+static int api_normal_args(double mean, double sd, int method, api_dist *d) {
+    if (!isfinite(mean) || !isfinite(sd) || sd < 0 ||
+        (method != ZURAND_NORMAL_ZIGGURAT && method != ZURAND_NORMAL_MCFARLAND))
+        return ZURAND_EINVAL;
+    d->dist = method == ZURAND_NORMAL_MCFARLAND ? ZURAND_DIST_NORMAL_MCF
+                                                : ZURAND_DIST_NORMAL;
+    d->a = mean;
+    d->s = sd;
+    return ZURAND_OK;
+}
+
+static void api_scale(double *x, R_xlen_t n, const api_dist *d) {
+    if (d->s == 0.0) {
+        for (R_xlen_t i = 0; i < n; i++)
+            x[i] = d->a;
+    } else if (d->a != 0.0 || d->s != 1.0) {
+        affine_pass(x, n, d->a, d->s, 1);
+    }
+}
+
+static int api_fill_at(zurand_key k, uint64_t start, size_t n,
+                       const api_dist *d, double *out) {
+    if (n > (size_t)R_XLEN_T_MAX || start > UINT64_MAX - (uint64_t)n)
+        return ZURAND_EINVAL;
+    if (d->s != 0.0)
+        fill_range_key((zurand_engine_t)k.engine, api_philox_key(k), out,
+                       start, (R_xlen_t)n, d->dist, 0);
+    api_scale(out, (R_xlen_t)n, d);
+    return ZURAND_OK;
+}
+
+static int api_fill_uniform_at(zurand_key k, uint64_t start, size_t n,
+                               double min, double max, double *out) {
+    api_dist d;
+    if (!api_key_ok(k))
+        return ZURAND_EKEY;
+    if (api_uniform_args(min, max, &d) != ZURAND_OK)
+        return ZURAND_EINVAL;
+    return api_fill_at(k, start, n, &d, out);
+}
+
+static int api_fill_normal_at(zurand_key k, uint64_t start, size_t n,
+                              double mean, double sd, int method, double *out) {
+    api_dist d;
+    if (!api_key_ok(k))
+        return ZURAND_EKEY;
+    if (api_normal_args(mean, sd, method, &d) != ZURAND_OK)
+        return ZURAND_EINVAL;
+    return api_fill_at(k, start, n, &d, out);
+}
+
+/* The stream: engine chunks, generated from their first position and in
+ * order, poured into the caller's buffer `chunk` values at a time. A
+ * chunk that fits in the buffer's remaining room is generated straight
+ * into it; one that straddles two of the caller's chunks is generated into
+ * a stack buffer and copied out in two parts, so no value is generated
+ * twice and the caller's chunk need not be a multiple of the engine's
+ * (512 values, or 4096 or 5120 for xoshiro256pp, by architecture). */
+static int api_stream(zurand_key k, uint64_t total, const api_dist *d,
+                      double *buf, size_t chunk, zurand_consumer fn,
+                      void *ctx) {
+    if (buf == NULL || fn == NULL || chunk == 0 ||
+        chunk > (size_t)R_XLEN_T_MAX)
+        return ZURAND_EINVAL;
+    uint64_t pos = 0;     /* positions poured into buf so far */
+    size_t fill = 0;      /* values in buf now */
+    if (d->s == 0.0) {    /* a constant: nothing to generate */
+        while (pos < total) {
+            uint64_t left = total - pos;
+            fill = left < chunk ? (size_t)left : chunk;
+            for (size_t i = 0; i < fill; i++)
+                buf[i] = d->a;
+            if (fn(ctx, buf, fill, pos))
+                return ZURAND_STOPPED;
+            pos += fill;
+        }
+        return ZURAND_OK;
+    }
+    zurand_engine_t eng = (zurand_engine_t)k.engine;
+    philox4x64_key_t kp = api_philox_key(k);
+    threefry4x64_key_t kt = threefry_key_from_philox(kp);
+    const uint64_t cw = (uint64_t)engine_chunk_words_raw(eng);
+    double stage[ZURAND_MAX_CHUNK_WORDS];
+    size_t st_len = 0, st_off = 0;
+    uint64_t next_c = 0;
+    while (pos < total) {
+        size_t room = chunk - fill;
+        if (st_off < st_len) {
+            size_t take = st_len - st_off < room ? st_len - st_off : room;
+            memcpy(buf + fill, stage + st_off, take * sizeof(double));
+            st_off += take;
+            fill += take;
+            pos += take;
+        } else {
+            uint64_t left = total - next_c * cw;   /* == total - pos here */
+            int m = left < cw ? (int)left : (int)cw;
+            if ((size_t)m <= room) {
+                dist_chunk_key(eng, kp, kt, next_c, buf + fill, m, d->dist);
+                fill += (size_t)m;
+                pos += (uint64_t)m;
+            } else {
+                dist_chunk_key(eng, kp, kt, next_c, stage, m, d->dist);
+                st_len = (size_t)m;
+                st_off = 0;
+            }
+            next_c++;
+        }
+        if (fill == chunk || (pos == total && fill > 0)) {
+            if (d->a != 0.0 || d->s != 1.0)
+                affine_pass(buf, (R_xlen_t)fill, d->a, d->s, 1);
+            if (fn(ctx, buf, fill, pos - fill))
+                return ZURAND_STOPPED;
+            fill = 0;
+        }
+    }
+    return ZURAND_OK;
+}
+
+static int api_stream_uniform(zurand_key k, uint64_t total, double min,
+                              double max, double *buf, size_t chunk,
+                              zurand_consumer fn, void *ctx) {
+    api_dist d;
+    if (!api_key_ok(k))
+        return ZURAND_EKEY;
+    if (api_uniform_args(min, max, &d) != ZURAND_OK)
+        return ZURAND_EINVAL;
+    return api_stream(k, total, &d, buf, chunk, fn, ctx);
+}
+
+static int api_stream_normal(zurand_key k, uint64_t total, double mean,
+                             double sd, int method, double *buf, size_t chunk,
+                             zurand_consumer fn, void *ctx) {
+    api_dist d;
+    if (!api_key_ok(k))
+        return ZURAND_EKEY;
+    if (api_normal_args(mean, sd, method, &d) != ZURAND_OK)
+        return ZURAND_EINVAL;
+    return api_stream(k, total, &d, buf, chunk, fn, ctx);
+}
+
 static const zurand_api zurand_api_table = {
     ZURAND_API_VERSION,
     sizeof(zurand_api),
@@ -1729,7 +1951,11 @@ static const zurand_api zurand_api_table = {
     api_fill_normal,
     api_fill_integer,
     api_fill_bits64,
-    api_fill_normal_method
+    api_fill_normal_method,
+    api_fill_uniform_at,
+    api_fill_normal_at,
+    api_stream_uniform,
+    api_stream_normal
 };
 
 static const zurand_api *zurand_api_get(void) {
@@ -1743,8 +1969,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"C_rng_key_from_r", (DL_FUNC) &C_rng_key_from_r, 2},
     {"C_rng_key_format", (DL_FUNC) &C_rng_key_format, 1},
     {"C_rng_fold",       (DL_FUNC) &C_rng_fold,       2},
-    {"C_rng_uniform",    (DL_FUNC) &C_rng_uniform,    4},
-    {"C_rng_normal",     (DL_FUNC) &C_rng_normal,     5},
+    {"C_rng_uniform",    (DL_FUNC) &C_rng_uniform,    5},
+    {"C_rng_normal",     (DL_FUNC) &C_rng_normal,     6},
     {"C_rng_integer",    (DL_FUNC) &C_rng_integer,    4},
     {"C_rng_bits",       (DL_FUNC) &C_rng_bits,       3},
     {"C_rng_threads",    (DL_FUNC) &C_rng_threads,    1},
