@@ -154,37 +154,41 @@ key <- rng_key(42L, engine = "xoshiro256pp")
 ## Performance
 
 Millions of values per second for `n = 1e7`, median of five rounds, from the
-`benchmark` workflow on GitHub-hosted runners (2026-09-26). Every package is
+`benchmark` workflow's code: on a GitHub-hosted runner for Linux
+(2026-09-26), and run locally on an Apple M1 (2026-09-27). Every package is
 measured in the same `bench::mark()` call on the same machine.
 
-| | Linux x86_64, 1 thread | Linux x86_64, 4 threads | macOS arm64, 1 thread |
-|---|---:|---:|---:|
-| **uniform** | | | |
-| zurand (`xoshiro256pp`) | **864** | **1801** | **1364** |
-| zurand (`philox4x64`) | 276 | 594 | 356 |
-| randompack (`x256++simd`) | 688 | 684 | 1087 |
-| dqrng | 368 | 367 | 230 |
-| base R `runif()` | 104 | 104 | 148 |
-| **normal** | | | |
-| zurand (`xoshiro256pp`) | **366** | **919** | **624** |
-| zurand (`philox4x64`) | 215 | 501 | 297 |
-| randompack (`x256++simd`) | 355 | 355 | 503 |
-| RcppZiggurat (MT) | 125 | 124 | 193 |
-| dqrng | 143 | 143 | 189 |
-| base R `rnorm()` | 28 | 28 | 39 |
+| | Linux x86_64, 1 thread | Linux x86_64, 4 threads | Apple M1, 1 thread | Apple M1, 8 threads |
+|---|---:|---:|---:|---:|
+| **uniform** | | | | |
+| zurand (`xoshiro256pp`) | **864** | **1801** | **2196** | **4984** |
+| zurand (`philox4x64`) | 276 | 594 | 574 | 2404 |
+| randompack (`x256++simd`) | 688 | 684 | 1918 | 1888 |
+| dqrng | 368 | 367 | 311 | 310 |
+| base R `runif()` | 104 | 104 | 213 | 210 |
+| **normal** | | | | |
+| zurand (`xoshiro256pp`) | **366** | **919** | **739** | **3143** |
+| zurand (`philox4x64`) | 215 | 501 | 377 | 1622 |
+| randompack (`x256++simd`) | 355 | 355 | 718 | 708 |
+| RcppZiggurat (MT) | 125 | 124 | 225 | 221 |
+| dqrng | 143 | 143 | 235 | 233 |
+| base R `rnorm()` | 28 | 28 | 43 | 42 |
 
 Linux: AMD EPYC 7763, AVX2, OpenMP, and a kernel that uses 2 MiB pages for
 everything; on Linux kernels in the default `madvise` mode zurand requests
 them itself for large outputs, which doubles large fills there (see the
-article). macOS: Apple M1, NEON, one thread (the runner lacks the OpenMP
-headers; see below). On one thread zurand leads dqrng and RcppZiggurat by
-2.3-6x. Against randompack's SIMD engine, the fastest single-threaded
-alternative, it leads on every row: uniform by 1.26x on x86_64 and
-1.05-1.4x on Apple Silicon depending on the runner; normal by 1.03x on
-this Zen 3 (1.08x on a Xeon 6973P, from the same-machine A/B in #43) and
-1.05-1.25x on Apple Silicon. With threads zurand is 2.6x randompack, and
-its output is still bit-identical to one thread; none of the others
-parallelizes at the R level. The
+article). Apple M1: a MacBook Air (fanless; 4 performance and 4 efficiency
+cores) on mains power, NEON, OpenMP through the runtime R ships (see
+below). On one thread zurand leads dqrng and RcppZiggurat by 2.3-7x.
+Against randompack's SIMD engine, the fastest single-threaded alternative,
+it leads on every row: uniform by 1.26x on x86_64 and 1.15x on the M1
+(0.97x there for 1e5 values, a fill small enough to stay in cache);
+normal by 1.03x on this Zen 3 (1.08x on a Xeon 6973P, from the
+same-machine A/B in #43) and 1.01-1.03x on the M1, 1.09x there with
+`method = "mcfarland"`. With threads zurand is 2.6x randompack on four EPYC
+cores, and 2.6x (uniform) to 4.4x (normal) on the M1's eight; its output
+is still bit-identical to one thread, and none of the others parallelizes
+at the R level. The
 [performance article](https://github.com/pedrobtz/zurand/blob/main/vignettes/performance.Rmd)
 has the method and how to reproduce these numbers.
 

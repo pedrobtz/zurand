@@ -18,48 +18,57 @@ minutes and needs every competing package installed.
 ## Results
 
 Millions of values per second for `n = 1e7`, median of five rounds, from
-the package's `benchmark` workflow on GitHub-hosted runners, 2026-09-26.
+the package's `benchmark` workflow: on a GitHub-hosted runner for Linux
+(2026-09-26), and the workflow's code run locally on an Apple M1
+(2026-09-27).
 
-| | Linux x86_64, 1 thread | Linux x86_64, 4 threads | macOS arm64, 1 thread |
-|---|---:|---:|---:|
-| **uniform** | | | |
-| zurand (`xoshiro256pp`) | **864** | **1801** | **1364** |
-| zurand (`philox4x64`) | 276 | 594 | 356 |
-| randompack (`x256++simd`) | 688 | 684 | 1087 |
-| randompack (`philox`) | 252 | 252 | 419 |
-| dqrng | 368 | 367 | 230 |
-| base R `runif()` | 104 | 104 | 148 |
-| **normal** | | | |
-| zurand (`xoshiro256pp`) | **366** | **919** | **624** |
-| zurand (`philox4x64`) | 215 | 501 | 297 |
-| randompack (`x256++simd`) | 355 | 355 | 503 |
-| randompack (`philox`) | 184 | 184 | 303 |
-| RcppZiggurat (MT) | 125 | 124 | 193 |
-| dqrng | 143 | 143 | 189 |
-| base R `rnorm()` | 28 | 28 | 39 |
+| | Linux x86_64, 1 thread | Linux x86_64, 4 threads | Apple M1, 1 thread | Apple M1, 8 threads |
+|---|---:|---:|---:|---:|
+| **uniform** | | | | |
+| zurand (`xoshiro256pp`) | **864** | **1801** | **2196** | **4984** |
+| zurand (`philox4x64`) | 276 | 594 | 574 | 2404 |
+| randompack (`x256++simd`) | 688 | 684 | 1918 | 1888 |
+| randompack (`philox`) | 252 | 252 | 574 | 572 |
+| dqrng | 368 | 367 | 311 | 310 |
+| base R `runif()` | 104 | 104 | 213 | 210 |
+| **normal** | | | | |
+| zurand (`xoshiro256pp`) | **366** | **919** | **739** | **3143** |
+| zurand (`philox4x64`) | 215 | 501 | 377 | 1622 |
+| randompack (`x256++simd`) | 355 | 355 | 718 | 708 |
+| randompack (`philox`) | 184 | 184 | 375 | 369 |
+| RcppZiggurat (MT) | 125 | 124 | 225 | 221 |
+| dqrng | 143 | 143 | 235 | 233 |
+| base R `rnorm()` | 28 | 28 | 43 | 42 |
 
 - **Linux:** AMD EPYC 7763, 4 cores, AVX2, OpenMP.
-- **macOS:** Apple M1 (virtualised), 3 cores, NEON, one thread: the
-  benchmark runner lacks the OpenMP headers, so the build is serial (see
-  *Threads* for how macOS builds get OpenMP).
+- **Apple M1:** a MacBook Air (fanless), 8 cores (4 performance and 4
+  efficiency), 16 GB, NEON, on mains power, with OpenMP through the runtime
+  R ships (see *Threads*). Not a CI runner: GitHub's M1 runner is a
+  virtualised 3-core slice whose numbers moved by a third between runs
+  (1364-1837 M/s uniform on one thread).
 
 ## Reading the table
 
-- **Against dqrng and RcppZiggurat**, zurand's default engine is 2.3-6x
-  faster on uniform and 2.9-3.2x on normal, single-threaded.
+- **Against dqrng and RcppZiggurat**, zurand's default engine is 2.3-7x
+  faster on uniform and 2.9-3.3x on normal, single-threaded.
 - **Against randompack's SIMD engine**, the fastest single-threaded
   competitor, zurand leads on every row. Uniform: 1.26x on x86_64, and
-  1.05-1.4x on Apple Silicon depending on the runner (same-machine A/Bs on
-  three M1 runners gave 1.05-1.15x for fills of 2e5 values or more, and
-  about 0.95x for fills small enough to stay in cache). Normal: 1.03x on
-  this Zen 3, 1.08x on a Xeon 6973P (the same-machine A/B behind #43) and
-  1.05-1.25x on Apple Silicon. Both vectorise the generator (AVX2 on
+  1.15x on the M1 for fills of 1e6 and 1e7 values (0.97x for 1e5, a fill
+  small enough to stay in cache; same-machine A/B, one thread). Normal:
+  1.03x on this Zen 3, 1.08x on a Xeon 6973P (the same-machine A/B behind
+  #43) and 1.01-1.03x on the M1, where `method = "mcfarland"` (below) is
+  1.09x. Both vectorise the generator (AVX2 on
   x86_64, NEON on arm64), and both use NumPy's ziggurat, scalar, for
   normals; zurand's takes the sign from a signed table, is unrolled by
   four, and keeps its rare slow path as plain out-of-line code.
 - **With threads**, zurand is the only package here that parallelizes at the
   R level, and the threaded output is bit-identical to the serial one. On
-  four cores it is 2.6x randompack on both.
+  four EPYC cores it is 2.6x randompack on both. On the M1's eight it is
+  2.6x on uniform and 4.4x on normal: normals scale to 4.3x one thread,
+  while uniform stops at about 2.3x, where it is writing 40 GB/s. Half of
+  the M1's cores are efficiency cores, and all eight still beat the four
+  performance cores alone, by 4-13% on normals, so leave `rng_threads()`
+  uncapped there.
 - **The engines differ in speed, not in guarantees.** Philox and Threefry
   are counter-based: each value is computed from its position. The default
   xoshiro256pp reseeds a cheap recurrence from Philox every 512 values.
@@ -175,7 +184,7 @@ to the default method in the same `bench::mark()` call:
 | EPYC 7763 (Zen 3) | 1.08 | 1.15 | 1.17 |
 | EPYC 9V74 (Zen 4) | 1.07 | 1.16 | 1.25 |
 | Neoverse N2 | 1.04 | 1.07 | 1.10 |
-| Apple M1 | 1.02-1.03 | 1.06-1.08 | 1.05-1.07 |
+| Apple M1 | 1.09 | 1.09 | 1.08 |
 
 The default stays the NumPy-table ziggurat: changing it would change
 every existing normal stream. The two methods are separate streams: the
