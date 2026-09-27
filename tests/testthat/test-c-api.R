@@ -58,9 +58,17 @@ test_that("C API fills equal the R samplers, called from worker threads", {
     expect_identical(fill(keys, n, "integer", -2e9, 2e9),
                      rng_integer(keys, n, min = -2000000000L, max = 2000000000L))
     expect_identical(fill(keys, n, "bits64"), rng_bits(keys, n, bits = 64L))
+    # fill_normal_method(), API version 2.
+    expect_identical(fill(keys, n, "normal_ziggurat"), rng_normal(keys, n))
+    expect_identical(fill(keys, n, "normal_mcfarland"),
+                     rng_normal(keys, n, method = "mcfarland"))
+    expect_identical(fill(keys, n, "normal_mcfarland", 0.3, 1.7),
+                     rng_normal(keys, n, mean = 0.3, sd = 1.7, method = "mcfarland"))
     # Degenerate scales, handled before the fill.
     expect_identical(fill(keys, 5L, "uniform", 2, 2), rng_uniform(keys, 5L, 2, 2))
     expect_identical(fill(keys, 5L, "normal", 4, 0), rng_normal(keys, 5L, 4, 0))
+    expect_identical(fill(keys, 5L, "normal_mcfarland", 4, 0),
+                     rng_normal(keys, 5L, 4, 0, method = "mcfarland"))
   }
 })
 
@@ -80,7 +88,8 @@ test_that("C API reports invalid arguments as return codes", {
   skip_on_cran()
   ns <- client()
   # version, then: key index out of range, min > max, sd < 0, infinite bound,
-  # NA integer bound, unknown engine, unknown stream, and n = 0 (fine).
+  # NA integer bound, unknown engine, unknown stream, n = 0 (fine); and for
+  # fill_normal_method(): methods 2 and -1, sd < 0, unknown engine.
   expect_identical(ns$client_errors(rng_key(1L)),
-                   c(1L, 1L, 1L, 1L, 1L, 1L, 2L, 2L, 0L))
+                   c(2L, 1L, 1L, 1L, 1L, 1L, 2L, 2L, 0L, 1L, 1L, 1L, 2L))
 })

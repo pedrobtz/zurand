@@ -57,7 +57,10 @@ SEXP client_fill(SEXP keys, SEXP n_, SEXP what_, SEXP a_, SEXP b_) {
         if (what == 0)      rc = zr->fill_uniform(ks[j], (size_t)n, a, b, dout + off);
         else if (what == 1) rc = zr->fill_normal(ks[j], (size_t)n, a, b, dout + off);
         else if (what == 2) rc = zr->fill_integer(ks[j], (size_t)n, (int)a, (int)b, iout + off);
-        else                rc = zr->fill_bits64(ks[j], (size_t)n, bout + off);
+        else if (what == 3) rc = zr->fill_bits64(ks[j], (size_t)n, bout + off);
+        else                rc = zr->fill_normal_method(ks[j], (size_t)n, a, b,
+                                  what == 4 ? ZURAND_NORMAL_ZIGGURAT
+                                            : ZURAND_NORMAL_MCFARLAND, dout + off);
         failed |= (rc != ZURAND_OK);
     }
     if (failed)
@@ -92,7 +95,7 @@ SEXP client_errors(SEXP key) {
     zurand_key k, bad;
     double d[4]; int iv[4];
     if (zr->key_get(key, 0, &k) != ZURAND_OK) Rf_error("key_get failed");
-    SEXP ans = PROTECT(Rf_allocVector(INTSXP, 9));
+    SEXP ans = PROTECT(Rf_allocVector(INTSXP, 13));
     int *r = INTEGER(ans);
     r[0] = zr->version;
     r[1] = zr->key_get(key, 5, &bad);                         /* out of range */
@@ -105,6 +108,11 @@ SEXP client_errors(SEXP key) {
     bad = k; bad.stream = 2;
     r[7] = zr->fill_bits64(bad, 4, (uint64_t *) d);           /* stream */
     r[8] = zr->fill_normal(k, 0, 0.0, 1.0, d);                /* n = 0 is fine */
+    r[9] = zr->fill_normal_method(k, 4, 0.0, 1.0, 2, d);      /* method */
+    r[10] = zr->fill_normal_method(k, 4, 0.0, 1.0, -1, d);    /* method */
+    r[11] = zr->fill_normal_method(k, 4, 0.0, -1.0, ZURAND_NORMAL_MCFARLAND, d);
+    bad = k; bad.engine = 7;
+    r[12] = zr->fill_normal_method(bad, 4, 0.0, 1.0, ZURAND_NORMAL_MCFARLAND, d);
     UNPROTECT(1);
     return ans;
 }

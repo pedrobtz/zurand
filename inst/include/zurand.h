@@ -39,12 +39,18 @@
 extern "C" {
 #endif
 
-#define ZURAND_API_VERSION 1
+#define ZURAND_API_VERSION 2
 
 /* Engine codes, as recorded in zurand_key.engine. */
 #define ZURAND_ENGINE_PHILOX4X64   0
 #define ZURAND_ENGINE_THREEFRY4X64 1
 #define ZURAND_ENGINE_XOSHIRO256PP 2
+
+/* Normal methods, for fill_normal_method(): rng_normal(method = "ziggurat")
+ * and rng_normal(method = "mcfarland"). Separate streams: the same key
+ * gives unrelated values under each. */
+#define ZURAND_NORMAL_ZIGGURAT  0
+#define ZURAND_NORMAL_MCFARLAND 1
 
 /* Return codes. */
 #define ZURAND_OK      0
@@ -86,6 +92,14 @@ typedef struct zurand_api {
 
     /* rng_bits(key, n, bits = 64) as integers rather than hex strings. */
     int (*fill_bits64)(zurand_key key, size_t n, uint64_t *out);
+
+    /* Version 2. */
+
+    /* rng_normal(key, n, mean, sd, method) into out[0 .. n-1], with method
+     * ZURAND_NORMAL_ZIGGURAT (what fill_normal() uses) or
+     * ZURAND_NORMAL_MCFARLAND; any other method is ZURAND_EINVAL. */
+    int (*fill_normal_method)(zurand_key key, size_t n, double mean,
+                              double sd, int method, double *out);
 } zurand_api;
 
 /* Fetch the API table. Call on the main thread; the pointer stays valid for

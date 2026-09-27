@@ -256,8 +256,9 @@ if (zr->fill_normal(k, n, 0.0, 1.0, buf) != ZURAND_OK) { /* bad arguments */ }
 ```
 
 The header, [inst/include/zurand.h](https://github.com/pedrobtz/zurand/blob/main/inst/include/zurand.h), documents the
-rest: uniform, integer and 64-bit fills, and `fold_int()`, which derives a
-key exactly as `rng_fold(key, i)` does.
+rest: uniform, integer and 64-bit fills, `fill_normal_method()` for
+`rng_normal(method = "mcfarland")`, and `fold_int()`, which derives a key
+exactly as `rng_fold(key, i)` does.
 
 ## Interop with R's RNG
 
