@@ -43,15 +43,16 @@ digest_normal <- c(
   threefry4x64 = "257bbe55425f91e66d2302cd6b3660fe"
 )
 digest_normal_scaled  <- "3db5888105cfe7d7d34d1c01491dd4fc"
-# rng_normal(method = "mcfarland"), computed 2026-09-27 on macOS x86_64.
+# rng_normal(method = "mcfarland"), computed 2026-09-27 on macOS x86_64,
+# after the edge began reusing the fast-path word (#46).
 # Per 1e6 draws its edge takes ~11,700 of them through every overhang kind
 # and ~280 through the tail (log1p), and calls exp() about 3,000 times.
 digest_mcfarland <- c(
-  xoshiro256pp = "9be3044655f42d10880b356c1a9b3893",
-  philox4x64   = "f33798e82d32ccd1fb93e5658a31d3d1",
-  threefry4x64 = "9933f335a92089260b61642a1ef23772"
+  xoshiro256pp = "282ba89bad7e711f730832366eef95c7",
+  philox4x64   = "7234891b18858dc38e3c31dc5aabe2a9",
+  threefry4x64 = "4ca018a6a95d2d07ecb49fbf351f75df"
 )
-digest_mcfarland_scaled <- "161bf094e17d8ab3f1d936e0efce178d"
+digest_mcfarland_scaled <- "d12db748d5fd5a07d0650f7815151ebe"
 digest_uniform_scaled <- "685b24f007ecea32b544a1cb9495699f"
 digest_integer        <- "e76d991a8fbdce2645b8f69bf06f6852"
 

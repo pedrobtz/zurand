@@ -1,12 +1,13 @@
 # Normal-only same-machine A/B, one thread: lib-a vs lib-b, ten alternating
 # rounds, three engines, two sizes; reports b/a with its range.
+# ZURAND_AB_METHOD=mcfarland times that method instead of the default.
 args <- commandArgs(TRUE)
 if (length(args) && args[1] == "child") {
   suppressMessages({library(zurand); library(bench)})
   for (eng in c("xoshiro256pp", "philox4x64", "threefry4x64")) {
     key <- rng_key(7L, engine = eng); rng_threads(1L)
     for (n in c(1e6, 1e7)) {
-      b <- bench::mark(rng_normal(key, n), min_iterations = if (n < 1e7) 200 else 30, filter_gc = FALSE)
+      b <- bench::mark(rng_normal(key, n, method = Sys.getenv("ZURAND_AB_METHOD", "ziggurat")), min_iterations = if (n < 1e7) 200 else 30, filter_gc = FALSE)
       cat(sprintf("%s\t%s\t%g\t%.1f\n", args[2], eng, n, n / as.numeric(b$median) / 1e6))
     }
   }

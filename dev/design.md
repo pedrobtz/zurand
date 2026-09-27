@@ -103,7 +103,7 @@ per-element formula is evaluated in IEEE binary64 **without contraction**
 | bits | the 64-bit word; `bits = 32` takes the low half | -- |
 | uniform | `u = ((w >> 12) \| 0x3ff0...) as double - (1 - 2^-53)`, exactly `(m + 0.5) 2^-52`, so `u` is in (0, 1) | `min + (max - min) * u` when non-default |
 | normal | ziggurat on NumPy's 256-layer tables: word -> layer, sign, 52-bit `rabs`; accept `rabs < ki` gives `z = ±rabs * wi`; wedge and tail draw words at `(position, g >= 1)` | `mean + sd * z` when non-default |
-| normal, `method = "mcfarland"` (additive, purpose 7) | McFarland's modified ziggurat, tables from `tools/generate-mcfarland-tables.py`: low byte `i < 253` gives `z = X_i * (int64)w`; otherwise the sign is `w`'s top bit, alias sampling over 256 cells picks the tail or an overhang, rejection inside it, all further words at `(position, g >= 1)` under purpose 7; tail by Marsaglia's method | as above |
+| normal, `method = "mcfarland"` (additive, purpose 7) | McFarland's modified ziggurat, tables from `tools/generate-mcfarland-tables.py`: low byte `i < 253` gives `z = X_i * (int64)w`; otherwise the sign is `w`'s top bit and its other 63 bits are the first overhang position, alias sampling over 256 cells picks the tail or an overhang, rejection inside it, all further words at `(position, g >= 1)` under purpose 7; tail by Marsaglia's method | as above |
 | integer | Lemire bounded 32-bit on the low word, retries at `(position, g >= 1)` | inclusive `[min, max]` |
 | exponential (additive) | ziggurat on NumPy's exponential tables, purpose 5 | `rate` |
 

@@ -244,6 +244,14 @@ test_that("rng_normal(method = \"mcfarland\") is bit-stable, edge paths included
       -0x1.fa8717a73914ap+1, -0x1.d7496000c03cep+1, -0x1.febe984beb2a9p+1
     ))
 
+  # overhang draws: the fast path's low byte was >= 253 and |z| < X_0
+  over_idx <- c(24L, 137L, 263L, 292L, 320L, 409L)
+  expect_identical(mcf("philox4x64", 20000L)[over_idx],
+    c(
+      0x1.d9f92522b03a2p-4, -0x1.32bda7094a899p-3, 0x1.8ed6403e33a45p-1,
+      -0x1.6a36acf4f7e7ap+0, -0x1.d7aa2eb4f3738p-5, -0x1.753b66c3ffdebp-3
+    ))
+
   expect_identical(mcf("philox4x64", 4L, mean = 2, sd = 3),
     c(
       0x1.925c8c7f695dap+0, -0x1.6016a6e7c2c74p+1, 0x1.21dc456529c6p-1,
