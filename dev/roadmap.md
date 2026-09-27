@@ -47,28 +47,33 @@ R CMD INSTALL . && Rscript tools/benchmark.R
   other metric regresses, and output is bit-identical unless the change is
   listed in milestone A.
 
-## Status (2026-09-26)
+## Status (2026-09-27)
 
-n = 1e7, M/s, from the `benchmark` workflow on GitHub runners, each package
-in the same `bench::mark()` call:
+n = 1e7, M/s, from the `benchmark` workflow's code, each package in the
+same `bench::mark()` call: EPYC on a GitHub runner (2026-09-26), M1 run
+locally on a MacBook Air (fanless, 4P+4E, mains power; 2026-09-27):
 
-| | EPYC 7763, 1 thread | EPYC, 4 threads | Apple M1, 1 thread |
-|---|---:|---:|---:|
-| uniform: zurand `xoshiro256pp` | **864** | **1801** | **1364** |
-| uniform: randompack `x256++simd` | 688 | 684 | 1087 |
-| uniform: dqrng | 368 | 367 | 230 |
-| Gaussian: zurand `xoshiro256pp` | **366** | **919** | **624** |
-| Gaussian: randompack `x256++simd` | 355 | 355 | 503 |
-| Gaussian: RcppZiggurat MT | 125 | 124 | 193 |
+| | EPYC 7763, 1 thread | EPYC, 4 threads | Apple M1, 1 thread | Apple M1, 8 threads |
+|---|---:|---:|---:|---:|
+| uniform: zurand `xoshiro256pp` | **864** | **1801** | **2196** | **4984** |
+| uniform: randompack `x256++simd` | 688 | 684 | 1918 | 1888 |
+| uniform: dqrng | 368 | 367 | 311 | 310 |
+| Gaussian: zurand `xoshiro256pp` | **366** | **919** | **739** | **3143** |
+| Gaussian: randompack `x256++simd` | 355 | 355 | 718 | 708 |
+| Gaussian: RcppZiggurat MT | 125 | 124 | 225 | 221 |
 
 After the fused AVX2 uniform (#34), the NEON path (#35, #38), `DC ZVA` on
 Apple (#39), the signed-table ziggurat (#40), huge pages (#42, no effect
 on these runners, whose kernels use them anyway) and the slow path's
 codegen (#43). zurand leads randompack on every row; x86 Gaussian by 3%
-on this Zen 3 and 8% on a Xeon 6973P (the A/B behind #43). The M1 runner
-is a noisy VM: the same code measured 1837/661 M/s in the morning and
-1364/624 here; same-machine A/Bs on three M1 runners gave 1.05-1.15x
-(uniform) and 1.05-1.20x (Gaussian). Both packages' normals are bounded
+on this Zen 3 and 8% on a Xeon 6973P (the A/B behind #43). The M1 column
+replaces GitHub's M1 runner, a noisy 3-core VM (1837/661 M/s one morning,
+1364/624 that afternoon). On the real M1, one thread, same-machine A/B
+(`dev/simd/ab_randompack.R`, `ab_methods.R`): uniform 1.15x randompack at
+1e6-1e7 and 0.97x at 1e5 (cache-resident); Gaussian 1.01-1.03x, 1.09x with
+`"mcfarland"`. All eight threads beat four by 4-13% on normals, efficiency
+cores included; uniform stops at about 2.3x one thread (40 GB/s written),
+normals reach 4.3x. Both packages' normals are bounded
 by the scalar ziggurat's table lookups; the ziggurat implementation is
 frozen (below), its compiler attributes are not.
 
@@ -141,7 +146,7 @@ or claims a new argument, purpose value or engine name.
 | C9 | Split `src/zurand.c` along engine and sampler lines | neutral | 1,050 lines and three engines |
 | C10 | Make `src/zigbounds.h` platform-independent (exact rationals or `Rmpfr`) | build only | old 0.4 |
 | C11 | `RNGkind("user-supplied")` bridge | additive, opt-in | only if users ask; stateful by nature |
-| C13 | ~~`rng_normal(method = "mcfarland")`~~ **DONE**: McFarland's modified ziggurat, purpose 7; tables from `tools/generate-mcfarland-tables.py` (mpmath) | additive | transform -21..-39% per value on eight CPUs (`dev/simd/mcfarland.c`); R level, one thread, xoshiro, 1e7: 1.17x the default on Zen 3, 1.25x Zen 4, 1.10x Neoverse N2, 1.05-1.07x M1; 1.2-1.7x randompack; 1e9-draw chi-square clean on two engines |
+| C13 | ~~`rng_normal(method = "mcfarland")`~~ **DONE**: McFarland's modified ziggurat, purpose 7; tables from `tools/generate-mcfarland-tables.py` (mpmath) | additive | transform -21..-39% per value on eight CPUs (`dev/simd/mcfarland.c`); R level, one thread, xoshiro, 1e7: 1.17x the default on Zen 3, 1.25x Zen 4, 1.10x Neoverse N2, 1.08x M1 (MacBook Air; 1.05-1.07x on the CI VM); 1.2-1.7x randompack; 1e9-draw chi-square clean on two engines |
 | C14 | ~~`rng_normal(method = "boxmuller")`, vectorised Box-Muller (VectorizedRNG.jl)~~ **TRIED, NOT ADDED** | additive | deterministic version built (`dev/simd/boxmuller.c`: fdlibm log, fitted sine polynomial, no FMA; AVX2/AVX-512/NEON bit-identical to scalar), ns per normal with words in cache vs McFarland: Xeon 8573C AVX-512 2.41 vs 0.61, Zen 3/4 AVX2 3.45 vs 0.80-0.85, M1 NEON 5.69 vs 0.53, Neoverse N2 NEON 7.96 vs 0.63. With FMA, as VectorizedRNG uses: 1.81 / 2.76-2.92 / 4.27 / 8.22 -- 0.97-1.33x faster, still 3-13x slower, and 7% of values change by up to 9e-16, i.e. no cross-platform identity. Divide, sqrt and two polynomials cost more than a table lookup; VectorizedRNG's 2x is against Julia's buffered scalar randn |
 | C12 | ~~AVX-512 path for `xoshiro256pp` (8 lanes, `vprolq`)~~ **CLOSED** 2026-09-27 | neutral | one thread against randompack's AVX-512 path (corrected 2026-09-27; the first figures came from `dev/simd/ab_randompack.R` before it pinned one thread, so they compared 4-thread zurand with serial randompack): uniform 1.09-1.16x on Zen 5, 1.09-1.39x Zen 4, 1.11-1.21x Xeon 6973P; normals with the default method 0.96-1.00x on Zen 5, 0.97-1.07x Zen 4, 1.11-1.13x Xeon; with `"mcfarland"` 1.08-1.09x Zen 5, 1.30x Xeon 8370C. AVX-512 would not fix the normals (the prototype (`dev/simd/avx512.c`) gained +12-15% uniform on one Xeon 6973P, was contradictory on Zen 4, ~+2% on normals), `method = "mcfarland"` already does; costs a third bit-identical SIMD path, dispatch, CI legs, and the MinGW zmm alignment hazard (GCC 54412). Reopen only if a CPU class appears where randompack leads |
 
@@ -165,15 +170,17 @@ path codegen #43) and McFarland's (#45, word reuse #48) -- and the
 integer and bits samplers. Reopen only for a new method (an additive
 purpose value) or for a CPU class on which zurand loses to the fastest
 competitor; not for tuning. Where it stands, one thread, same-machine
-A/Bs: ahead of randompack on every CPU measured on uniform (1.09-1.40x)
-and on normals with `"mcfarland"` (1.08-1.30x). Normals with the default
-method are ahead on Zen 3 and Intel (1.03-1.13x) and level to 3-5% behind
+A/Bs: ahead of randompack on every CPU measured on uniform (1.09-1.40x;
+the M1 1.15x, but 0.97x for a cache-resident 1e5 fill) and on normals
+with `"mcfarland"` (1.08-1.30x). Normals with the default method are ahead
+on Zen 3, Intel and the M1 (1.01-1.13x) and level to 3-5% behind
 on AVX-512 AMD (Zen 4 at 1e7, Zen 5); that is the default stream's price,
 and the reason `"mcfarland"` exists, not a tuning target.
 
-What remains open is not per-thread: threads for the CRAN macOS binary
-(pthreads, no OpenMP there), ALTREP lazy vectors, and a C API member for
-`rng_normal(method =)`.
+What remains open is not per-thread: ALTREP lazy vectors and a C API
+member for `rng_normal(method =)`. Threads on macOS came with #50
+(`./configure` links the libomp R ships; validated on an M1 MacBook Air,
+8 threads).
 
 ### Ziggurat implementation frozen (2026-09-26)
 
