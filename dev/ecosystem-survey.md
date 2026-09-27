@@ -77,6 +77,16 @@ Read on the survey date:
   Distribution Sampling", arXiv:2605.05099
 - Widynski, "Squares: A Fast Counter-Based RNG", arXiv:2004.06278
 - Julia `Random` documentation: <https://docs.julialang.org/en/v1/stdlib/Random/>
+- McFarland's modified ziggurat, C reference (MIT):
+  <https://github.com/cd-mcfarland/fast_prng> (`fd75d77`); C. D. McFarland
+  (2016), J. Stat. Comput. Simul. 86(7), 1281-1294, arXiv:1403.6870.
+  Behind `rng_normal(method = "mcfarland")`.
+- Scott Boyce's Fortran translation in USGS BiF-lib (Apache 2.0):
+  <https://github.com/ScottBoyce/bif>, `random_routines_interface.f90`
+  (mirror `846261b`). Quad-precision tables, reuse of the failed fast-path
+  word; an off-by-one inflection index (206 for 205) and an unneeded
+  `exp()` path in the convex branch. Reviewed in issue #46: zurand took the
+  word reuse and generates its own tables; nothing copied.
 
 Not read (blocked from the review environment), so the corresponding rows
 are working knowledge and worth re-checking before being cited:

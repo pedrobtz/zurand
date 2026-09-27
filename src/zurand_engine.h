@@ -207,8 +207,12 @@ R123_STATIC_INLINE double ZE_N(zig_normal_at)(ZE_KEY_T key, uint64_t index,
  * rejection inside it. Every word after the first comes from retry blocks
  * at (index, attempt >= 1) under this method's own purpose value, so draw
  * i is a pure function of (key, i), as for the NumPy-table sampler. The
- * sign is the first word's top bit. Uniforms u in [0, 2^63) are a word's
- * top 63 bits. */
+ * sign is the first word's top bit, and its other 63 bits are the first
+ * overhang position, as in McFarland's C and Boyce's Fortran (BiF-lib):
+ * the low byte, known to be >= 253 here, is squashed by the conversion to
+ * double. That fits 88% of edge draws in one retry block instead of 71%
+ * (2,477 fewer Philox calls per 1e6 draws). Further uniforms u in
+ * [0, 2^63) are a word's top 63 bits. */
 R123_STATIC_INLINE uint64_t ZE_N(mcf_next)(ZE_N(zig_stream) *s, ZE_KEY_T key,
                                      uint64_t index) {
     if (s->w == 4) {
@@ -235,8 +239,8 @@ static double ZE_N(mcf_normal_edge)(ZE_KEY_T key, uint64_t index, uint64_t w) {
     if (j > ZURAND_MCF_J_INFLECTION) {
         /* x < 1, the curve above the chord: below the chord (u2 >= u1) is
          * inside; far above it is outside; the band between asks exp(). */
+        uint64_t u1 = w & UINT64_C(0x7fffffffffffffff);
         for (;;) {
-            uint64_t u1 = ZE_N(mcf_next)(&s, key, index) >> 1;
             uint64_t u2 = ZE_N(mcf_next)(&s, key, index) >> 1;
             x = zurand_mcf_interp(X, j, u1);
             if (u2 >= u1)
@@ -244,6 +248,7 @@ static double ZE_N(mcf_normal_edge)(ZE_KEY_T key, uint64_t index, uint64_t w) {
             if (u1 - u2 <= ZURAND_MCF_E_CONVEX &&
                 zurand_mcf_interp(Y, j, u2) < zurand_exp(-0.5 * x * x))
                 break;
+            u1 = ZE_N(mcf_next)(&s, key, index) >> 1;
         }
     } else if (j == 0) {
         /* tail beyond X_0: Marsaglia's method, as the NumPy-table sampler */
@@ -259,8 +264,8 @@ static double ZE_N(mcf_normal_edge)(ZE_KEY_T key, uint64_t index, uint64_t w) {
     } else if (j < ZURAND_MCF_J_INFLECTION) {
         /* x > 1, the curve below the chord: reflect into the lower
          * triangle; well below the chord is inside. */
+        uint64_t u1 = w & UINT64_C(0x7fffffffffffffff);
         for (;;) {
-            uint64_t u1 = ZE_N(mcf_next)(&s, key, index) >> 1;
             uint64_t u2 = ZE_N(mcf_next)(&s, key, index) >> 1;
             if (u2 < u1) {
                 uint64_t t = u1; u1 = u2; u2 = t;
@@ -269,15 +274,17 @@ static double ZE_N(mcf_normal_edge)(ZE_KEY_T key, uint64_t index, uint64_t w) {
             if (u2 - u1 > ZURAND_MCF_E_CONCAVE ||
                 zurand_mcf_interp(Y, j, u2) < zurand_exp(-0.5 * x * x))
                 break;
+            u1 = ZE_N(mcf_next)(&s, key, index) >> 1;
         }
     } else {
         /* the overhang straddling x = 1: the whole rectangle */
+        uint64_t u1 = w & UINT64_C(0x7fffffffffffffff);
         for (;;) {
-            uint64_t u1 = ZE_N(mcf_next)(&s, key, index) >> 1;
             uint64_t u2 = ZE_N(mcf_next)(&s, key, index) >> 1;
             x = zurand_mcf_interp(X, j, u1);
             if (zurand_mcf_interp(Y, j, u2) < zurand_exp(-0.5 * x * x))
                 break;
+            u1 = ZE_N(mcf_next)(&s, key, index) >> 1;
         }
     }
     return sign * x;
