@@ -314,10 +314,10 @@ static R_xlen_t lazy_index(SEXP indx, R_xlen_t k, R_xlen_t n) {
         return v == NA_INTEGER || v < 1 || v > n ? -1 : (R_xlen_t)v - 1;
     }
     double d = REAL_ELT(indx, k);
-    if (!R_FINITE(d))
+    /* Range-check before the cast, which is undefined past R_xlen_t. */
+    if (!R_FINITE(d) || d < 1 || d >= (double)n + 1)
         return -1;
-    R_xlen_t v = (R_xlen_t)d - 1;
-    return v < 0 || v >= n ? -1 : v;
+    return (R_xlen_t)d - 1;
 }
 
 static SEXP lazy_Extract_subset(SEXP x, SEXP indx, SEXP call) {
@@ -362,9 +362,9 @@ static const void *lazy_Dataptr_or_null(SEXP x) {
     return v == R_NilValue ? NULL : (const void *) REAL(v);
 }
 
+/* Generated values are never NA; written ones may be. */
 static int lazy_No_NA(SEXP x) {
-    (void)x;
-    return 1;
+    return !lazy_st(x)->written;
 }
 
 /* The key and arguments, so a lazy vector saves as a few hundred bytes --

@@ -116,6 +116,26 @@ test_that("materialisation happens once and copies stay independent", {
   expect_identical(x[-(2:3)], rng_normal(k, 1000)[-(2:3)])
 })
 
+test_that("a written lazy vector no longer promises to have no NA", {
+  x <- rng_lazy_normal(rng_key(1L), 1000L)
+  expect_false(anyNA(x))
+  x[5] <- NA
+  expect_true(anyNA(x))
+  expect_true(is.na(x[5]))
+  y <- rng_lazy_uniform(rng_key(2L), 100L)
+  y[3] <- NA
+  expect_true(is.na(mean(y)))
+  expect_identical(mean(y, na.rm = TRUE), mean(rng_uniform(rng_key(2L), 100L)[-3]))
+})
+
+test_that("real indices are range-checked before conversion", {
+  x <- rng_lazy_normal(rng_key(1L), 10L)
+  ref <- rng_normal(rng_key(1L), 10L)
+  idx <- c(0.5, 1.5, 10.9, 11, 1e300, Inf, NA)
+  expect_identical(x[idx], ref[idx])
+  expect_true(all(is.na(x[c(11, 1e300, Inf)])))
+})
+
 test_that("large lazy sums match with threads on and off", {
   skip_on_cran()
   k <- rng_key(6L)
