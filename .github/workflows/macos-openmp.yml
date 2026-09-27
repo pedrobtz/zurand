@@ -26,8 +26,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: OpenMP headers (LLVM 19.1.5, for Xcode 16.3+), as CRAN's machines
         run: |
-          curl -sSLO https://mac.r-project.org/openmp/openmp-19.1.5-darwin20-Release.tar.gz
-          sudo tar fxz openmp-19.1.5-darwin20-Release.tar.gz -C /
+          curl -sSL -o "$RUNNER_TEMP/openmp.tar.gz" https://mac.r-project.org/openmp/openmp-19.1.5-darwin20-Release.tar.gz
+          sudo tar fxz "$RUNNER_TEMP/openmp.tar.gz" -C /
           ls -l /usr/local/include/omp.h
       - uses: r-lib/actions/setup-r@v2
       - uses: r-lib/actions/setup-r-dependencies@v2
@@ -36,11 +36,13 @@ jobs:
           needs: check
       - name: configure takes the OpenMP path and links R's libomp
         run: |
-          ./configure | tee configure.out
-          grep -q "OpenMP works with -Xclang -fopenmp -lomp... yes" configure.out
+          ./configure | tee "$RUNNER_TEMP/configure.out"
+          grep -q "OpenMP works with -Xclang -fopenmp -lomp... yes" "$RUNNER_TEMP/configure.out"
           R CMD INSTALL .
-          otool -L "$(Rscript -e 'cat(system.file("libs", package = "zurand"))')/zurand.so" | tee otool.out
-          grep -q "R.framework/.*/libomp.dylib" otool.out
+          ./cleanup
+          otool -L "$(Rscript -e 'cat(system.file("libs", package = "zurand"))')/zurand.so" | tee "$RUNNER_TEMP/otool.out"
+          grep -q "R.framework/.*/libomp.dylib" "$RUNNER_TEMP/otool.out"
+          git status --porcelain --ignored
           Rscript -e 'n <- zurand::rng_threads(); cat("rng_threads():", n, "\n"); stopifnot(n > 1)'
       - name: speed-up with threads (one run, informational)
         run: |
