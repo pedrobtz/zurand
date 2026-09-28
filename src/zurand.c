@@ -1415,6 +1415,39 @@ SEXP C_rng_threads(SEXP threads_) {
     return Rf_ScalarInteger(prev);
 }
 
+/* The scaling of a uniform on [min, max]: x = min + span * u through
+ * affine_pass(), bit for bit as it has always been. When the bounds are more
+ * than DBL_MAX apart the span overflows and every x would be Inf; then the
+ * same pass runs on the halved bounds, followed by a doubling. Halving and
+ * doubling are exact, so x = 2 * (min/2 + (max/2 - min/2) * u) stays within
+ * [min, max]. Every uniform frontend -- eager, positional, lazy and the C
+ * API -- takes its scaling from here. */
+typedef struct {
+    double a, s;
+    int twice;
+} zurand_scaling;
+
+static zurand_scaling uniform_scaling(double min, double max) {
+    zurand_scaling t = {min, max - min, 0};
+    if (!isfinite(t.s)) {
+        t.a = ldexp(min, -1);
+        t.s = ldexp(max, -1) - ldexp(min, -1);
+        t.twice = 1;
+    }
+    return t;
+}
+
+/* affine_pass() plus the doubling, if any. The doubling is serial: it only
+ * serves bounds more than DBL_MAX apart. */
+static void scaling_pass(double *out, R_xlen_t total, zurand_scaling t,
+                         int nt) {
+    if (t.a != 0.0 || t.s != 1.0)
+        affine_pass(out, total, t.a, t.s, nt);
+    if (t.twice)
+        for (R_xlen_t i = 0; i < total; i++)
+            out[i] += out[i];
+}
+
 /* ---- .Call entry points: samplers ---- */
 
 SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_, SEXP offset_) {
@@ -1459,8 +1492,7 @@ SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_, SEXP offset_) {
             fill_range_key(eng, key_from_words(kw, nkey, col), out + n * col,
                            offset, n, ZURAND_DIST_UNIFORM, par_rows);
     }
-    if (min != 0.0 || span != 1.0)
-        affine_pass(out, total, min, span, nt);
+    scaling_pass(out, total, uniform_scaling(min, max), nt);
     UNPROTECT(1);
     return ans;
 }
@@ -1721,8 +1753,7 @@ static int api_fill_uniform(zurand_key k, size_t n, double min, double max,
         return ZURAND_OK;
     }
     fill_uniform_key((zurand_engine_t)k.engine, api_philox_key(k), out, nn, 0);
-    if (min != 0.0 || span != 1.0)
-        affine_pass(out, nn, min, span, 1);
+    scaling_pass(out, nn, uniform_scaling(min, max), 1);
     return ZURAND_OK;
 }
 
@@ -1788,19 +1819,23 @@ static int api_fill_bits64(zurand_key k, size_t n, uint64_t *out) {
 }
 
 /* A double sampler's arguments, checked once: `dist`, and the scaling
- * a + s * x (skipped when a = 0 and s = 1), or the constant a when s = 0.
- * Returns ZURAND_OK or ZURAND_EINVAL. */
+ * a + s * x (skipped when a = 0 and s = 1; doubled after when `twice`, see
+ * uniform_scaling()), or the constant a when s = 0. Returns ZURAND_OK or
+ * ZURAND_EINVAL. */
 typedef struct {
     int dist;
     double a, s;
+    int twice;
 } api_dist;
 
 static int api_uniform_args(double min, double max, api_dist *d) {
     if (!isfinite(min) || !isfinite(max) || min > max)
         return ZURAND_EINVAL;
+    zurand_scaling t = uniform_scaling(min, max);
     d->dist = ZURAND_DIST_UNIFORM;
-    d->a = min;
-    d->s = max - min;
+    d->a = t.a;
+    d->s = t.s;
+    d->twice = t.twice;
     return ZURAND_OK;
 }
 
@@ -1812,6 +1847,7 @@ static int api_normal_args(double mean, double sd, int method, api_dist *d) {
                                                 : ZURAND_DIST_NORMAL;
     d->a = mean;
     d->s = sd;
+    d->twice = 0;
     return ZURAND_OK;
 }
 
@@ -1819,8 +1855,8 @@ static void api_scale(double *x, R_xlen_t n, const api_dist *d) {
     if (d->s == 0.0) {
         for (R_xlen_t i = 0; i < n; i++)
             x[i] = d->a;
-    } else if (d->a != 0.0 || d->s != 1.0) {
-        affine_pass(x, n, d->a, d->s, 1);
+    } else {
+        scaling_pass(x, n, (zurand_scaling){d->a, d->s, d->twice}, 1);
     }
 }
 
@@ -1912,8 +1948,8 @@ static int api_stream(zurand_key k, uint64_t total, const api_dist *d,
             next_c++;
         }
         if (fill == chunk || (pos == total && fill > 0)) {
-            if (d->a != 0.0 || d->s != 1.0)
-                affine_pass(buf, (R_xlen_t)fill, d->a, d->s, 1);
+            scaling_pass(buf, (R_xlen_t)fill,
+                         (zurand_scaling){d->a, d->s, d->twice}, 1);
             if (fn(ctx, buf, fill, pos - fill))
                 return ZURAND_STOPPED;
             fill = 0;

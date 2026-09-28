@@ -64,6 +64,12 @@ test_that("C API fills equal the R samplers, called from worker threads", {
                      rng_normal(keys, n, method = "mcfarland"))
     expect_identical(fill(keys, n, "normal_mcfarland", 0.3, 1.7),
                      rng_normal(keys, n, mean = 0.3, sd = 1.7, method = "mcfarland"))
+    # Bounds more than DBL_MAX apart, whose span overflows.
+    big <- .Machine$double.xmax
+    expect_identical(fill(keys, n, "uniform", -big, big),
+                     rng_uniform(keys, n, -big, big))
+    expect_identical(fill(keys, n, "uniform", -1e308, 1e308),
+                     rng_uniform(keys, n, -1e308, 1e308))
     # Degenerate scales, handled before the fill.
     expect_identical(fill(keys, 5L, "uniform", 2, 2), rng_uniform(keys, 5L, 2, 2))
     expect_identical(fill(keys, 5L, "normal", 4, 0), rng_normal(keys, 5L, 4, 0))
@@ -108,6 +114,9 @@ test_that("C API positional fills equal rng_*(offset =), from worker threads", {
                        rng_uniform(keys, 3000L, offset = offset))
       expect_identical(ns$client_fill_at(keys, 3000L, "uniform", -2, 5, offset),
                        rng_uniform(keys, 3000L, -2, 5, offset = offset))
+      expect_identical(
+        ns$client_fill_at(keys, 3000L, "uniform", -1e308, 1e308, offset),
+        rng_uniform(keys, 3000L, -1e308, 1e308, offset = offset))
       expect_identical(ns$client_fill_at(keys, 3000L, "normal", 0.5, 2, offset),
                        rng_normal(keys, 3000L, 0.5, 2, offset = offset))
       expect_identical(
@@ -170,4 +179,6 @@ test_that("C API streams run one per worker thread", {
                    rng_normal(keys, 20000L, method = "mcfarland"))
   expect_identical(ns$client_stream_par(keys, 20000L, 4096L, "uniform", 0, 1),
                    rng_uniform(keys, 20000L))
+  expect_identical(ns$client_stream_par(keys, 20000L, 333L, "uniform", -1e308, 1e308),
+                   rng_uniform(keys, 20000L, -1e308, 1e308))
 })

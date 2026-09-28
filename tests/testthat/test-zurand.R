@@ -177,6 +177,40 @@ test_that("rng_uniform() returns values in the requested interval", {
   expect_identical(um[, 1L], rng_uniform(keys[1], 5L))
 })
 
+test_that("uniform bounds more than DBL_MAX apart give finite draws", {
+  # max - min overflows to Inf for these, and every draw used to be Inf.
+  # Such bounds are scaled as 2 * (min/2 + (max/2 - min/2) * u), which R
+  # computes here independently: identical() pins the exact formula.
+  big <- .Machine$double.xmax
+  bounds <- list(c(-1e308, 1e308), c(-big, big), c(-big, 1e300), c(-1e300, big))
+  for (engine in c("xoshiro256pp", "philox4x64", "threefry4x64")) {
+    key <- rng_key(42L, engine = engine)
+    u <- rng_uniform(key, 3000L)
+    for (b in bounds) {
+      info <- paste(engine, format(b[1]), format(b[2]))
+      x <- rng_uniform(key, 3000L, b[1], b[2])
+      expect_identical(x, 2 * (b[1] / 2 + (b[2] / 2 - b[1] / 2) * u), info = info)
+      expect_true(all(is.finite(x) & x >= b[1] & x <= b[2]), info = info)
+      # Spread over the whole interval: the mean of 3000 uniforms lies well
+      # within 5% of the half-width of the midpoint. Scaled first, so that
+      # summing does not overflow.
+      z <- x * 2^-20
+      lo <- b[1] * 2^-20
+      hi <- b[2] * 2^-20
+      expect_lt(abs(mean(z) - (lo + hi) / 2), 0.05 * (hi - lo) / 2, label = info)
+      expect_identical(rng_uniform(key, 1000L, b[1], b[2], offset = 1234),
+                       x[1234 + seq_len(1000L)], info = info)
+      keys <- rng_key(42L, n = 3L, engine = engine)
+      expect_identical(rng_uniform(keys, 10L, b[1], b[2])[, 2L],
+                       rng_uniform(keys[2], 10L, b[1], b[2]), info = info)
+    }
+  }
+  # Bounds whose span is finite keep their exact stream.
+  key <- rng_key(42L)
+  expect_identical(rng_uniform(key, 50L, -big / 2, big / 2),
+                   -big / 2 + (big / 2 + big / 2) * rng_uniform(key, 50L))
+})
+
 test_that("rng_normal() returns shifted and scaled normal values", {
   key <- rng_key(123L)
   keys <- rng_key(123L, n = 2L)

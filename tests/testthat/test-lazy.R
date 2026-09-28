@@ -101,6 +101,25 @@ test_that("lazy vectors serialise as their recipe, and modified ones as values",
   expect_identical(w[-5], rng_uniform(k, 100)[-5])
 })
 
+test_that("lazy uniforms with bounds more than DBL_MAX apart match the sampler", {
+  big <- .Machine$double.xmax
+  for (engine in c("xoshiro256pp", "philox4x64", "threefry4x64")) {
+    k <- rng_key(3L, engine = engine)
+    for (b in list(c(-1e308, 1e308), c(-big, big))) {
+      ref <- rng_uniform(k, 70000L, b[1], b[2])
+      expect_true(all(is.finite(ref)))
+      x <- rng_lazy_uniform(k, 70000L, b[1], b[2])
+      expect_identical(x[c(1, 2, 3, 600, 69999)], ref[c(1, 2, 3, 600, 69999)])
+      expect_identical(vapply(1:40, function(i) x[[i]], 0), ref[1:40])
+      expect_identical(x[5:40000], ref[5:40000])          # regions
+      expect_identical(sum(x), sum(ref))
+      y <- unserialize(serialize(x, NULL))
+      expect_identical(y[c(7, 65000)], ref[c(7, 65000)])
+      expect_identical(x[], ref)                          # materialised
+    }
+  }
+})
+
 test_that("materialisation happens once and copies stay independent", {
   k <- rng_key(4L)
   x <- rng_lazy_normal(k, 1000)
