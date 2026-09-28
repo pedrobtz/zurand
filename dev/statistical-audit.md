@@ -13,6 +13,22 @@ Rscript tools/statistical-audit.R --sampler=normal --engine=philox4x64 --gb=4 \
   | RNG_test stdin32
 ```
 
+## Modes
+
+`--mode=stream`, the default and every row below, reads a new key every
+1e7 values -- `rng_fold(key, block)`, each from its first position -- so it
+is a concatenation of many related keys' first 1e7 values, not one key's
+long stream. `--mode=continuous` advances a single key through `offset =`
+and emits exactly that key's stream from position 0 (checked across block
+boundaries). `--method=mcfarland` audits McFarland's normal method, which
+no row below covers. The `extended` workflow plan runs both at 256 GB.
+
+Batteries are statistical evidence only. The normal samplers' edge
+shortcuts are also checked decision by decision: `test-shortcuts.R`
+constructs draws in every ziggurat wedge and McFarland overhang, many close
+to the chord, and requires each shortcut decision to agree with
+`y < exp(-x^2 / 2)` computed in R from the defining tables.
+
 ## Results
 
 PractRand pre0.95, 256 MB per combination, x86_64, 2026-09-19.
@@ -106,6 +122,8 @@ set for making it the default is met.
 
 ## Still to run
 
+- the `extended` plan: uniform and normal (both methods) on one key via
+  `--mode=continuous`, and McFarland on the default mode (#57)
 - uniform and bits, both engines, at the same depth
 - the same long runs for philox4x64 and threefry4x64 (the `full` plan
   covers xoshiro256pp only)
