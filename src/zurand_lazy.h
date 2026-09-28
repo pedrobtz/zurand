@@ -54,6 +54,26 @@ typedef struct {
 } lazy_state;
 
 static R_altrep_class_t zurand_lazy_class;
+
+/* Interrupts. A lazy vector makes a scan of 1e12 values one short
+ * expression, and R's own loops over ALTREP regions -- sum(), mean(),
+ * range() -- never check for an interrupt, so the read methods do, once
+ * per ZURAND_LAZY_INTERRUPT generated values. Checks run on the R thread,
+ * after a read has completed and outside any parallel region: the cache is
+ * consistent there and no heap memory is held, so unwinding leaks nothing.
+ * At 2^22 values a check costs well under 0.1% of the work between checks.
+ * Materialisation fills the vector in one call and is bounded by memory;
+ * it is not interruptible. */
+#define ZURAND_LAZY_INTERRUPT ((R_xlen_t)1 << 22)
+static R_xlen_t zurand_lazy_work = 0;
+
+static void lazy_account(R_xlen_t generated) {
+    zurand_lazy_work += generated;
+    if (zurand_lazy_work >= ZURAND_LAZY_INTERRUPT) {
+        zurand_lazy_work = 0;
+        R_CheckUserInterrupt();
+    }
+}
 /* How a single read that misses the cache is served, for measurement:
  * 0 computes the value alone, 2 fills the chunk around it, 1 (default)
  * fills the chunk only when reads move forward one at a time. */
@@ -297,7 +317,9 @@ static double lazy_Elt(SEXP x, R_xlen_t i) {
     SEXP v = R_altrep_data2(x);
     if (v != R_NilValue)
         return REAL(v)[i];
-    return lazy_elt(lazy_st(x), i);
+    double value = lazy_elt(lazy_st(x), i);
+    lazy_account(1);
+    return value;
 }
 
 static R_xlen_t lazy_Get_region(SEXP x, R_xlen_t i, R_xlen_t n, double *buf) {
@@ -307,10 +329,12 @@ static R_xlen_t lazy_Get_region(SEXP x, R_xlen_t i, R_xlen_t n, double *buf) {
         return 0;
     if (n > st->n - i)
         n = st->n - i;
-    if (v != R_NilValue)
+    if (v != R_NilValue) {
         memcpy(buf, REAL(v) + i, (size_t)n * sizeof(double));
-    else
+    } else {
         lazy_region(st, i, n, buf);
+        lazy_account(n);
+    }
     return n;
 }
 
@@ -354,6 +378,7 @@ static SEXP lazy_Extract_subset(SEXP x, SEXP indx, SEXP call) {
             for (R_xlen_t j = 0; j < r; j++)
                 out[k + j] = lazy_elt(st, i + j);
         k += r;
+        lazy_account(r);
     }
     UNPROTECT(1);
     return ans;
