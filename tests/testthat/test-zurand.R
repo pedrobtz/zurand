@@ -473,3 +473,18 @@ test_that("offset is validated", {
   expect_error(rng_uniform(key, 2L, offset = 2^53), "2\\^53")
   expect_identical(rng_uniform(key, 0L, offset = 2^53), numeric())
 })
+
+test_that("offset + n is checked exactly at 2^53", {
+  # offset + n rounds to 2^53 when it is 2^53 + 1, so a check that adds
+  # accepted these; one past the limit is still past it.
+  key <- rng_key(1L)
+  for (sampler in list(rng_uniform, rng_normal)) {
+    expect_error(sampler(key, 1L, offset = 2^53), "2\\^53")
+    expect_error(sampler(key, 2L, offset = 2^53 - 1), "2\\^53")
+    expect_error(sampler(key, 3L, offset = 2^53 - 2), "2\\^53")
+    expect_error(sampler(key, 5L, offset = 2^53 - 4), "2\\^53")
+    expect_length(sampler(key, 1L, offset = 2^53 - 1), 1L)
+    expect_length(sampler(key, 3L, offset = 2^53 - 3), 3L)
+    expect_length(sampler(key, 0L, offset = 2^53), 0L)
+  }
+})

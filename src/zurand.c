@@ -442,12 +442,14 @@ static R_xlen_t length_scalar(SEXP x, const char *what) {
 }
 
 /* The first position a sampler returns. Doubles are exact to 2^53, which
- * also bounds offset + n. */
+ * also bounds offset + n. The check subtracts rather than adds: n <=
+ * R_XLEN_T_MAX < 2^52, so 2^53 - n is exact, whereas the sum rounds (2^53
+ * + 1 is 2^53 again) and would let offset + n exceed the limit by one. */
 static uint64_t offset_scalar(SEXP x, R_xlen_t n) {
     double value = numeric_scalar(x, "offset");
     if (value != trunc(value) || value < 0)
         Rf_error("`offset` must be a single non-negative whole number");
-    if (value + (double)n > 9007199254740992.0)
+    if (value > 9007199254740992.0 - (double)n)
         Rf_error("`offset + n` must not exceed 2^53");
     return (uint64_t)value;
 }
