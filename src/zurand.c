@@ -618,6 +618,48 @@ static inline double zurand_mcf_interp(const double *v, unsigned j, uint64_t u) 
            zurand_rounded((double)(int64_t)u * (v[j - 1] - v[j]));
 }
 
+/* ---- Edge shortcuts ----
+ * Both normal samplers settle most edge draws with integer comparisons and
+ * leave exp() only a band around each chord. The shortcuts are functions of
+ * their own so that tests can compare their decisions with a plain exp()
+ * comparison on draws of the tests' choosing (C_zurand_shortcut()). Each
+ * returns +1 to accept, -1 to reject, and 0 when the exp() test decides. */
+
+/* NumPy-table ziggurat, wedge of layer idx (1..255): rabs is the draw's
+ * 52-bit magnitude, at least ki_double[idx], and Y the wedge word. See
+ * zig_normal_slow() for the geometry and ZURAND_ZIG_GUARD. */
+static inline int zig_wedge_shortcut(int idx, uint64_t rabs, uint64_t Y) {
+    uint64_t L = (UINT64_C(1) << 52) - ki_double[idx];
+    uint64_t R = (UINT64_C(1) << 52) - rabs;
+    uint64_t YL;
+    (void)mulhilo64(Y, L, &YL);
+    int accept, reject;
+    if (idx > ZURAND_ZIG_INFLECTION) {
+        reject = YL > R + ZURAND_ZIG_GUARD;
+        accept = !reject && YL + zurand_zig_gap[idx] < R;
+    } else if (idx < ZURAND_ZIG_INFLECTION) {
+        accept = YL + ZURAND_ZIG_GUARD < R;
+        reject = !accept && YL > R + zurand_zig_gap[idx];
+    } else {
+        reject = YL > R + zurand_zig_gap_hi52;
+        accept = !reject && YL + zurand_zig_gap[idx] < R;
+    }
+    return accept ? 1 : reject ? -1 : 0;
+}
+
+/* McFarland, overhang j (1..ZURAND_MCF_LAYERS - 1), one attempt: u1 and
+ * u2 are 63-bit, and for the concave overhangs already ordered u1 <= u2.
+ * Convex overhangs (j > inflection) accept below the chord and reject far
+ * above it; concave ones accept far below it; the straddling one always
+ * asks exp(). See mcf_normal_edge(). */
+static inline int mcf_edge_shortcut(unsigned j, uint64_t u1, uint64_t u2) {
+    if (j > ZURAND_MCF_J_INFLECTION)
+        return u2 >= u1 ? 1 : u1 - u2 > ZURAND_MCF_E_CONVEX ? -1 : 0;
+    if (j < ZURAND_MCF_J_INFLECTION)
+        return u2 - u1 > ZURAND_MCF_E_CONCAVE ? 1 : 0;
+    return 0;
+}
+
 #define ZE_SUFFIX philox
 #define ZE_KEY_T  philox4x64_key_t
 #define ZE_GEN(c, k) philox4x64_R(10, (c), (k))
@@ -2004,6 +2046,80 @@ static const zurand_api *zurand_api_get(void) {
 
 /* ---- registration ---- */
 
+/* ---- .Call entry points for tests: the edge shortcuts ----
+ *
+ * The shortcuts' decisions for draws a test constructs, and the tables a
+ * test needs to decide the same draws independently with exp(). Words
+ * arrive as two doubles holding their high and low 32 bits. Not exported. */
+
+static uint64_t word_from_halves(SEXP hi, SEXP lo, R_xlen_t i, int bits) {
+    double h = REAL(hi)[i], l = REAL(lo)[i];
+    double top = bits == 64 ? 4294967296.0 : ldexp(1.0, bits - 32);
+    if (!(h >= 0 && h < top && h == trunc(h) && l >= 0 && l < 4294967296.0 &&
+          l == trunc(l)))
+        Rf_error("word %.0f is outside %d bits", (double)i + 1, bits);
+    return ((uint64_t)h << 32) | (uint64_t)l;
+}
+
+/* method 0: ziggurat wedge of layer idx, a = rabs, b = Y;
+ * method 1: McFarland overhang j, a = u1, b = u2 (u1 <= u2 when concave). */
+SEXP C_zurand_shortcut(SEXP method_, SEXP layer_, SEXP a_hi, SEXP a_lo,
+                       SEXP b_hi, SEXP b_lo) {
+    int method = Rf_asInteger(method_);
+    R_xlen_t n = XLENGTH(layer_);
+    if (TYPEOF(layer_) != INTSXP || TYPEOF(a_hi) != REALSXP ||
+        TYPEOF(a_lo) != REALSXP || TYPEOF(b_hi) != REALSXP ||
+        TYPEOF(b_lo) != REALSXP || XLENGTH(a_hi) != n || XLENGTH(a_lo) != n ||
+        XLENGTH(b_hi) != n || XLENGTH(b_lo) != n)
+        Rf_error("layers must be integer and words double, all of one length");
+    SEXP ans = PROTECT(Rf_allocVector(INTSXP, n));
+    for (R_xlen_t i = 0; i < n; i++) {
+        int layer = INTEGER(layer_)[i];
+        if (method == 0) {
+            uint64_t rabs = word_from_halves(a_hi, a_lo, i, 52);
+            if (layer < 1 || layer > 255 || rabs < ki_double[layer])
+                Rf_error("draw %.0f is not in a ziggurat wedge", (double)i + 1);
+            INTEGER(ans)[i] = zig_wedge_shortcut(layer, rabs,
+                                                 word_from_halves(b_hi, b_lo, i, 64));
+        } else {
+            if (layer < 1 || layer > ZURAND_MCF_LAYERS)
+                Rf_error("draw %.0f is not in a McFarland overhang", (double)i + 1);
+            INTEGER(ans)[i] = mcf_edge_shortcut((unsigned)layer,
+                                                word_from_halves(a_hi, a_lo, i, 63),
+                                                word_from_halves(b_hi, b_lo, i, 63));
+        }
+    }
+    UNPROTECT(1);
+    return ans;
+}
+
+SEXP C_zurand_normal_tables(void) {
+    const char *names[] = {"ki", "wi", "fi", "zig_inflection",
+                           "mcf_x", "mcf_y", "mcf_inflection", ""};
+    SEXP ans = PROTECT(Rf_mkNamed(VECSXP, names));
+    SEXP ki = Rf_allocVector(REALSXP, 256);
+    SET_VECTOR_ELT(ans, 0, ki);
+    SEXP wi = Rf_allocVector(REALSXP, 256);
+    SET_VECTOR_ELT(ans, 1, wi);
+    SEXP fi = Rf_allocVector(REALSXP, 256);
+    SET_VECTOR_ELT(ans, 2, fi);
+    for (int i = 0; i < 256; i++) {
+        REAL(ki)[i] = (double)ki_double[i];   /* < 2^52: exact */
+        REAL(wi)[i] = wi_double[i];
+        REAL(fi)[i] = fi_double[i];
+    }
+    SET_VECTOR_ELT(ans, 3, Rf_ScalarInteger(ZURAND_ZIG_INFLECTION));
+    SEXP mx = Rf_allocVector(REALSXP, ZURAND_MCF_LAYERS + 1);
+    SET_VECTOR_ELT(ans, 4, mx);
+    SEXP my = Rf_allocVector(REALSXP, ZURAND_MCF_LAYERS + 1);
+    SET_VECTOR_ELT(ans, 5, my);
+    memcpy(REAL(mx), zurand_mcf_x, (ZURAND_MCF_LAYERS + 1) * sizeof(double));
+    memcpy(REAL(my), zurand_mcf_y, (ZURAND_MCF_LAYERS + 1) * sizeof(double));
+    SET_VECTOR_ELT(ans, 6, Rf_ScalarInteger(ZURAND_MCF_J_INFLECTION));
+    UNPROTECT(1);
+    return ans;
+}
+
 static const R_CallMethodDef CallEntries[] = {
     {"C_rng_key",        (DL_FUNC) &C_rng_key,        3},
     {"C_rng_key_from_r", (DL_FUNC) &C_rng_key_from_r, 2},
@@ -2018,6 +2134,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"C_rng_bits",       (DL_FUNC) &C_rng_bits,       3},
     {"C_rng_threads",    (DL_FUNC) &C_rng_threads,    1},
     {"C_rng_simd",       (DL_FUNC) &C_rng_simd,       1},
+    {"C_zurand_shortcut", (DL_FUNC) &C_zurand_shortcut, 6},
+    {"C_zurand_normal_tables", (DL_FUNC) &C_zurand_normal_tables, 0},
     {NULL, NULL, 0}
 };
 

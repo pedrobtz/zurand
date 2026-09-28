@@ -124,24 +124,10 @@ static double ZE_N(zig_normal_slow)(ZE_KEY_T key, uint64_t index, uint64_t r) {
          * own double rounding lives there too, so the hairline band defers
          * to the exp() test instead of deciding. With the guard, shortcut
          * decisions never contradict the fallback. */
-        uint64_t L = (UINT64_C(1) << 52) - ki_double[idx];
-        uint64_t R = (UINT64_C(1) << 52) - rabs;
-        uint64_t YL;
-        (void)mulhilo64(Y, L, &YL);
-        int accept, reject;
-        if (idx > ZURAND_ZIG_INFLECTION) {
-            reject = YL > R + ZURAND_ZIG_GUARD;
-            accept = !reject && YL + zurand_zig_gap[idx] < R;
-        } else if (idx < ZURAND_ZIG_INFLECTION) {
-            accept = YL + ZURAND_ZIG_GUARD < R;
-            reject = !accept && YL > R + zurand_zig_gap[idx];
-        } else {
-            reject = YL > R + zurand_zig_gap_hi52;
-            accept = !reject && YL + zurand_zig_gap[idx] < R;
-        }
-        if (accept)
+        int shortcut = zig_wedge_shortcut(idx, rabs, Y);
+        if (shortcut > 0)
             return x;
-        if (!reject) {
+        if (shortcut == 0) {
             double u = ZURAND_U64_TO_DOUBLE(Y);
             double rise = zurand_rounded((fi_double[idx - 1] - fi_double[idx]) * u);
             if (rise + fi_double[idx] < zurand_exp(-0.5 * x * x))
@@ -243,10 +229,9 @@ static double ZE_N(mcf_normal_edge)(ZE_KEY_T key, uint64_t index, uint64_t w) {
         for (;;) {
             uint64_t u2 = ZE_N(mcf_next)(&s, key, index) >> 1;
             x = zurand_mcf_interp(X, j, u1);
-            if (u2 >= u1)
-                break;
-            if (u1 - u2 <= ZURAND_MCF_E_CONVEX &&
-                zurand_mcf_interp(Y, j, u2) < zurand_exp(-0.5 * x * x))
+            int shortcut = mcf_edge_shortcut(j, u1, u2);
+            if (shortcut > 0 || (shortcut == 0 &&
+                zurand_mcf_interp(Y, j, u2) < zurand_exp(-0.5 * x * x)))
                 break;
             u1 = ZE_N(mcf_next)(&s, key, index) >> 1;
         }
@@ -271,7 +256,7 @@ static double ZE_N(mcf_normal_edge)(ZE_KEY_T key, uint64_t index, uint64_t w) {
                 uint64_t t = u1; u1 = u2; u2 = t;
             }
             x = zurand_mcf_interp(X, j, u1);
-            if (u2 - u1 > ZURAND_MCF_E_CONCAVE ||
+            if (mcf_edge_shortcut(j, u1, u2) > 0 ||
                 zurand_mcf_interp(Y, j, u2) < zurand_exp(-0.5 * x * x))
                 break;
             u1 = ZE_N(mcf_next)(&s, key, index) >> 1;
