@@ -37,12 +37,69 @@ test_that("key subsetting rejects indices that would fabricate keys", {
   expect_error(keys[NA_integer_], "missing")
   expect_error(keys[c(1L, NA, 3L)], "missing")
   expect_error(keys[1.5], "whole numbers")
-  expect_error(keys[10L], "subscript out of bounds")
+  expect_error(keys[10L], "existing keys")
 
   expect_identical(keys[[2L]], keys[2L])
   expect_error(keys[[c(1L, 2L)]], "exactly one key")
   expect_error(keys[[TRUE]], "exactly one key")
   expect_error(keys[[integer()]], "exactly one key")
+})
+
+test_that("key subsetting rejects indices R would turn into missing rows", {
+  # Each of these used to coerce to NA with only a warning, yielding a key
+  # of NA words that was identical whatever vector it came from.
+  one <- rng_key(1L)
+  keys <- rng_key(42L, n = 4L)
+  for (i in list(Inf, -Inf, 2^31, -2^31, 1e300, 5, -5, 4 + 2^31)) {
+    expect_error(keys[i], "finite|existing keys", info = format(i))
+    expect_error(keys[[i]], "finite|existing keys", info = format(i))
+    expect_error(one[i], "finite|existing keys", info = format(i))
+  }
+  expect_error(keys[c(1, Inf)], "finite")
+  expect_error(keys["a"], "integer, double or logical")
+
+  # Legitimate indices are unchanged.
+  expect_identical(length(keys[-1]), 3L)
+  expect_identical(length(keys[0]), 0L)
+  expect_identical(keys[4], keys[4L])
+  expect_identical(keys[c(TRUE, FALSE)], keys[c(1L, 3L)])
+  expect_identical(keys[[4]], keys[4L])
+})
+
+test_that("key vectors cannot be modified in place", {
+  keys <- rng_key(1L, n = 4L)
+  before <- keys
+  expect_error(keys[1:4] <- rng_key(2L), "immutable")
+  expect_error(keys[2] <- 99L, "immutable")
+  expect_error(keys[[2]] <- rng_key(3L), "immutable")
+  expect_error(keys[[2]] <- 99L, "immutable")
+  expect_identical(keys, before)
+})
+
+test_that("key vectors work key by key with vector functions", {
+  keys <- rng_key(7L, n = 3L, engine = "philox4x64")
+
+  as_list <- as.list(keys)
+  expect_length(as_list, 3L)
+  for (j in 1:3) expect_identical(as_list[[j]], keys[j])
+  expect_identical(lapply(keys, rng_uniform, 2L),
+                   lapply(1:3, function(j) rng_uniform(keys[j], 2L)))
+  expect_identical(vapply(keys, rng_uniform, 0), as.vector(rng_uniform(keys)))
+  expect_identical(Map(rng_normal, keys, 2L),
+                   lapply(1:3, function(j) rng_normal(keys[j], 2L)))
+
+  expect_identical(rep(keys, 2), c(keys, keys))
+  expect_identical(rep(keys, each = 2), keys[c(1, 1, 2, 2, 3, 3)])
+  expect_identical(rep(keys, length.out = 4), keys[c(1, 2, 3, 1)])
+  expect_identical(attr(rep(keys, 2), "engine"), "philox4x64")
+
+  doubled <- c(keys, keys[2], keys)
+  expect_identical(duplicated(doubled), c(FALSE, FALSE, FALSE, TRUE, TRUE, TRUE, TRUE))
+  expect_identical(unique(doubled), keys)
+  expect_identical(rev(keys), keys[3:1])
+
+  expect_error(sort(keys), "no order")
+  expect_error(order(keys), "no order")
 })
 
 test_that("rng_fold() derives deterministic keys from typed data", {

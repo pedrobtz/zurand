@@ -6,6 +6,13 @@
 \alias{print.rng_key}
 \alias{length.rng_key}
 \alias{[.rng_key}
+\alias{[<-.rng_key}
+\alias{[[<-.rng_key}
+\alias{as.list.rng_key}
+\alias{rep.rng_key}
+\alias{duplicated.rng_key}
+\alias{unique.rng_key}
+\alias{xtfrm.rng_key}
 \alias{[[.rng_key}
 \alias{c.rng_key}
 \title{Create a stateless RNG key}
@@ -19,6 +26,20 @@ rng_key(seed, n = 1L, engine = c("xoshiro256pp", "philox4x64", "threefry4x64"))
 \method{length}{rng_key}(x)
 
 \method{[}{rng_key}(x, i, ..., drop = FALSE)
+
+\method{[}{rng_key}(x, i, ...) <- value
+
+\method{[[}{rng_key}(x, i, ...) <- value
+
+\method{as.list}{rng_key}(x, ...)
+
+\method{rep}{rng_key}(x, ...)
+
+\method{duplicated}{rng_key}(x, incomparables = FALSE, ...)
+
+\method{unique}{rng_key}(x, incomparables = FALSE, ...)
+
+\method{xtfrm}{rng_key}(x)
 
 \method{[[}{rng_key}(x, i, ...)
 
@@ -54,11 +75,19 @@ other's values. Changing engine changes every number you get.}
 
 \item{...}{Unused.}
 
-\item{i}{Integer or logical index selecting keys. Missing values and
-fractional numbers are an error: a silently invented key would
-deterministically collide with every other key subset the same way.}
+\item{i}{Integer or logical index selecting keys. Missing values,
+fractional numbers, infinities and positions beyond the key vector are
+an error: R would turn such an index into a key of missing words, the
+same invented key whatever vector it came from, so unrelated subsets
+would silently share one stream.}
 
 \item{drop}{Ignored; key subsetting always preserves the \code{rng_key} class.}
+
+\item{value}{Not used: keys are immutable, so assigning into a key vector
+is an error. Without these methods R would write the value into
+individual key words, silently producing different keys.}
+
+\item{incomparables}{Passed to \code{\link[=duplicated]{duplicated()}}.}
 
 \item{recursive}{Ignored. Included for compatibility with \code{\link[=c]{c()}}.}
 }
@@ -75,6 +104,17 @@ integer representation.
 The samplers in this package never read or update \code{.Random.seed}. Calling a
 sampler twice with the same key and arguments returns the same values.
 }
+\section{Key vectors}{
+
+A key vector behaves like a vector of opaque keys: \code{length()}, \code{[},
+\code{[[}, \code{c()}, \code{rev()}, \code{rep()}, \code{unique()}, \code{duplicated()} and
+\code{as.list()} work key by key and keep the engine and stream version, so
+\code{lapply(keys, f)}, \code{Map()} and the parallel map functions hand each task
+one key. Keys are immutable: assigning into a key vector is an error, and
+so is sorting one, since keys have no order; compare keys with
+\code{\link[=identical]{identical()}}.
+}
+
 \section{Stream version}{
 
 A key also records the version of the stream definition it was made

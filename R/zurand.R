@@ -30,6 +30,15 @@
 #'   A key records its engine, so a key made with one never produces the
 #'   other's values. Changing engine changes every number you get.
 #'
+#' @section Key vectors:
+#' A key vector behaves like a vector of opaque keys: `length()`, `[`,
+#' `[[`, `c()`, `rev()`, `rep()`, `unique()`, `duplicated()` and
+#' `as.list()` work key by key and keep the engine and stream version, so
+#' `lapply(keys, f)`, `Map()` and the parallel map functions hand each task
+#' one key. Keys are immutable: assigning into a key vector is an error, and
+#' so is sorting one, since keys have no order; compare keys with
+#' [identical()].
+#'
 #' @section Stream version:
 #' A key also records the version of the stream definition it was made
 #' under, as `attr(key, "stream")`; every key made by this version of
@@ -359,25 +368,99 @@ length.rng_key <- function(x) {
 }
 
 #' @rdname rng_key
-#' @param i Integer or logical index selecting keys. Missing values and
-#'   fractional numbers are an error: a silently invented key would
-#'   deterministically collide with every other key subset the same way.
+#' @param i Integer or logical index selecting keys. Missing values,
+#'   fractional numbers, infinities and positions beyond the key vector are
+#'   an error: R would turn such an index into a key of missing words, the
+#'   same invented key whatever vector it came from, so unrelated subsets
+#'   would silently share one stream.
 #' @param drop Ignored; key subsetting always preserves the `rng_key` class.
 #' @export
 `[.rng_key` <- function(x, i, ..., drop = FALSE) {
   words <- unclass(x)
   if (missing(i)) i <- seq_len(nrow(words))
-  if (anyNA(i)) {
-    stop("`i` must not contain missing values", call. = FALSE)
-  }
-  if (is.numeric(i) && any(i != trunc(i))) {
-    stop("`i` must contain whole numbers", call. = FALSE)
-  }
+  check_key_index(i, nrow(words))
   out <- words[i, , drop = FALSE]
   class(out) <- "rng_key"
   attr(out, "engine") <- attr(x, "engine", exact = TRUE)
   attr(out, "stream") <- key_stream(x)
   out
+}
+
+# Matrix subsetting turns an index it cannot use -- an infinity, or a
+# double beyond the integer range -- into NA, and a row of NA words is a
+# valid opaque key: the same one from every vector. Refuse such indices
+# here, before subsetting; the key words themselves cannot be checked,
+# because any 32-bit pattern, NA_INTEGER's included, is a legitimate word.
+check_key_index <- function(i, n) {
+  if (anyNA(i)) {
+    stop("`i` must not contain missing values", call. = FALSE)
+  }
+  if (is.numeric(i)) {
+    if (!all(is.finite(i))) {
+      stop("`i` must contain finite positions", call. = FALSE)
+    }
+    if (any(i != trunc(i))) {
+      stop("`i` must contain whole numbers", call. = FALSE)
+    }
+    if (any(abs(i) > n)) {
+      stop("`i` must select existing keys, positions 1 to ", n, call. = FALSE)
+    }
+  } else if (!is.logical(i)) {
+    stop("`i` must be an integer, double or logical vector", call. = FALSE)
+  }
+}
+
+#' @rdname rng_key
+#' @param value Not used: keys are immutable, so assigning into a key vector
+#'   is an error. Without these methods R would write the value into
+#'   individual key words, silently producing different keys.
+#' @export
+`[<-.rng_key` <- function(x, i, ..., value) {
+  stop_key_assignment()
+}
+
+#' @rdname rng_key
+#' @export
+`[[<-.rng_key` <- function(x, i, ..., value) {
+  stop_key_assignment()
+}
+
+stop_key_assignment <- function() {
+  stop("keys are immutable; build a new key vector with c() and `[` instead",
+       call. = FALSE)
+}
+
+#' @rdname rng_key
+#' @export
+as.list.rng_key <- function(x, ...) {
+  lapply(seq_len(length(x)), function(j) x[j])
+}
+
+#' @rdname rng_key
+#' @export
+rep.rng_key <- function(x, ...) {
+  x[rep(seq_len(length(x)), ...)]
+}
+
+#' @rdname rng_key
+#' @param incomparables Passed to [duplicated()].
+#' @export
+duplicated.rng_key <- function(x, incomparables = FALSE, ...) {
+  # duplicated() on the word matrix compares rows, i.e. whole keys; it
+  # returns a one-dimensional array, which as.vector() makes a plain logical.
+  as.vector(duplicated(unclass(x), incomparables = incomparables, ...))
+}
+
+#' @rdname rng_key
+#' @export
+unique.rng_key <- function(x, incomparables = FALSE, ...) {
+  x[!duplicated(x, incomparables = incomparables, ...)]
+}
+
+#' @rdname rng_key
+#' @export
+xtfrm.rng_key <- function(x) {
+  stop("keys have no order; compare them with identical()", call. = FALSE)
 }
 
 # A key without the attribute predates it, and is stream 1.
