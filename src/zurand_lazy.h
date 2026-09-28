@@ -7,7 +7,8 @@
  * vector.
  *
  * State. data1 is list(key, meta, st): the rng_key (for serialisation and
- * printing), meta = c(n, dist, a, s), and st, a raw vector holding a
+ * printing), meta = c(n, dist, a, s), with a fifth element 1 when the
+ * scaling doubles (uniform_scaling()), and st, a raw vector holding a
  * lazy_state -- the decoded key, the scaling, and a one-chunk cache.
  * data2 is the materialised vector once something has asked for the data
  * pointer, R_NilValue until then.
@@ -26,7 +27,7 @@
  * vector, filled once with the ordinary parallel fill and kept in data2;
  * from then on every read is served from it.
  *
- * Scaling is applied per element with the formula affine_pass() uses, so
+ * Scaling is applied per element with the formula scaling_pass() uses, so
  * scaled values are identical however they are reached. */
 
 #include <R_ext/Altrep.h>
@@ -42,6 +43,7 @@ typedef struct {
     int engine;
     int dist;
     double a, s;               /* x = a + s * u, or a when s == 0 */
+    int twice;                 /* then x + x; see uniform_scaling() */
     R_xlen_t n;
     R_xlen_t cw;               /* the engine's chunk: 512, or 4096/5120 */
     R_xlen_t cchunk;           /* chunk in the cache, -1 for none */
@@ -52,6 +54,26 @@ typedef struct {
 } lazy_state;
 
 static R_altrep_class_t zurand_lazy_class;
+
+/* Interrupts. A lazy vector makes a scan of 1e12 values one short
+ * expression, and R's own loops over ALTREP regions -- sum(), mean(),
+ * range() -- never check for an interrupt, so the read methods do, once
+ * per ZURAND_LAZY_INTERRUPT generated values. Checks run on the R thread,
+ * after a read has completed and outside any parallel region: the cache is
+ * consistent there and no heap memory is held, so unwinding leaks nothing.
+ * At 2^22 values a check costs well under 0.1% of the work between checks.
+ * Materialisation fills the vector in one call and is bounded by memory;
+ * it is not interruptible. */
+#define ZURAND_LAZY_INTERRUPT ((R_xlen_t)1 << 22)
+static R_xlen_t zurand_lazy_work = 0;
+
+static void lazy_account(R_xlen_t generated) {
+    zurand_lazy_work += generated;
+    if (zurand_lazy_work >= ZURAND_LAZY_INTERRUPT) {
+        zurand_lazy_work = 0;
+        R_CheckUserInterrupt();
+    }
+}
 /* How a single read that misses the cache is served, for measurement:
  * 0 computes the value alone, 2 fills the chunk around it, 1 (default)
  * fills the chunk only when reads move forward one at a time. */
@@ -68,9 +90,14 @@ static uint64_t lazy_purpose(int dist) {
 }
 
 static double lazy_scale1(const lazy_state *st, double u) {
-    return st->s == 0.0 ? st->a
-         : (st->a != 0.0 || st->s != 1.0) ? st->a + zurand_rounded(st->s * u)
-         : u;
+    double x = st->s == 0.0 ? st->a
+             : (st->a != 0.0 || st->s != 1.0) ? st->a + zurand_rounded(st->s * u)
+             : u;
+    return st->twice ? x + x : x;
+}
+
+static zurand_scaling lazy_scaling(const lazy_state *st) {
+    return (zurand_scaling){st->a, st->s, st->twice};
 }
 
 static R_xlen_t lazy_chunk_len(const lazy_state *st, R_xlen_t c) {
@@ -89,8 +116,7 @@ static void lazy_chunk(const lazy_state *st, R_xlen_t c, double *out,
     }
     dist_chunk_key((zurand_engine_t)st->engine, st->kp, st->kt, (uint64_t)c,
                    out, (int)m, st->dist);
-    if (st->a != 0.0 || st->s != 1.0)
-        affine_pass(out, m, st->a, st->s, 1);
+    scaling_pass(out, m, lazy_scaling(st), 1);
 }
 
 static void lazy_fill_cache(lazy_state *st, R_xlen_t c) {
@@ -152,8 +178,7 @@ static void lazy_region(lazy_state *st, R_xlen_t i, R_xlen_t n, double *buf) {
         int nt = zurand_threads();
         fill_range_key((zurand_engine_t)st->engine, st->kp, buf, (uint64_t)i, n,
                        st->dist, n >= ZURAND_OMP_MIN_VALUES ? nt : 0);
-        if (st->a != 0.0 || st->s != 1.0)
-            affine_pass(buf, n, st->a, st->s, nt);
+        scaling_pass(buf, n, lazy_scaling(st), nt);
         return;
     }
     R_xlen_t done = 0;
@@ -190,6 +215,7 @@ static SEXP lazy_make(SEXP key, SEXP meta) {
     st->dist = (int)m[1];
     st->a = m[2];
     st->s = m[3];
+    st->twice = XLENGTH(meta) > 4 && m[4] != 0.0;
     st->cw = engine_chunk_words_raw((zurand_engine_t)st->engine);
     st->cchunk = -1;
     st->last = -2;
@@ -211,24 +237,28 @@ SEXP C_rng_lazy(SEXP key, SEXP n_, SEXP dist_, SEXP a_, SEXP b_) {
     key_stream(key);
     R_xlen_t n = length_scalar(n_, "n");
     int dist = Rf_asInteger(dist_);
-    double a, s;
+    zurand_scaling t;
     if (dist == ZURAND_DIST_UNIFORM) {
         double min = finite_scalar(a_, "min"), max = finite_scalar(b_, "max");
         if (min > max)
             Rf_error("`min` must be less than or equal to `max`");
-        a = min;
-        s = max - min;
+        t = uniform_scaling(min, max);
     } else {
-        a = finite_scalar(a_, "mean");
-        s = finite_scalar(b_, "sd");
-        if (s < 0)
+        t.a = finite_scalar(a_, "mean");
+        t.s = finite_scalar(b_, "sd");
+        t.twice = 0;
+        if (t.s < 0)
             Rf_error("`sd` must be non-negative");
     }
-    SEXP meta = PROTECT(Rf_allocVector(REALSXP, 4));
+    /* The fifth element only when needed, so an ordinary lazy vector
+     * serialises exactly as before. */
+    SEXP meta = PROTECT(Rf_allocVector(REALSXP, t.twice ? 5 : 4));
     REAL(meta)[0] = (double)n;
     REAL(meta)[1] = (double)dist;
-    REAL(meta)[2] = a;
-    REAL(meta)[3] = s;
+    REAL(meta)[2] = t.a;
+    REAL(meta)[3] = t.s;
+    if (t.twice)
+        REAL(meta)[4] = 1.0;
     SEXP ans = lazy_make(key, meta);
     UNPROTECT(1);
     return ans;
@@ -257,8 +287,7 @@ static SEXP lazy_materialise(SEXP x) {
             fill_normal_key((zurand_engine_t)st->engine, st->kp, out, n, par_rows,
                             st->dist == ZURAND_DIST_NORMAL_MCF
                                 ? ZURAND_NORMAL_MCFARLAND : ZURAND_NORMAL_ZIGGURAT);
-        if (st->a != 0.0 || st->s != 1.0)
-            affine_pass(out, n, st->a, st->s, nt);
+        scaling_pass(out, n, lazy_scaling(st), nt);
     }
     R_set_altrep_data2(x, v);
     UNPROTECT(1);
@@ -288,7 +317,9 @@ static double lazy_Elt(SEXP x, R_xlen_t i) {
     SEXP v = R_altrep_data2(x);
     if (v != R_NilValue)
         return REAL(v)[i];
-    return lazy_elt(lazy_st(x), i);
+    double value = lazy_elt(lazy_st(x), i);
+    lazy_account(1);
+    return value;
 }
 
 static R_xlen_t lazy_Get_region(SEXP x, R_xlen_t i, R_xlen_t n, double *buf) {
@@ -298,10 +329,12 @@ static R_xlen_t lazy_Get_region(SEXP x, R_xlen_t i, R_xlen_t n, double *buf) {
         return 0;
     if (n > st->n - i)
         n = st->n - i;
-    if (v != R_NilValue)
+    if (v != R_NilValue) {
         memcpy(buf, REAL(v) + i, (size_t)n * sizeof(double));
-    else
+    } else {
         lazy_region(st, i, n, buf);
+        lazy_account(n);
+    }
     return n;
 }
 
@@ -345,6 +378,7 @@ static SEXP lazy_Extract_subset(SEXP x, SEXP indx, SEXP call) {
             for (R_xlen_t j = 0; j < r; j++)
                 out[k + j] = lazy_elt(st, i + j);
         k += r;
+        lazy_account(r);
     }
     UNPROTECT(1);
     return ans;

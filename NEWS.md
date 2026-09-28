@@ -22,18 +22,30 @@ across platforms, thread counts, SIMD paths and call order.
 ## Functions
 
 * `rng_key()`, `rng_key_from_r()` and `rng_fold()` create and derive keys.
+* A key vector behaves as a vector of opaque keys: `[`, `[[`, `c()`,
+  `rev()`, `rep()`, `unique()`, `duplicated()` and `as.list()` work key by
+  key, so `lapply(keys, f)` and parallel maps hand each task one key. Keys
+  are immutable: assigning into a key vector is an error, as is an index
+  that is infinite or beyond the vector, which R would otherwise turn into
+  a key of missing words shared by every vector (#57).
 * `rng_uniform()`, `rng_normal()`, `rng_integer()` and `rng_bits()` sample;
   with a vector of keys they return one column per key.
 * `rng_uniform()` and `rng_normal()` take `offset`: `rng_normal(key, n,
   offset = k)` returns positions `k` to `k + n - 1`, exactly
   `rng_normal(key, k + n)[(k + 1):(k + n)]`, so a long simulation can draw
   its next batch, or resume from a checkpoint, without the earlier values.
+  `offset + n` may not exceed 2^53, checked exactly (#57).
+* `rng_uniform()` accepts any finite bounds: when `max - min` exceeds the
+  largest double, draws are scaled on halved bounds and doubled, exactly,
+  instead of all being `Inf`; other bounds keep their stream (#57).
 * `rng_lazy_uniform()` and `rng_lazy_normal()` return lazy vectors (ALTREP):
   created instantly, with each value computed only when read and exactly
   equal to the matching sampler's. `sum()` over 1e9 lazy normals runs in
   the memory R itself uses; saving one stores only the key and arguments.
   Arithmetic and C code that asks for the data pointer fill the vector
-  once. For scattered reads, key it with the `philox4x64` engine.
+  once. For scattered reads, key it with the `philox4x64` engine. Scans
+  over a lazy vector respond to an interrupt, so `sum()` over 1e12 lazy
+  values can be stopped (#57).
 * `rng_normal(method = "mcfarland")` samples with McFarland's (2016)
   modified ziggurat, whose common case needs no table comparison. Large
   fills run 1.15-1.25x faster than the default method on x86_64 and

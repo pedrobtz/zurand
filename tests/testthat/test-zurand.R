@@ -37,12 +37,69 @@ test_that("key subsetting rejects indices that would fabricate keys", {
   expect_error(keys[NA_integer_], "missing")
   expect_error(keys[c(1L, NA, 3L)], "missing")
   expect_error(keys[1.5], "whole numbers")
-  expect_error(keys[10L], "subscript out of bounds")
+  expect_error(keys[10L], "existing keys")
 
   expect_identical(keys[[2L]], keys[2L])
   expect_error(keys[[c(1L, 2L)]], "exactly one key")
   expect_error(keys[[TRUE]], "exactly one key")
   expect_error(keys[[integer()]], "exactly one key")
+})
+
+test_that("key subsetting rejects indices R would turn into missing rows", {
+  # Each of these used to coerce to NA with only a warning, yielding a key
+  # of NA words that was identical whatever vector it came from.
+  one <- rng_key(1L)
+  keys <- rng_key(42L, n = 4L)
+  for (i in list(Inf, -Inf, 2^31, -2^31, 1e300, 5, -5, 4 + 2^31)) {
+    expect_error(keys[i], "finite|existing keys", info = format(i))
+    expect_error(keys[[i]], "finite|existing keys", info = format(i))
+    expect_error(one[i], "finite|existing keys", info = format(i))
+  }
+  expect_error(keys[c(1, Inf)], "finite")
+  expect_error(keys["a"], "integer, double or logical")
+
+  # Legitimate indices are unchanged.
+  expect_identical(length(keys[-1]), 3L)
+  expect_identical(length(keys[0]), 0L)
+  expect_identical(keys[4], keys[4L])
+  expect_identical(keys[c(TRUE, FALSE)], keys[c(1L, 3L)])
+  expect_identical(keys[[4]], keys[4L])
+})
+
+test_that("key vectors cannot be modified in place", {
+  keys <- rng_key(1L, n = 4L)
+  before <- keys
+  expect_error(keys[1:4] <- rng_key(2L), "immutable")
+  expect_error(keys[2] <- 99L, "immutable")
+  expect_error(keys[[2]] <- rng_key(3L), "immutable")
+  expect_error(keys[[2]] <- 99L, "immutable")
+  expect_identical(keys, before)
+})
+
+test_that("key vectors work key by key with vector functions", {
+  keys <- rng_key(7L, n = 3L, engine = "philox4x64")
+
+  as_list <- as.list(keys)
+  expect_length(as_list, 3L)
+  for (j in 1:3) expect_identical(as_list[[j]], keys[j])
+  expect_identical(lapply(keys, rng_uniform, 2L),
+                   lapply(1:3, function(j) rng_uniform(keys[j], 2L)))
+  expect_identical(vapply(keys, rng_uniform, 0), as.vector(rng_uniform(keys)))
+  expect_identical(Map(rng_normal, keys, 2L),
+                   lapply(1:3, function(j) rng_normal(keys[j], 2L)))
+
+  expect_identical(rep(keys, 2), c(keys, keys))
+  expect_identical(rep(keys, each = 2), keys[c(1, 1, 2, 2, 3, 3)])
+  expect_identical(rep(keys, length.out = 4), keys[c(1, 2, 3, 1)])
+  expect_identical(attr(rep(keys, 2), "engine"), "philox4x64")
+
+  doubled <- c(keys, keys[2], keys)
+  expect_identical(duplicated(doubled), c(FALSE, FALSE, FALSE, TRUE, TRUE, TRUE, TRUE))
+  expect_identical(unique(doubled), keys)
+  expect_identical(rev(keys), keys[3:1])
+
+  expect_error(sort(keys), "no order")
+  expect_error(order(keys), "no order")
 })
 
 test_that("rng_fold() derives deterministic keys from typed data", {
@@ -118,6 +175,40 @@ test_that("rng_uniform() returns values in the requested interval", {
   expect_identical(rng_uniform(key, 3L, min = 2, max = 2), rep(2, 3L))
   expect_equal(dim(um), c(5L, 3L))
   expect_identical(um[, 1L], rng_uniform(keys[1], 5L))
+})
+
+test_that("uniform bounds more than DBL_MAX apart give finite draws", {
+  # max - min overflows to Inf for these, and every draw used to be Inf.
+  # Such bounds are scaled as 2 * (min/2 + (max/2 - min/2) * u), which R
+  # computes here independently: identical() pins the exact formula.
+  big <- .Machine$double.xmax
+  bounds <- list(c(-1e308, 1e308), c(-big, big), c(-big, 1e300), c(-1e300, big))
+  for (engine in c("xoshiro256pp", "philox4x64", "threefry4x64")) {
+    key <- rng_key(42L, engine = engine)
+    u <- rng_uniform(key, 3000L)
+    for (b in bounds) {
+      info <- paste(engine, format(b[1]), format(b[2]))
+      x <- rng_uniform(key, 3000L, b[1], b[2])
+      expect_identical(x, 2 * (b[1] / 2 + (b[2] / 2 - b[1] / 2) * u), info = info)
+      expect_true(all(is.finite(x) & x >= b[1] & x <= b[2]), info = info)
+      # Spread over the whole interval: the mean of 3000 uniforms lies well
+      # within 5% of the half-width of the midpoint. Scaled first, so that
+      # summing does not overflow.
+      z <- x * 2^-20
+      lo <- b[1] * 2^-20
+      hi <- b[2] * 2^-20
+      expect_lt(abs(mean(z) - (lo + hi) / 2), 0.05 * (hi - lo) / 2, label = info)
+      expect_identical(rng_uniform(key, 1000L, b[1], b[2], offset = 1234),
+                       x[1234 + seq_len(1000L)], info = info)
+      keys <- rng_key(42L, n = 3L, engine = engine)
+      expect_identical(rng_uniform(keys, 10L, b[1], b[2])[, 2L],
+                       rng_uniform(keys[2], 10L, b[1], b[2]), info = info)
+    }
+  }
+  # Bounds whose span is finite keep their exact stream.
+  key <- rng_key(42L)
+  expect_identical(rng_uniform(key, 50L, -big / 2, big / 2),
+                   -big / 2 + (big / 2 + big / 2) * rng_uniform(key, 50L))
 })
 
 test_that("rng_normal() returns shifted and scaled normal values", {
@@ -415,4 +506,19 @@ test_that("offset is validated", {
   expect_error(rng_uniform(key, 2L, offset = NA), "offset")
   expect_error(rng_uniform(key, 2L, offset = 2^53), "2\\^53")
   expect_identical(rng_uniform(key, 0L, offset = 2^53), numeric())
+})
+
+test_that("offset + n is checked exactly at 2^53", {
+  # offset + n rounds to 2^53 when it is 2^53 + 1, so a check that adds
+  # accepted these; one past the limit is still past it.
+  key <- rng_key(1L)
+  for (sampler in list(rng_uniform, rng_normal)) {
+    expect_error(sampler(key, 1L, offset = 2^53), "2\\^53")
+    expect_error(sampler(key, 2L, offset = 2^53 - 1), "2\\^53")
+    expect_error(sampler(key, 3L, offset = 2^53 - 2), "2\\^53")
+    expect_error(sampler(key, 5L, offset = 2^53 - 4), "2\\^53")
+    expect_length(sampler(key, 1L, offset = 2^53 - 1), 1L)
+    expect_length(sampler(key, 3L, offset = 2^53 - 3), 3L)
+    expect_length(sampler(key, 0L, offset = 2^53), 0L)
+  }
 })

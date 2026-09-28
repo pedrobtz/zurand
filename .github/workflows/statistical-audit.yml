@@ -22,9 +22,9 @@ on:
   workflow_dispatch:
     inputs:
       plan:
-        description: "pilot (16 GB each), full (release audit), or custom (the fields below)"
+        description: "pilot (16 GB each), full (release audit), extended (continuous keys and McFarland, 256 GB each), or custom (the fields below)"
         type: choice
-        options: [pilot, full, custom]
+        options: [pilot, full, extended, custom]
         default: pilot
       sampler:
         description: "custom: sampler"
@@ -37,10 +37,15 @@ on:
         options: [xoshiro256pp, philox4x64, threefry4x64]
         default: xoshiro256pp
       mode:
-        description: "custom: stream (one key), keys (64 sibling keys interleaved), folds (64 folded keys interleaved)"
+        description: "custom: stream (a folded key per 1e7 values), continuous (one key via offset), keys (64 sibling keys interleaved), folds (64 folded keys interleaved)"
         type: choice
-        options: [stream, keys, folds]
+        options: [stream, continuous, keys, folds]
         default: stream
+      method:
+        description: "custom: normal method"
+        type: choice
+        options: [ziggurat, mcfarland]
+        default: ziggurat
       gb:
         description: "custom: gigabytes"
         default: "4"
@@ -66,12 +71,13 @@ jobs:
           SAMPLER: ${{ inputs.sampler }}
           ENGINE: ${{ inputs.engine }}
           MODE: ${{ inputs.mode }}
+          METHOD: ${{ inputs.method }}
           GB: ${{ inputs.gb }}
         run: |
           set -eu
           # The release audit of xoshiro256pp (roadmap A8): its three
           # samplers on one stream, plus the two cross-key modes on raw bits.
-          row() { printf '{"sampler":"%s","engine":"%s","mode":"%s","gb":"%s"}' "$1" "$2" "$3" "$4"; }
+          row() { printf '{"sampler":"%s","engine":"%s","mode":"%s","gb":"%s","method":"%s"}' "$1" "$2" "$3" "$4" "${5:-ziggurat}"; }
           case "$PLAN" in
             pilot)
               m="[$(row bits xoshiro256pp stream 16),$(row uniform xoshiro256pp stream 16),$(row normal xoshiro256pp stream 16),$(row bits xoshiro256pp keys 16),$(row bits xoshiro256pp folds 16)]" ;;
@@ -82,8 +88,13 @@ jobs:
               # one that cannot reach 1 TB inside the 330-minute cap, and
               # 512 GB takes ~3 h.
               m="[$(row bits xoshiro256pp stream 1024),$(row uniform xoshiro256pp stream 1024),$(row normal xoshiro256pp stream 512),$(row bits xoshiro256pp keys 1024),$(row bits xoshiro256pp folds 1024)]" ;;
+            extended)
+              # Issue #57: one key read far along its stream (continuous,
+              # through offset =), and McFarland's method, which the plans
+              # above never select.
+              m="[$(row uniform xoshiro256pp continuous 256),$(row normal xoshiro256pp continuous 256),$(row normal xoshiro256pp continuous 256 mcfarland),$(row normal xoshiro256pp stream 256 mcfarland)]" ;;
             custom)
-              m="[$(row "$SAMPLER" "$ENGINE" "$MODE" "$GB")]" ;;
+              m="[$(row "$SAMPLER" "$ENGINE" "$MODE" "$GB" "$METHOD")]" ;;
           esac
           echo "matrix={\"include\":$m}" >> "$GITHUB_OUTPUT"
           echo "$m"
@@ -95,9 +106,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
-    name: ${{ matrix.sampler }}-${{ matrix.engine }}-${{ matrix.mode }} (${{ matrix.gb }} GB)
+    name: ${{ matrix.sampler }}-${{ matrix.method }}-${{ matrix.engine }}-${{ matrix.mode }} (${{ matrix.gb }} GB)
     env:
-      NAME: ${{ matrix.sampler }}-${{ matrix.engine }}-${{ matrix.mode }}-${{ matrix.gb }}GB
+      NAME: ${{ matrix.sampler }}-${{ matrix.method }}-${{ matrix.engine }}-${{ matrix.mode }}-${{ matrix.gb }}GB
     steps:
       - uses: actions/checkout@v4
 
@@ -142,13 +153,14 @@ jobs:
           if [ "${{ inputs.tool }}" = "practrand" ]; then
             Rscript tools/statistical-audit.R --sampler='${{ matrix.sampler }}' \
                     --engine='${{ matrix.engine }}' --mode='${{ matrix.mode }}' \
-                    --gb='${{ matrix.gb }}' \
+                    --method='${{ matrix.method }}' --gb='${{ matrix.gb }}' \
               | RNG_test stdin32 -tlmin 256KB -tlmax '${{ matrix.gb }}GB' -multithreaded \
               > "audit/$NAME.txt" 2>&1 || true
           else
             Rscript tools/statistical-audit.R --sampler='${{ matrix.sampler }}' \
                     --engine='${{ matrix.engine }}' --mode='${{ matrix.mode }}' \
-                    --gb='${{ matrix.gb }}' --out="audit/$NAME.bin"
+                    --method='${{ matrix.method }}' --gb='${{ matrix.gb }}' \
+                    --out="audit/$NAME.bin"
             dieharder -a -g 201 -f "audit/$NAME.bin" > "audit/$NAME.txt" 2>&1 || true
             rm -f "audit/$NAME.bin"
           fi

@@ -442,12 +442,14 @@ static R_xlen_t length_scalar(SEXP x, const char *what) {
 }
 
 /* The first position a sampler returns. Doubles are exact to 2^53, which
- * also bounds offset + n. */
+ * also bounds offset + n. The check subtracts rather than adds: n <=
+ * R_XLEN_T_MAX < 2^52, so 2^53 - n is exact, whereas the sum rounds (2^53
+ * + 1 is 2^53 again) and would let offset + n exceed the limit by one. */
 static uint64_t offset_scalar(SEXP x, R_xlen_t n) {
     double value = numeric_scalar(x, "offset");
     if (value != trunc(value) || value < 0)
         Rf_error("`offset` must be a single non-negative whole number");
-    if (value + (double)n > 9007199254740992.0)
+    if (value > 9007199254740992.0 - (double)n)
         Rf_error("`offset + n` must not exceed 2^53");
     return (uint64_t)value;
 }
@@ -614,6 +616,48 @@ static void zurand_advise_output(void *p, size_t bytes) {
 static inline double zurand_mcf_interp(const double *v, unsigned j, uint64_t u) {
     return zurand_rounded(v[j] * 0x1.0p63) +
            zurand_rounded((double)(int64_t)u * (v[j - 1] - v[j]));
+}
+
+/* ---- Edge shortcuts ----
+ * Both normal samplers settle most edge draws with integer comparisons and
+ * leave exp() only a band around each chord. The shortcuts are functions of
+ * their own so that tests can compare their decisions with a plain exp()
+ * comparison on draws of the tests' choosing (C_zurand_shortcut()). Each
+ * returns +1 to accept, -1 to reject, and 0 when the exp() test decides. */
+
+/* NumPy-table ziggurat, wedge of layer idx (1..255): rabs is the draw's
+ * 52-bit magnitude, at least ki_double[idx], and Y the wedge word. See
+ * zig_normal_slow() for the geometry and ZURAND_ZIG_GUARD. */
+static inline int zig_wedge_shortcut(int idx, uint64_t rabs, uint64_t Y) {
+    uint64_t L = (UINT64_C(1) << 52) - ki_double[idx];
+    uint64_t R = (UINT64_C(1) << 52) - rabs;
+    uint64_t YL;
+    (void)mulhilo64(Y, L, &YL);
+    int accept, reject;
+    if (idx > ZURAND_ZIG_INFLECTION) {
+        reject = YL > R + ZURAND_ZIG_GUARD;
+        accept = !reject && YL + zurand_zig_gap[idx] < R;
+    } else if (idx < ZURAND_ZIG_INFLECTION) {
+        accept = YL + ZURAND_ZIG_GUARD < R;
+        reject = !accept && YL > R + zurand_zig_gap[idx];
+    } else {
+        reject = YL > R + zurand_zig_gap_hi52;
+        accept = !reject && YL + zurand_zig_gap[idx] < R;
+    }
+    return accept ? 1 : reject ? -1 : 0;
+}
+
+/* McFarland, overhang j (1..ZURAND_MCF_LAYERS - 1), one attempt: u1 and
+ * u2 are 63-bit, and for the concave overhangs already ordered u1 <= u2.
+ * Convex overhangs (j > inflection) accept below the chord and reject far
+ * above it; concave ones accept far below it; the straddling one always
+ * asks exp(). See mcf_normal_edge(). */
+static inline int mcf_edge_shortcut(unsigned j, uint64_t u1, uint64_t u2) {
+    if (j > ZURAND_MCF_J_INFLECTION)
+        return u2 >= u1 ? 1 : u1 - u2 > ZURAND_MCF_E_CONVEX ? -1 : 0;
+    if (j < ZURAND_MCF_J_INFLECTION)
+        return u2 - u1 > ZURAND_MCF_E_CONCAVE ? 1 : 0;
+    return 0;
 }
 
 #define ZE_SUFFIX philox
@@ -1413,6 +1457,39 @@ SEXP C_rng_threads(SEXP threads_) {
     return Rf_ScalarInteger(prev);
 }
 
+/* The scaling of a uniform on [min, max]: x = min + span * u through
+ * affine_pass(), bit for bit as it has always been. When the bounds are more
+ * than DBL_MAX apart the span overflows and every x would be Inf; then the
+ * same pass runs on the halved bounds, followed by a doubling. Halving and
+ * doubling are exact, so x = 2 * (min/2 + (max/2 - min/2) * u) stays within
+ * [min, max]. Every uniform frontend -- eager, positional, lazy and the C
+ * API -- takes its scaling from here. */
+typedef struct {
+    double a, s;
+    int twice;
+} zurand_scaling;
+
+static zurand_scaling uniform_scaling(double min, double max) {
+    zurand_scaling t = {min, max - min, 0};
+    if (!isfinite(t.s)) {
+        t.a = ldexp(min, -1);
+        t.s = ldexp(max, -1) - ldexp(min, -1);
+        t.twice = 1;
+    }
+    return t;
+}
+
+/* affine_pass() plus the doubling, if any. The doubling is serial: it only
+ * serves bounds more than DBL_MAX apart. */
+static void scaling_pass(double *out, R_xlen_t total, zurand_scaling t,
+                         int nt) {
+    if (t.a != 0.0 || t.s != 1.0)
+        affine_pass(out, total, t.a, t.s, nt);
+    if (t.twice)
+        for (R_xlen_t i = 0; i < total; i++)
+            out[i] += out[i];
+}
+
 /* ---- .Call entry points: samplers ---- */
 
 SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_, SEXP offset_) {
@@ -1457,8 +1534,7 @@ SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_, SEXP offset_) {
             fill_range_key(eng, key_from_words(kw, nkey, col), out + n * col,
                            offset, n, ZURAND_DIST_UNIFORM, par_rows);
     }
-    if (min != 0.0 || span != 1.0)
-        affine_pass(out, total, min, span, nt);
+    scaling_pass(out, total, uniform_scaling(min, max), nt);
     UNPROTECT(1);
     return ans;
 }
@@ -1719,8 +1795,7 @@ static int api_fill_uniform(zurand_key k, size_t n, double min, double max,
         return ZURAND_OK;
     }
     fill_uniform_key((zurand_engine_t)k.engine, api_philox_key(k), out, nn, 0);
-    if (min != 0.0 || span != 1.0)
-        affine_pass(out, nn, min, span, 1);
+    scaling_pass(out, nn, uniform_scaling(min, max), 1);
     return ZURAND_OK;
 }
 
@@ -1786,19 +1861,23 @@ static int api_fill_bits64(zurand_key k, size_t n, uint64_t *out) {
 }
 
 /* A double sampler's arguments, checked once: `dist`, and the scaling
- * a + s * x (skipped when a = 0 and s = 1), or the constant a when s = 0.
- * Returns ZURAND_OK or ZURAND_EINVAL. */
+ * a + s * x (skipped when a = 0 and s = 1; doubled after when `twice`, see
+ * uniform_scaling()), or the constant a when s = 0. Returns ZURAND_OK or
+ * ZURAND_EINVAL. */
 typedef struct {
     int dist;
     double a, s;
+    int twice;
 } api_dist;
 
 static int api_uniform_args(double min, double max, api_dist *d) {
     if (!isfinite(min) || !isfinite(max) || min > max)
         return ZURAND_EINVAL;
+    zurand_scaling t = uniform_scaling(min, max);
     d->dist = ZURAND_DIST_UNIFORM;
-    d->a = min;
-    d->s = max - min;
+    d->a = t.a;
+    d->s = t.s;
+    d->twice = t.twice;
     return ZURAND_OK;
 }
 
@@ -1810,6 +1889,7 @@ static int api_normal_args(double mean, double sd, int method, api_dist *d) {
                                                 : ZURAND_DIST_NORMAL;
     d->a = mean;
     d->s = sd;
+    d->twice = 0;
     return ZURAND_OK;
 }
 
@@ -1817,8 +1897,8 @@ static void api_scale(double *x, R_xlen_t n, const api_dist *d) {
     if (d->s == 0.0) {
         for (R_xlen_t i = 0; i < n; i++)
             x[i] = d->a;
-    } else if (d->a != 0.0 || d->s != 1.0) {
-        affine_pass(x, n, d->a, d->s, 1);
+    } else {
+        scaling_pass(x, n, (zurand_scaling){d->a, d->s, d->twice}, 1);
     }
 }
 
@@ -1910,8 +1990,8 @@ static int api_stream(zurand_key k, uint64_t total, const api_dist *d,
             next_c++;
         }
         if (fill == chunk || (pos == total && fill > 0)) {
-            if (d->a != 0.0 || d->s != 1.0)
-                affine_pass(buf, (R_xlen_t)fill, d->a, d->s, 1);
+            scaling_pass(buf, (R_xlen_t)fill,
+                         (zurand_scaling){d->a, d->s, d->twice}, 1);
             if (fn(ctx, buf, fill, pos - fill))
                 return ZURAND_STOPPED;
             fill = 0;
@@ -1966,6 +2046,80 @@ static const zurand_api *zurand_api_get(void) {
 
 /* ---- registration ---- */
 
+/* ---- .Call entry points for tests: the edge shortcuts ----
+ *
+ * The shortcuts' decisions for draws a test constructs, and the tables a
+ * test needs to decide the same draws independently with exp(). Words
+ * arrive as two doubles holding their high and low 32 bits. Not exported. */
+
+static uint64_t word_from_halves(SEXP hi, SEXP lo, R_xlen_t i, int bits) {
+    double h = REAL(hi)[i], l = REAL(lo)[i];
+    double top = bits == 64 ? 4294967296.0 : ldexp(1.0, bits - 32);
+    if (!(h >= 0 && h < top && h == trunc(h) && l >= 0 && l < 4294967296.0 &&
+          l == trunc(l)))
+        Rf_error("word %.0f is outside %d bits", (double)i + 1, bits);
+    return ((uint64_t)h << 32) | (uint64_t)l;
+}
+
+/* method 0: ziggurat wedge of layer idx, a = rabs, b = Y;
+ * method 1: McFarland overhang j, a = u1, b = u2 (u1 <= u2 when concave). */
+SEXP C_zurand_shortcut(SEXP method_, SEXP layer_, SEXP a_hi, SEXP a_lo,
+                       SEXP b_hi, SEXP b_lo) {
+    int method = Rf_asInteger(method_);
+    R_xlen_t n = XLENGTH(layer_);
+    if (TYPEOF(layer_) != INTSXP || TYPEOF(a_hi) != REALSXP ||
+        TYPEOF(a_lo) != REALSXP || TYPEOF(b_hi) != REALSXP ||
+        TYPEOF(b_lo) != REALSXP || XLENGTH(a_hi) != n || XLENGTH(a_lo) != n ||
+        XLENGTH(b_hi) != n || XLENGTH(b_lo) != n)
+        Rf_error("layers must be integer and words double, all of one length");
+    SEXP ans = PROTECT(Rf_allocVector(INTSXP, n));
+    for (R_xlen_t i = 0; i < n; i++) {
+        int layer = INTEGER(layer_)[i];
+        if (method == 0) {
+            uint64_t rabs = word_from_halves(a_hi, a_lo, i, 52);
+            if (layer < 1 || layer > 255 || rabs < ki_double[layer])
+                Rf_error("draw %.0f is not in a ziggurat wedge", (double)i + 1);
+            INTEGER(ans)[i] = zig_wedge_shortcut(layer, rabs,
+                                                 word_from_halves(b_hi, b_lo, i, 64));
+        } else {
+            if (layer < 1 || layer > ZURAND_MCF_LAYERS)
+                Rf_error("draw %.0f is not in a McFarland overhang", (double)i + 1);
+            INTEGER(ans)[i] = mcf_edge_shortcut((unsigned)layer,
+                                                word_from_halves(a_hi, a_lo, i, 63),
+                                                word_from_halves(b_hi, b_lo, i, 63));
+        }
+    }
+    UNPROTECT(1);
+    return ans;
+}
+
+SEXP C_zurand_normal_tables(void) {
+    const char *names[] = {"ki", "wi", "fi", "zig_inflection",
+                           "mcf_x", "mcf_y", "mcf_inflection", ""};
+    SEXP ans = PROTECT(Rf_mkNamed(VECSXP, names));
+    SEXP ki = Rf_allocVector(REALSXP, 256);
+    SET_VECTOR_ELT(ans, 0, ki);
+    SEXP wi = Rf_allocVector(REALSXP, 256);
+    SET_VECTOR_ELT(ans, 1, wi);
+    SEXP fi = Rf_allocVector(REALSXP, 256);
+    SET_VECTOR_ELT(ans, 2, fi);
+    for (int i = 0; i < 256; i++) {
+        REAL(ki)[i] = (double)ki_double[i];   /* < 2^52: exact */
+        REAL(wi)[i] = wi_double[i];
+        REAL(fi)[i] = fi_double[i];
+    }
+    SET_VECTOR_ELT(ans, 3, Rf_ScalarInteger(ZURAND_ZIG_INFLECTION));
+    SEXP mx = Rf_allocVector(REALSXP, ZURAND_MCF_LAYERS + 1);
+    SET_VECTOR_ELT(ans, 4, mx);
+    SEXP my = Rf_allocVector(REALSXP, ZURAND_MCF_LAYERS + 1);
+    SET_VECTOR_ELT(ans, 5, my);
+    memcpy(REAL(mx), zurand_mcf_x, (ZURAND_MCF_LAYERS + 1) * sizeof(double));
+    memcpy(REAL(my), zurand_mcf_y, (ZURAND_MCF_LAYERS + 1) * sizeof(double));
+    SET_VECTOR_ELT(ans, 6, Rf_ScalarInteger(ZURAND_MCF_J_INFLECTION));
+    UNPROTECT(1);
+    return ans;
+}
+
 static const R_CallMethodDef CallEntries[] = {
     {"C_rng_key",        (DL_FUNC) &C_rng_key,        3},
     {"C_rng_key_from_r", (DL_FUNC) &C_rng_key_from_r, 2},
@@ -1980,6 +2134,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"C_rng_bits",       (DL_FUNC) &C_rng_bits,       3},
     {"C_rng_threads",    (DL_FUNC) &C_rng_threads,    1},
     {"C_rng_simd",       (DL_FUNC) &C_rng_simd,       1},
+    {"C_zurand_shortcut", (DL_FUNC) &C_zurand_shortcut, 6},
+    {"C_zurand_normal_tables", (DL_FUNC) &C_zurand_normal_tables, 0},
     {NULL, NULL, 0}
 };
 
