@@ -129,6 +129,39 @@ rng_bits(key, 3L, bits = 64L)
 #> [1] "43c5f4cd83802dbd" "78da9ead113fe5a4" "299a3bb52451dd67"
 ```
 
+## Lazy vectors
+
+Because every value is a function of the key and its position, a vector's
+values need not exist before they are read:
+
+```r
+key <- rng_key(42L)
+x <- rng_lazy_normal(key, 1e9)     # instant; no values stored
+x[c(1, 5e8, 1e9)]                  # computes three values
+sum(x)                             # a billion normals, in constant memory
+identical(rng_lazy_normal(key, 1e6)[], rng_normal(key, 1e6))   # TRUE
+```
+
+`sum(x)` above peaks at the memory R itself uses (71 MB on an M1), where
+the materialised vector would need 7.6 GB, and `saveRDS(x)` writes a few
+hundred bytes. Two costs, plainly:
+
+- Anything that needs the vector as ordinary memory -- most arithmetic
+  (`x * 2`), modifying it, C code asking for its data pointer --
+  materialises all of it once, with the usual parallel fill; after that it
+  is an ordinary vector in memory.
+- Full scans are slower than on a generated vector: `sum()` and `mean()`
+  measured 1.6-2.7x slower than `rng_normal()` then `sum()`, because R
+  reads lazy vectors 512 values at a time on one thread. Reading part of
+  one is where it wins: `x[1:1e6]` of a lazy 1e8 vector took a tenth of the
+  time of generating the 1e8.
+
+For scattered reads (`x[sample(n, k)]`, random indices in a loop), key the
+vector with `rng_key(seed, engine = "philox4x64")`: Philox computes any
+single value directly, 7-11x faster per read (i5, M1) than the default
+`xoshiro256pp`, which reaches it through its 512-value block. For scans and
+sequential loops keep the default.
+
 ## Engines
 
 A key records its engine, chosen when it is created:
