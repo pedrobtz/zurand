@@ -22,12 +22,16 @@ across platforms, thread counts, SIMD paths and call order.
 ## Functions
 
 * `rng_key()`, `rng_key_from_r()` and `rng_fold()` create and derive keys.
+  `rng_fold()` folds the storage type and values of plain vectors; classed
+  data such as factors and dates is an error, since a factor would fold as
+  codes that change with its levels (#60).
 * A key vector behaves as a vector of opaque keys: `[`, `[[`, `c()`,
   `rev()`, `rep()`, `unique()`, `duplicated()` and `as.list()` work key by
   key, so `lapply(keys, f)` and parallel maps hand each task one key. Keys
   are immutable: assigning into a key vector is an error, as is an index
   that is infinite or beyond the vector, which R would otherwise turn into
-  a key of missing words shared by every vector (#57).
+  a key of missing words shared by every vector (#57). A key vector takes
+  one index: `keys[1, 2]` and `keys[, 1]` are an error (#60).
 * `rng_uniform()`, `rng_normal()`, `rng_integer()` and `rng_bits()` sample;
   with a vector of keys they return one column per key.
 * `rng_uniform()` and `rng_normal()` take `offset`: `rng_normal(key, n,
@@ -45,7 +49,9 @@ across platforms, thread counts, SIMD paths and call order.
   Arithmetic and C code that asks for the data pointer fill the vector
   once. For scattered reads, key it with the `philox4x64` engine. Scans
   over a lazy vector respond to an interrupt, so `sum()` over 1e12 lazy
-  values can be stopped (#57).
+  values can be stopped (#57). Each lazy vector's cache is at most one
+  engine chunk and never longer than the vector, so a short one costs
+  bytes, not 40 KB (#60).
 * `rng_normal(method = "mcfarland")` samples with McFarland's (2016)
   modified ziggurat, whose common case needs no table comparison. Large
   fills run 1.15-1.25x faster than the default method on x86_64 and
@@ -89,3 +95,5 @@ across platforms, thread counts, SIMD paths and call order.
   function on each chunk in order, so a long simulation consumes its
   numbers from cache without the whole stream ever being in memory. Either
   way the values are those of `rng_uniform()` and `rng_normal()`.
+* Every entry point reports a bad argument, including a NULL output
+  buffer, as `ZURAND_EINVAL` rather than crashing the session (#60).

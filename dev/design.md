@@ -29,8 +29,9 @@ What zurand competes on, in order:
    uniform and 1.9-2.7x RcppZiggurat on Gaussian, and 4 threads on Linux
    give 1370 and 822 M/s, bit-identical to one thread. It is not the
    fastest single-threaded generator everywhere: randompack's 8-lane SIMD
-   xoshiro256++ ties it on x86_64 and is about 2x on Apple Silicon, where
-   zurand has no vector path (2026-09-26 CI benchmark; roadmap C4).
+   xoshiro256++ ties it on x86_64 and was about 2x on Apple Silicon
+   before zurand's NEON path landed (2026-09-26 CI benchmark; roadmap C4,
+   done in #35/#38).
 3. **A small, stable surface.** Uniform, normal, integer, bits, and an
    exponential. Fourteen distributions is randompack's niche, not this one.
 
