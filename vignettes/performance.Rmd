@@ -164,7 +164,7 @@ the keys; with one key they split its positions.
 
 On macOS R does not set OpenMP compiler flags, so the package's
 `configure` script tries the OpenMP runtime that R itself ships
-(`libomp.dylib` in `R.home("lib")`, see https://mac.r-project.org/openmp),
+(`libomp.dylib` in `R.home("lib")`, see https://mac.r-project.org/openmp/),
 the same route data.table's CRAN binaries take. It needs the OpenMP headers
 at build time, which CRAN's build machines have; without them the build is
 single-threaded, and `rng_threads()` reports 1.

@@ -352,7 +352,7 @@ script links the OpenMP runtime that R itself ships (`libomp.dylib` in
 `R.home("lib")`), as CRAN's macOS binaries of data.table do. That needs the
 OpenMP headers when the package is built: CRAN's build machines have them,
 and for a source build on your own Mac they come from
-<https://mac.r-project.org/openmp>. Without them the build is
+<https://mac.r-project.org/openmp/>. Without them the build is
 single-threaded and `rng_threads()` reports 1.
 
 ## License

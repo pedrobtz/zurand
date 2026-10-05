@@ -1,7 +1,7 @@
 # OpenMP on macOS the way CRAN builds it. R leaves SHLIB_OPENMP_CFLAGS empty
 # on macOS; ./configure links the libomp R ships in $(R_HOME)/lib when the
 # headers are present, which CRAN's build machines provide as
-# https://mac.r-project.org/openmp instructs. This job installs those
+# https://mac.r-project.org/openmp/ instructs. This job installs those
 # headers the same way, asserts that configure took the OpenMP path, runs
 # R CMD check with threads on, and prints the speed-up.
 #
