@@ -98,9 +98,12 @@ test_that("C API reports invalid arguments as return codes", {
   # fill_normal_method(): methods 2 and -1, sd < 0, unknown engine.
   # Version 3: positional fills (min > max, method, start + n overflowing)
   # and streams (chunk 0, no buffer, no consumer, engine, total 0 is fine).
+  # Then a NULL output buffer for every fill and fold_int(), which used to
+  # crash the session (#60), and a NULL buffer with n = 0, which is fine.
   expect_identical(ns$client_errors(rng_key(1L)),
                    c(3L, 1L, 1L, 1L, 1L, 1L, 2L, 2L, 0L, 1L, 1L, 1L, 2L,
-                     1L, 1L, 1L, 1L, 1L, 1L, 2L, 0L))
+                     1L, 1L, 1L, 1L, 1L, 1L, 2L, 0L,
+                     1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, 0L))
 })
 
 test_that("C API positional fills equal rng_*(offset =), from worker threads", {
