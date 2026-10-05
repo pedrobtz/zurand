@@ -35,9 +35,12 @@
 #' `[[`, `c()`, `rev()`, `rep()`, `unique()`, `duplicated()` and
 #' `as.list()` work key by key and keep the engine and stream version, so
 #' `lapply(keys, f)`, `Map()` and the parallel map functions hand each task
-#' one key. Keys are immutable: assigning into a key vector is an error, and
-#' so is sorting one, since keys have no order; compare keys with
-#' [identical()].
+#' one key. A key vector takes one index, as a vector does: `keys[1, 2]`
+#' and `keys[, 1]` are an error, not a view of the words inside. `c()`
+#' dispatches on its first argument, so combine key vectors with a key
+#' first: `c(NULL, key)` returns the bare integer words, not keys. Keys are
+#' immutable: assigning into a key vector is an error, and so is sorting
+#' one, since keys have no order; compare keys with [identical()].
 #'
 #' @section Stream version:
 #' A key also records the version of the stream definition it was made
@@ -97,12 +100,21 @@ rng_key_from_r <- function(n = 1L,
 #'   values must be whole numbers; integer and double vectors holding the
 #'   same values (`1L` and `1`) derive the same key. All other type
 #'   distinctions matter: `rng_fold(key, "1")` and `rng_fold(key, 1)` differ.
+#'   Only the storage type and the values are folded, so classed objects
+#'   such as factors and dates are an error: a factor would fold as its
+#'   level codes, whose meaning changes with the level set. Fold
+#'   `as.character(f)` or `unclass(d)` instead. Names and dimensions are
+#'   ignored: a matrix folds as its values in column order.
 #' @return An `rng_key` vector with the same length as `key`.
 #' @export
 #' @examples
 #' key <- rng_key(42L)
 #' layer_key <- rng_fold(key, "layer1")
 rng_fold <- function(key, data) {
+  if (is.object(data)) {
+    stop("`data` must be a plain vector, not a <", class(data)[[1L]],
+         ">; fold as.character() or unclass() of it instead", call. = FALSE)
+  }
   .Call(C_rng_fold, key, data)
 }
 
@@ -378,6 +390,9 @@ length.rng_key <- function(x) {
 #' @param drop Ignored; key subsetting always preserves the `rng_key` class.
 #' @export
 `[.rng_key` <- function(x, i, ..., drop = FALSE) {
+  if (...length() > 0L) {
+    stop("a key vector takes one index, `keys[i]`", call. = FALSE)
+  }
   words <- unclass(x)
   if (missing(i)) i <- seq_len(nrow(words))
   check_key_index(i, nrow(words))

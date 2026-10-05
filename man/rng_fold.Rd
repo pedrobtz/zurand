@@ -12,7 +12,12 @@ rng_fold(key, data)
 \item{data}{A character, integer, double, logical or raw vector. Numeric
 values must be whole numbers; integer and double vectors holding the
 same values (\code{1L} and \code{1}) derive the same key. All other type
-distinctions matter: \code{rng_fold(key, "1")} and \code{rng_fold(key, 1)} differ.}
+distinctions matter: \code{rng_fold(key, "1")} and \code{rng_fold(key, 1)} differ.
+Only the storage type and the values are folded, so classed objects
+such as factors and dates are an error: a factor would fold as its
+level codes, whose meaning changes with the level set. Fold
+\code{as.character(f)} or \code{unclass(d)} instead. Names and dimensions are
+ignored: a matrix folds as its values in column order.}
 }
 \value{
 An \code{rng_key} vector with the same length as \code{key}.

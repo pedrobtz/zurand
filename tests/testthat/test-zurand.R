@@ -122,6 +122,30 @@ test_that("rng_fold() folds whole-number doubles and integers identically", {
   expect_false(identical(rng_fold(key, 1), rng_fold(key, as.raw(1))))
 })
 
+test_that("rng_fold() rejects classed data instead of folding its codes", {
+  # #60: a factor folded as its level codes, so the key changed with the
+  # level set; a Date folded as its day count.
+  key <- rng_key(3L)
+  expect_error(rng_fold(key, factor(c("b", "a"))), "plain vector, not a <factor>")
+  expect_error(rng_fold(key, as.Date("2026-01-01")), "not a <Date>")
+  expect_error(rng_fold(key, rng_key(1L)), "not a <rng_key>")
+  expect_identical(rng_fold(key, as.character(factor(c("b", "a")))),
+                   rng_fold(key, c("b", "a")))
+  # Names and dimensions are ignored, as documented.
+  expect_identical(rng_fold(key, matrix(1:4, 2)), rng_fold(key, 1:4))
+  expect_identical(rng_fold(key, c(a = 1L)), rng_fold(key, 1L))
+})
+
+test_that("a key vector takes one index", {
+  # #60: a second subscript was silently dropped into `...`.
+  keys <- rng_key(1L, n = 3L)
+  expect_error(keys[1, 2], "one index")
+  expect_error(keys[, 1], "one index")
+  expect_error(keys[1, ], "one index")
+  expect_identical(keys[], keys)
+  expect_identical(keys[2, drop = TRUE], keys[2])
+})
+
 test_that("samplers are pure functions of key and arguments", {
   key <- rng_key(42L)
   keys <- rng_key(42L, n = 3L)
