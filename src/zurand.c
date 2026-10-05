@@ -33,17 +33,9 @@
 #include "Random123/philox.h"
 #include "Random123/threefry.h"
 
-/* NumPy's ziggurat tables (BSD 3-clause, see src/numpyzig/LICENSE). The
- * header is vendored verbatim and also carries float/exponential tables
- * this package does not use. */
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-const-variable"
-#endif
+/* NumPy's ziggurat tables (BSD 3-clause, see src/numpyzig/LICENSE),
+ * trimmed to the normal-double tables this package uses. */
 #include "numpyzig/ziggurat_constants.h"
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
 /* Fixed-point brackets of the wedge test, generated from the NumPy
  * tables by tools/generate-zig-bounds.R: most wedge decisions need one
  * wide multiply instead of exp(). */
