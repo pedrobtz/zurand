@@ -45,7 +45,9 @@ length \code{n} whose elements are computed only when read. Every value is a
 pure function of the key and its position, so element \code{i} is exactly
 element \code{i} of \code{rng_uniform(key, n, ...)} or \code{rng_normal(key, n, ...)},
 and \code{identical(x[], rng_normal(key, n))} holds. Creating one is instant
-and takes no memory for the values, whatever \code{n} is.
+and takes no memory for the values, whatever \code{n} is: each lazy vector
+holds its key, its arguments and a cache of one engine chunk, which is
+\code{min(n, 5120)} doubles, so at most about 40 KB.
 }
 \details{
 Reading. \code{x[i]}, \code{x[idx]}, \code{x[a:b]}, \code{sum(x)}, \code{mean(x)} and loops over

@@ -69,6 +69,19 @@ test_that("reads are right whatever the cache holds", {
   }
 })
 
+test_that("a short lazy vector carries a cache no longer than itself", {
+  # #60: every lazy vector held a 5120-double (40 KB) cache, so 10,000 of
+  # length 10 took about 400 MB. Now the cache is min(n, chunk) values.
+  k <- rng_key(1L)
+  used <- function() sum(gc(full = TRUE)[, 2L]) # Mb, Ncells + Vcells
+  m0 <- used()
+  xs <- lapply(1:2000, function(i) rng_lazy_normal(k, 10L))
+  per_vector_kb <- (used() - m0) * 1024 / length(xs)
+  expect_lt(per_vector_kb, 4)
+  expect_identical(xs[[2000]][], rng_normal(k, 10L))
+  expect_identical(rng_lazy_uniform(k, 0L)[], numeric())
+})
+
 test_that("long lazy vectors take double indices past 2^31", {
   skip_if(.Machine$sizeof.pointer < 8, "no long vectors")
   for (engine in c("xoshiro256pp", "philox4x64")) {
@@ -148,6 +161,9 @@ test_that("a written lazy vector no longer promises to have no NA", {
 })
 
 test_that("real indices are range-checked before conversion", {
+  # Base R itself errors on 1e300 as an index of a plain vector on 32-bit
+  # builds, so the reference has nothing to compare against there.
+  skip_if(.Machine$sizeof.pointer < 8)
   x <- rng_lazy_normal(rng_key(1L), 10L)
   ref <- rng_normal(rng_key(1L), 10L)
   idx <- c(0.5, 1.5, 10.9, 11, 1e300, Inf, NA)

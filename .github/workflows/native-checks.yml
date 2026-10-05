@@ -35,7 +35,8 @@ jobs:
   analyzers:
     uses: pedrobtz/r-actions/.github/workflows/analyzers.yml@v1
     with:
-      # Random123 and NumPy's ziggurat tables are vendored verbatim and are
+      # Random123 and NumPy's ziggurat tables are vendored (verbatim; NumPy's
+      # trimmed to the tables used) and are
       # not ours to fix upstream. Excluded findings still appear in the job
       # summary under their own heading.
       exclude: |

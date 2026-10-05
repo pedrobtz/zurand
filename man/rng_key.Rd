@@ -110,9 +110,12 @@ A key vector behaves like a vector of opaque keys: \code{length()}, \code{[},
 \code{[[}, \code{c()}, \code{rev()}, \code{rep()}, \code{unique()}, \code{duplicated()} and
 \code{as.list()} work key by key and keep the engine and stream version, so
 \code{lapply(keys, f)}, \code{Map()} and the parallel map functions hand each task
-one key. Keys are immutable: assigning into a key vector is an error, and
-so is sorting one, since keys have no order; compare keys with
-\code{\link[=identical]{identical()}}.
+one key. A key vector takes one index, as a vector does: \code{keys[1, 2]}
+and \code{keys[, 1]} are an error, not a view of the words inside. \code{c()}
+dispatches on its first argument, so combine key vectors with a key
+first: \code{c(NULL, key)} returns the bare integer words, not keys. Keys are
+immutable: assigning into a key vector is an error, and so is sorting
+one, since keys have no order; compare keys with \code{\link[=identical]{identical()}}.
 }
 
 \section{Stream version}{

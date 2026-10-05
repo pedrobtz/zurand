@@ -230,7 +230,7 @@ SEXP client_errors(SEXP key) {
     zurand_key k, bad;
     double d[4]; int iv[4];
     if (zr->key_get(key, 0, &k) != ZURAND_OK) Rf_error("key_get failed");
-    SEXP ans = PROTECT(Rf_allocVector(INTSXP, 21));
+    SEXP ans = PROTECT(Rf_allocVector(INTSXP, 30));
     int *r = INTEGER(ans);
     r[0] = zr->version;
     r[1] = zr->key_get(key, 5, &bad);                         /* out of range */
@@ -257,11 +257,33 @@ SEXP client_errors(SEXP key) {
     r[18] = zr->stream_uniform(k, 10, 0.0, 1.0, d, 4, NULL, NULL);       /* no fn */
     r[19] = zr->stream_uniform(bad, 10, 0.0, 1.0, d, 4, never, NULL);    /* engine */
     r[20] = zr->stream_normal(k, 0, 0.0, 1.0, 1, d, 4, never, NULL);     /* total 0 */
+    /* NULL outputs (#60): EINVAL, not a segfault; fine when n = 0 */
+    r[21] = zr->fill_uniform(k, 1, 0.0, 1.0, NULL);
+    r[22] = zr->fill_uniform(k, 5, 2.0, 2.0, NULL);                      /* constant */
+    r[23] = zr->fill_normal_method(k, 1, 0.0, 1.0, 1, NULL);
+    r[24] = zr->fill_integer(k, 1, 0, 5, NULL);
+    r[25] = zr->fill_bits64(k, 1, NULL);
+    r[26] = zr->fill_normal_at(k, 7, 1, 0.0, 1.0, 0, NULL);
+    r[27] = zr->fill_uniform_at(k, 7, 1, 0.0, 1.0, NULL);
+    r[28] = zr->fold_int(k, 1, NULL);
+    r[29] = zr->fill_uniform(k, 0, 0.0, 1.0, NULL);                      /* n = 0 */
     UNPROTECT(1);
     return ans;
 }
 
+/* The team size of an OpenMP parallel region in this fixture: 1 when it
+ * was built without OpenMP, so its "worker thread" tests ran serially. */
+SEXP client_threads(void) {
+    int seen = 0;
+#ifdef CLIENT_OPENMP
+#pragma omp parallel reduction(+:seen)
+#endif
+    seen += 1;
+    return Rf_ScalarInteger(seen);
+}
+
 static const R_CallMethodDef entries[] = {
+    {"C_client_threads", (DL_FUNC) &client_threads, 0},
     {"C_client_fill",   (DL_FUNC) &client_fill,   5},
     {"C_client_fold",   (DL_FUNC) &client_fold,   2},
     {"C_client_errors", (DL_FUNC) &client_errors, 1},

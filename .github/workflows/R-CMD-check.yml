@@ -22,3 +22,7 @@ jobs:
          {"os": "ubuntu-latest", "r": "release"},
          {"os": "ubuntu-latest", "r": "oldrel-1"},
          {"os": "ubuntu-24.04-arm", "r": "release"}]
+      # CRAN's NOSUGGESTS flavour: the package without knitr, processx,
+      # rmarkdown or testthat. tests/testthat.R guards library(testthat) and
+      # the one processx test is skipped without it.
+      nosuggests: true

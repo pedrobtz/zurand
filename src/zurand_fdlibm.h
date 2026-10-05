@@ -10,8 +10,8 @@
  * gives the same bits on every platform that evaluates them as written --
  * which is also why Java's StrictMath is fdlibm.
  *
- * DERIVED, NOT VERBATIM. Unlike src/Random123 and src/numpyzig, this file
- * is edited, because the originals are not safe to compile as they are:
+ * DERIVED, NOT VERBATIM. Unlike src/Random123 and src/numpyzig (the
+ * latter only trimmed to the tables used), this file is edited, because the originals are not safe to compile as they are:
  *
  *  - every product that feeds an addition or subtraction goes through
  *    zurand_rounded(), because a fused multiply-add changes the result and

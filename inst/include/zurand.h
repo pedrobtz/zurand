@@ -61,9 +61,11 @@ extern "C" {
 #define ZURAND_NORMAL_ZIGGURAT  0
 #define ZURAND_NORMAL_MCFARLAND 1
 
-/* Return codes. */
+/* Return codes. Every entry point checks its arguments and reports a bad
+ * one with a code, never an R error: a NULL output buffer with n > 0 (or a
+ * NULL key output) is ZURAND_EINVAL, like any other invalid argument. */
 #define ZURAND_OK      0
-#define ZURAND_EINVAL  1   /* an argument is out of range, NaN or infinite */
+#define ZURAND_EINVAL  1   /* an argument is out of range, NaN, infinite or NULL */
 #define ZURAND_EKEY    2   /* unknown engine, or a stream this zurand lacks */
 #define ZURAND_STOPPED 3   /* a stream's consumer returned nonzero */
 

@@ -33,17 +33,9 @@
 #include "Random123/philox.h"
 #include "Random123/threefry.h"
 
-/* NumPy's ziggurat tables (BSD 3-clause, see src/numpyzig/LICENSE). The
- * header is vendored verbatim and also carries float/exponential tables
- * this package does not use. */
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-const-variable"
-#endif
+/* NumPy's ziggurat tables (BSD 3-clause, see src/numpyzig/LICENSE),
+ * trimmed to the normal-double tables this package uses. */
 #include "numpyzig/ziggurat_constants.h"
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
 /* Fixed-point brackets of the wedge test, generated from the NumPy
  * tables by tools/generate-zig-bounds.R: most wedge decisions need one
  * wide multiply instead of exp(). */
@@ -1748,7 +1740,7 @@ static philox4x64_key_t api_philox_key(zurand_key k) {
 
 static int api_key_get(SEXP keys, R_xlen_t i, zurand_key *out) {
     R_xlen_t nkey = key_count(keys);          /* R errors if not a key vector */
-    if (i < 0 || i >= nkey)
+    if (i < 0 || i >= nkey || out == NULL)
         return ZURAND_EINVAL;
     philox4x64_key_t p = key_from_words(INTEGER(keys), nkey, i);
     out->k0 = p.v[0];
@@ -1762,6 +1754,8 @@ static int api_key_get(SEXP keys, R_xlen_t i, zurand_key *out) {
 static int api_fold_int(zurand_key k, int64_t data, zurand_key *out) {
     if (!api_key_ok(k))
         return ZURAND_EKEY;
+    if (out == NULL)
+        return ZURAND_EINVAL;
     uint64_t h = UINT64_C(1469598103934665603);
     hash_byte(&h, 2);
     hash_u64(&h, 1);
@@ -1785,7 +1779,7 @@ static int api_fill_uniform(zurand_key k, size_t n, double min, double max,
     if (!api_key_ok(k))
         return ZURAND_EKEY;
     if (!isfinite(min) || !isfinite(max) || min > max ||
-        n > (size_t)R_XLEN_T_MAX)
+        n > (size_t)R_XLEN_T_MAX || (out == NULL && n > 0))
         return ZURAND_EINVAL;
     R_xlen_t nn = (R_xlen_t)n;
     double span = max - min;
@@ -1804,7 +1798,7 @@ static int api_fill_normal_method(zurand_key k, size_t n, double mean,
     if (!api_key_ok(k))
         return ZURAND_EKEY;
     if (!isfinite(mean) || !isfinite(sd) || sd < 0 ||
-        n > (size_t)R_XLEN_T_MAX ||
+        n > (size_t)R_XLEN_T_MAX || (out == NULL && n > 0) ||
         (method != ZURAND_NORMAL_ZIGGURAT && method != ZURAND_NORMAL_MCFARLAND))
         return ZURAND_EINVAL;
     R_xlen_t nn = (R_xlen_t)n;
@@ -1830,7 +1824,7 @@ static int api_fill_integer(zurand_key k, size_t n, int min, int max,
     if (!api_key_ok(k))
         return ZURAND_EKEY;
     if (min == NA_INTEGER || max == NA_INTEGER || min > max ||
-        n > (size_t)R_XLEN_T_MAX)
+        n > (size_t)R_XLEN_T_MAX || (out == NULL && n > 0))
         return ZURAND_EINVAL;
     uint32_t range = (uint32_t)((int64_t)max - (int64_t)min + 1);
     uint32_t threshold = (uint32_t)((UINT64_C(0x100000000) - range) % range);
@@ -1842,7 +1836,7 @@ static int api_fill_integer(zurand_key k, size_t n, int min, int max,
 static int api_fill_bits64(zurand_key k, size_t n, uint64_t *out) {
     if (!api_key_ok(k))
         return ZURAND_EKEY;
-    if (n > (size_t)R_XLEN_T_MAX)
+    if (n > (size_t)R_XLEN_T_MAX || (out == NULL && n > 0))
         return ZURAND_EINVAL;
     zurand_engine_t eng = (zurand_engine_t)k.engine;
     philox4x64_key_t kp = api_philox_key(k);
@@ -1904,7 +1898,8 @@ static void api_scale(double *x, R_xlen_t n, const api_dist *d) {
 
 static int api_fill_at(zurand_key k, uint64_t start, size_t n,
                        const api_dist *d, double *out) {
-    if (n > (size_t)R_XLEN_T_MAX || start > UINT64_MAX - (uint64_t)n)
+    if (n > (size_t)R_XLEN_T_MAX || start > UINT64_MAX - (uint64_t)n ||
+        (out == NULL && n > 0))
         return ZURAND_EINVAL;
     if (d->s != 0.0)
         fill_range_key((zurand_engine_t)k.engine, api_philox_key(k), out,

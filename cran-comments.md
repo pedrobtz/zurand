@@ -4,21 +4,10 @@ This is a first submission.
 
 ## R CMD check results
 
-0 errors | 0 warnings | 2 notes
+0 errors | 0 warnings | 1 note
 
 * checking CRAN incoming feasibility ... NOTE
   New submission
-
-* checking pragmas in C/C++ headers and code ... NOTE
-  File which contains pragma(s) suppressing diagnostics: 'src/zurand.c'
-
-  The pragma is `#pragma GCC diagnostic ignored "-Wunused-const-variable"`,
-  pushed and popped around one `#include` of NumPy's ziggurat constant
-  tables (src/numpyzig/ziggurat_constants.h, BSD 3-clause, credited in
-  inst/COPYRIGHTS). The header is vendored verbatim and defines tables for
-  several distributions, of which the package uses the normal ones; the
-  pragma keeps the unused tables from producing warnings without editing
-  the vendored file. No other diagnostic is suppressed.
 
 ## Notes for the reviewer
 
@@ -39,7 +28,8 @@ This is a first submission.
   depend on the platform's libm.
 * The package bundles three third-party components, all credited as `cph`
   in Authors@R and described in inst/COPYRIGHTS: Random123 (D. E. Shaw
-  Research), NumPy's ziggurat tables (NumPy Developers) and fdlibm's exp
+  Research), NumPy's ziggurat tables (NumPy Developers; the header is
+  trimmed to the normal-double tables the package uses) and fdlibm's exp
   and log1p (Sun Microsystems).
 
 ## Test environments

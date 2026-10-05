@@ -7,7 +7,7 @@
 # On macOS R leaves SHLIB_OPENMP_CFLAGS empty, because Apple's clang has
 # OpenMP support but no runtime. R itself ships the matching runtime,
 # libomp.dylib in $(R_HOME)/lib, and CRAN's build machines add the headers
-# (https://mac.r-project.org/openmp). So try to compile and link a program
+# (https://mac.r-project.org/openmp/). So try to compile and link a program
 # that needs both _OPENMP and <omp.h>, with -Xclang -fopenmp and -lomp; if
 # it builds, use those flags, otherwise fall back to the serial build.
 # Same approach as data.table's configure. The values never depend on the
@@ -39,7 +39,7 @@ CEOF
     OPENMP_CFLAGS="-Xclang -fopenmp"
     OPENMP_LIBS="-lomp"
   else
-    echo "no (building without OpenMP; see https://mac.r-project.org/openmp)"
+    echo "no (building without OpenMP; see https://mac.r-project.org/openmp/)"
   fi
   rm -rf "$tmp"
 fi

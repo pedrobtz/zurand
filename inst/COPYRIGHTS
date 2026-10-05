@@ -3,8 +3,10 @@ Pedro Baltazar as copyright holder (see the LICENSE file).
 
 It bundles the following third-party components, which carry their own
 copyright and license terms. Random123 and the NumPy tables are BSD
-3-clause licensed and redistributed unmodified; the fdlibm functions carry
-Sun's permissive notice and are modified, as described below.
+3-clause licensed; Random123 is redistributed unmodified, and the NumPy
+header is trimmed to the normal-double tables but otherwise unmodified.
+The fdlibm functions carry Sun's permissive notice and are modified, as
+described below.
 
 
 -------------------------------------------------------------------------
@@ -44,7 +46,11 @@ Full text:  src/numpyzig/LICENSE
 Source:     https://github.com/numpy/numpy
 
 Provides the lookup tables and layer layout for the ziggurat normal
-sampler in rng_normal(). Only the normal-double tables are used.
+sampler in rng_normal(). The header is trimmed to the normal-double tables
+(ki_double, wi_double, fi_double, ziggurat_nor_r, ziggurat_nor_inv_r); the
+float and exponential tables upstream also defines are removed, and what
+is kept is otherwise unmodified. A comment at the top of the file records
+the source, copyright and the trim.
 
 
 -------------------------------------------------------------------------
