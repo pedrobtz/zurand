@@ -24,3 +24,4 @@ client_stream_par <- function(keys, total, chunk, what, a, b,
   .Call(C_client_stream_par, keys, as.integer(total), as.integer(chunk),
         dist_code(what), as.double(a), as.double(b), method_code(method))
 }
+client_threads <- function() .Call(C_client_threads)

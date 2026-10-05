@@ -18,13 +18,36 @@ install_client <- function() {
   inc <- system.file("include", package = "zurand")
   if (!nzchar(inc) || !file.exists(file.path(inc, "zurand.h")))
     stop("zurand.h not found under system.file(\"include\", package = \"zurand\")")
+  # The OpenMP flags zurand's own configure chooses: R's SHLIB_OPENMP_CFLAGS,
+  # or on macOS, where R leaves that empty, -Xclang -fopenmp -lomp when they
+  # build (#60). Otherwise the fixture's loops would run on the main thread
+  # on macOS even where zurand itself is threaded.
+  flags <- list(c("$(SHLIB_OPENMP_CFLAGS)", "$(SHLIB_OPENMP_CFLAGS)"))
+  if (Sys.info()[["sysname"]] == "Darwin" && !nzchar(r_config("SHLIB_OPENMP_CFLAGS")))
+    flags <- c(list(c("-Xclang -fopenmp", "-lomp")), flags)
+  for (i in seq_along(flags)) {
+    lib <- try_install_client(inc, flags[[i]][1], flags[[i]][2])
+    if (is.character(lib)) return(lib)
+  }
+  stop("building the C API fixture failed:\n", paste(attr(lib, "log"), collapse = "\n"))
+}
+
+r_config <- function(var) {
+  out <- suppressWarnings(system2(file.path(R.home("bin"), "R"),
+                                  c("CMD", "config", var),
+                                  stdout = TRUE, stderr = TRUE))
+  trimws(paste(out, collapse = ""))
+}
+
+# The library path on success, otherwise FALSE with the build log attached.
+try_install_client <- function(inc, cflags, libs) {
   src <- file.path(tempfile("zurandclient-src"), "zurandclient")
   dir.create(src, recursive = TRUE)
   file.copy(list.files(test_path("zurandclient"), full.names = TRUE), src,
             recursive = TRUE)
   writeLines(c(sprintf('PKG_CPPFLAGS = -I"%s"', normalizePath(inc, "/")),
-               "PKG_CFLAGS = $(SHLIB_OPENMP_CFLAGS)",
-               "PKG_LIBS = $(SHLIB_OPENMP_CFLAGS)"),
+               paste("PKG_CFLAGS =", cflags),
+               paste("PKG_LIBS =", libs)),
              file.path(src, "src", "Makevars"))
   lib <- tempfile("zurandclient-lib")
   dir.create(lib)
@@ -34,9 +57,18 @@ install_client <- function() {
       paste0("--library=", shQuote(lib)), shQuote(src)),
     stdout = TRUE, stderr = TRUE))
   if (!is.null(attr(out, "status")) && attr(out, "status") != 0)
-    stop("building the C API fixture failed:\n", paste(out, collapse = "\n"))
+    return(structure(FALSE, log = out))
   lib
 }
+
+test_that("the fixture is threaded wherever zurand is", {
+  skip_on_cran()
+  ns <- client()
+  # zurand reports one thread when it was built without OpenMP; then the
+  # fixture is serial too and there is nothing to compare (#60).
+  skip_if(rng_threads() < 2L, "zurand was built without OpenMP")
+  expect_gt(ns$client_threads(), 1L)
+})
 
 test_that("C API fills equal the R samplers, called from worker threads", {
   skip_on_cran()
