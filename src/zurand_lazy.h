@@ -9,7 +9,8 @@
  * State. data1 is list(key, meta, st): the rng_key (for serialisation and
  * printing), meta = c(n, dist, a, s), with a fifth element 1 when the
  * scaling doubles (uniform_scaling()), and st, a raw vector holding a
- * lazy_state -- the decoded key, the scaling, and a one-chunk cache.
+ * lazy_state -- the decoded key, the scaling, and a one-chunk cache of
+ * min(n, chunk) values.
  * data2 is the materialised vector once something has asked for the data
  * pointer, R_NilValue until then.
  *
@@ -50,7 +51,9 @@ typedef struct {
     R_xlen_t clen;
     R_xlen_t last;             /* the last position read one at a time */
     int written;               /* the data pointer went out writable */
-    double cache[ZURAND_MAX_CHUNK_WORDS];
+    /* min(n, cw) values, allocated with the struct: a chunk never holds
+     * more, and a short vector should not carry a 40 KB cache (#60). */
+    double cache[];
 } lazy_state;
 
 static R_altrep_class_t zurand_lazy_class;
@@ -205,18 +208,21 @@ static void lazy_region(lazy_state *st, R_xlen_t i, R_xlen_t n, double *buf) {
 
 static SEXP lazy_make(SEXP key, SEXP meta) {
     const double *m = REAL(meta);
-    SEXP st_raw = PROTECT(Rf_allocVector(RAWSXP, sizeof(lazy_state)));
+    R_xlen_t n = (R_xlen_t)m[0];
+    R_xlen_t cw = engine_chunk_words_raw(key_engine_code(key));
+    size_t bytes = sizeof(lazy_state) + (size_t)(n < cw ? n : cw) * sizeof(double);
+    SEXP st_raw = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t)bytes));
     lazy_state *st = (lazy_state *) RAW(st_raw);
-    memset(st, 0, sizeof *st);
+    memset(st, 0, bytes);
     st->kp = key_from_words(INTEGER(key), key_count(key), 0);
     st->kt = threefry_key_from_philox(st->kp);
     st->engine = (int)key_engine_code(key);
-    st->n = (R_xlen_t)m[0];
+    st->n = n;
     st->dist = (int)m[1];
     st->a = m[2];
     st->s = m[3];
     st->twice = XLENGTH(meta) > 4 && m[4] != 0.0;
-    st->cw = engine_chunk_words_raw((zurand_engine_t)st->engine);
+    st->cw = cw;
     st->cchunk = -1;
     st->last = -2;
     SEXP data1 = PROTECT(Rf_allocVector(VECSXP, 3));

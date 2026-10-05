@@ -193,7 +193,9 @@ rng_normal <- function(key, n = 1L, mean = 0, sd = 1,
 #' pure function of the key and its position, so element `i` is exactly
 #' element `i` of `rng_uniform(key, n, ...)` or `rng_normal(key, n, ...)`,
 #' and `identical(x[], rng_normal(key, n))` holds. Creating one is instant
-#' and takes no memory for the values, whatever `n` is.
+#' and takes no memory for the values, whatever `n` is: each lazy vector
+#' holds its key, its arguments and a cache of one engine chunk, which is
+#' `min(n, 5120)` doubles, so at most about 40 KB.
 #'
 #' Reading. `x[i]`, `x[idx]`, `x[a:b]`, `sum(x)`, `mean(x)` and loops over
 #' `x` compute only the values they touch; nothing is kept but the last
