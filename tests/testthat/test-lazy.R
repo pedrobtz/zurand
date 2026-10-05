@@ -148,6 +148,9 @@ test_that("a written lazy vector no longer promises to have no NA", {
 })
 
 test_that("real indices are range-checked before conversion", {
+  # Base R itself errors on 1e300 as an index of a plain vector on 32-bit
+  # builds, so the reference has nothing to compare against there.
+  skip_if(.Machine$sizeof.pointer < 8)
   x <- rng_lazy_normal(rng_key(1L), 10L)
   ref <- rng_normal(rng_key(1L), 10L)
   idx <- c(0.5, 1.5, 10.9, 11, 1e300, Inf, NA)
