@@ -1,0 +1,2 @@
+useDynLib(zurandpract, .registration = TRUE)
+export(pract_zurand)

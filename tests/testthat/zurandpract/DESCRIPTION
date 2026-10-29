@@ -1,0 +1,9 @@
+Package: zurandpract
+Version: 0.0.1
+Title: Test Fixture Running 'zurand' Streams Through 'zurngtest'
+Description: Built by tests/testthat/test-zurngtest.R to test a 'zurand'
+    stream with 'PractRand' through the C callable of 'zurngtest', the way
+    a generator package written in C would. It gets both headers' paths
+    from the test, so 'zurngtest' is not a dependency of 'zurand'.
+License: MIT
+Encoding: UTF-8
