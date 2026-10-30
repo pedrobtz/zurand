@@ -10,7 +10,11 @@
 
 test_that("zurand streams pass PractRand through zurngtest's C callable", {
   skip_on_cran()
-  if (!identical(Sys.getenv("ZURAND_EXPECT_ZURNGTEST"), "true")) {
+  # Loading zurngtest registers the C callable the fixture looks up, so it
+  # is loaded either way; where CI expects it, a missing one is an error.
+  if (identical(Sys.getenv("ZURAND_EXPECT_ZURNGTEST"), "true")) {
+    loadNamespace("zurngtest")
+  } else {
     skip_if_not(requireNamespace("zurngtest", quietly = TRUE),
                 "zurngtest is not installed")
   }
