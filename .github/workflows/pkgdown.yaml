@@ -42,6 +42,10 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: JamesIves/github-pages-deploy-action@fa24774553152dd7873cd16ebd8d959b010c5445 # v4.9.0
         with:
+          # The coverage badge is committed to gh-pages too (coverage.yaml):
+          # keep it (clean: false) and never force-push over a badge commit
+          # that lands between this checkout and push.
           clean: false
+          force: false
           branch: gh-pages
           folder: docs
