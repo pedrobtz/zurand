@@ -9,16 +9,17 @@
 #' holds its key, its arguments and a cache of one engine chunk, which is
 #' `min(n, 5120)` doubles, so at most about 40 KB.
 #'
-#' Reading. `x[i]`, `x[idx]`, `x[a:b]`, `sum(x)`, `mean(x)` and loops over
+#' @section Reading:
+#' `x[i]`, `x[idx]`, `x[a:b]`, `sum(x)`, `mean(x)` and loops over
 #' `x` compute only the values they touch; nothing is kept but the last
 #' engine chunk read (at most 5120 values), so `sum()` over 1e9 lazy values
-#' runs in the memory R itself uses. Full scans cost more than they would
-#' on a generated vector -- `sum()` and `mean()` measured 1.6-2.7x slower
-#' than `rng_normal()` followed by `sum()` -- because R reads lazy vectors
+#' runs in the memory R itself uses. Full scans cost more than
+#' `rng_normal()` followed by `sum()` would, because R reads lazy vectors
 #' 512 values at a time on one thread. The gain is memory, and not paying
 #' for values that are never read.
 #'
-#' Interrupts. Scans that read a lazy vector in blocks -- `sum()`, `mean()`,
+#' @section Interrupts:
+#' Scans that read a lazy vector in blocks -- `sum()`, `mean()`,
 #' `max()`, `x[idx]` -- check for a user interrupt every \eqn{2^{22}} values,
 #' so Ctrl-C stops `sum()` over 1e12 values. Reading single elements and
 #' materialising do not check. For C and C++ code this means that
@@ -28,12 +29,14 @@
 #' unwound should take the data pointer first (which materialises the
 #' vector) or read under `R_UnwindProtect()` (`cpp11::unwind_protect()`).
 #'
-#' Materialisation. Anything that needs the whole vector as ordinary memory
+#' @section Materialisation:
+#' Anything that needs the whole vector as ordinary memory
 #' -- most arithmetic such as `x * 2`, modifying `x`, or C code asking for
 #' its data pointer -- fills it once, with the usual parallel fill, and
 #' from then on `x` holds all `n` values like any vector.
 #'
-#' Saving. [saveRDS()] and [serialize()] store only the key and the
+#' @section Saving:
+#' [saveRDS()] and [serialize()] store only the key and the
 #' arguments, so a lazy vector of 1e9 values saves as a few hundred bytes
 #' and comes back lazy. A lazy vector that has been modified saves its
 #' values. Reading is not modifying: after C code has had the data pointer
@@ -42,10 +45,11 @@
 #' one more fill, and stores only the key when nothing changed. Restoring
 #' checks the saved arguments and refuses ones it cannot have written.
 #'
-#' Engines. The vector uses its key's engine, so its values are that
+#' @section Engines:
+#' The vector uses its key's engine, so its values are that
 #' engine's. For scattered reads, `x[sample(n, k)]` or random indices in a
 #' loop, key it with `rng_key(seed, engine = "philox4x64")`: Philox computes
-#' any single value directly, 7-11x faster per read than
+#' any single value directly, several times faster per read than
 #' `"xoshiro256pp"`, which reaches it through its 512-value block. For scans
 #' and sequential loops the default is faster.
 #'
@@ -61,6 +65,8 @@
 rng_lazy_normal <- function(key, n, mean = 0, sd = 1,
                             method = c("ziggurat", "mcfarland")) {
   method <- match.arg(method)
+  # ZURAND_DIST_NORMAL_MCF = 2, ZURAND_DIST_NORMAL = 1 (src/zurand.c); 0 is
+  # ZURAND_DIST_UNIFORM, below. Not the C API's method codes.
   .Call(C_rng_lazy, key, n, if (method == "mcfarland") 2L else 1L, mean, sd)
 }
 

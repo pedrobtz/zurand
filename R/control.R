@@ -63,9 +63,11 @@ rng_threads <- function(threads = NULL) {
 #' @export
 #' @examples
 #' rng_simd()
+#' key <- rng_key(1L, engine = "xoshiro256pp")
 #' old <- rng_simd(FALSE)
-#' identical(rng_uniform(rng_key(1L, engine = "xoshiro256pp"), 4L),
-#'           { rng_simd(old != "none"); rng_uniform(rng_key(1L, engine = "xoshiro256pp"), 4L) })
+#' portable <- rng_uniform(key, 4L)
+#' rng_simd(old != "none")
+#' identical(portable, rng_uniform(key, 4L))
 rng_simd <- function(enable = NULL) {
   prev <- .Call(C_rng_simd, enable)
   if (is.null(enable)) prev else invisible(prev)

@@ -58,3 +58,12 @@ test_that("a malformed stream attribute is an error, not a cast", {
   attr(k, "stream") <- 1
   expect_identical(rng_uniform(k, 1), rng_uniform(rng_key(1L), 1))
 })
+
+test_that("c() of keys drops NULLs after the first argument", {
+  keys <- rng_key(1L, n = 2L)
+  expect_identical(c(keys, NULL), keys)
+  expect_identical(c(keys[1], NULL, keys[2]), keys)
+  # Dispatch is on the first argument: c(NULL, key) is the bare words.
+  expect_false(inherits(c(NULL, keys), "rng_key"))
+  expect_error(c(keys, 1:4), "must be <rng_key> objects")
+})

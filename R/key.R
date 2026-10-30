@@ -15,9 +15,10 @@
 #'   same values on every platform and thread count, and draw `i` does not
 #'   depend on `n`. They differ in speed and in the stream they produce.
 #'
-#'   * `"xoshiro256pp"` (default) -- the fastest of the three, and on one
-#'     thread about 1.6-2.5x dqrng on uniform and 1.9-2.7x RcppZiggurat on
-#'     normal (x86_64 and Apple Silicon; see the performance article). Philox derives a fresh 256-bit xoshiro256++ state for each
+#'   * `"xoshiro256pp"` (default) -- the fastest of the three, and faster
+#'     than dqrng and RcppZiggurat on one thread (x86_64 and Apple Silicon;
+#'     `vignette("performance", package = "zurand")` has the numbers).
+#'     Philox derives a fresh 256-bit xoshiro256++ state for each
 #'     512-value chunk, then a cheap recurrence produces the chunk, so a
 #'     chunk depends only on the key and its index. Reaching an arbitrary
 #'     index costs at most 511 recurrence steps. Audited with PractRand to
@@ -25,7 +26,7 @@
 #'   * `"philox4x64"` -- Philox4x64-10 from Random123, counter-based: each
 #'     value is computed directly from its position.
 #'   * `"threefry4x64"` -- Threefry4x64-13 from Random123, counter-based;
-#'     about 1.1x Philox in practice.
+#'     close to Philox in speed.
 #'
 #'   A key records its engine, so a key made with one never produces the
 #'   other's values. Changing engine changes every number you get.
@@ -38,7 +39,8 @@
 #' one key. A key vector takes one index, as a vector does: `keys[1, 2]`
 #' and `keys[, 1]` are an error, not a view of the words inside. `c()`
 #' dispatches on its first argument, so combine key vectors with a key
-#' first: `c(NULL, key)` returns the bare integer words, not keys. Keys are
+#' first: `c(NULL, key)` returns the bare integer words, not keys, while
+#' `c(key, NULL)` drops the `NULL` as `c()` does for any vector. Keys are
 #' immutable: assigning into a key vector is an error, and so is sorting
 #' one, since keys have no order; compare keys with [identical()].
 #'
@@ -278,20 +280,20 @@ key_stream <- function(x) {
 #' @export
 c.rng_key <- function(..., recursive = FALSE) {
   dots <- Filter(Negate(is.null), list(...))
-  if (!length(dots)) {
+  if (length(dots) == 0L) {
     return(rng_key(0, n = 0L))
   }
 
-  ok <- vapply(dots, inherits, logical(1), "rng_key")
+  ok <- vapply(dots, inherits, logical(1L), "rng_key")
   if (!all(ok)) {
-    stop("all inputs to `c.rng_key()` must be <rng_key> objects", call. = FALSE)
+    stop("all inputs to `c()` must be <rng_key> objects", call. = FALSE)
   }
 
-  engines <- vapply(dots, attr, character(1), "engine", exact = TRUE)
+  engines <- vapply(dots, attr, character(1L), "engine", exact = TRUE)
   if (length(unique(engines)) != 1L) {
     stop("all keys must use the same engine", call. = FALSE)
   }
-  streams <- vapply(dots, key_stream, integer(1))
+  streams <- vapply(dots, key_stream, integer(1L))
   if (length(unique(streams)) != 1L) {
     stop("all keys must use the same stream version", call. = FALSE)
   }

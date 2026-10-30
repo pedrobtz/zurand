@@ -7,7 +7,7 @@
 #' is \eqn{(m + 1/2) 2^{-52}} for a 52-bit integer \eqn{m}, so neither
 #' endpoint can occur. Other bounds are applied as `min + (max - min) * u`,
 #' which, as with [stats::runif()], will not return either extreme value
-#' unless `max = min` or `max - min` is small compared with `min`.
+#' unless `max == min` or `max - min` is small compared with `min`.
 #'
 #' @param key An `rng_key` vector.
 #' @param n A single non-negative whole number. Defaults to one draw per key.
@@ -44,10 +44,9 @@ rng_uniform <- function(key, n = 1L, min = 0, max = 1, offset = 0) {
 #'   * `"ziggurat"` (the default): Marsaglia and Tsang's ziggurat on NumPy's
 #'     256-layer tables.
 #'   * `"mcfarland"`: McFarland's modified ziggurat (2016). Its common case
-#'     needs no table comparison: 20-35% less time per value in the
-#'     transform on every CPU measured, and for large fills with the default
-#'     engine 1.15-1.25x the default method's throughput on x86_64 and
-#'     1.05-1.10x on arm64.
+#'     needs no table comparison, so it is faster than the default on every
+#'     CPU measured, by more on x86_64 than on arm64
+#'     (`vignette("performance", package = "zurand")`).
 #'
 #'   Both are exact samplers of the standard normal (to double precision)
 #'   and both are bit-reproducible across platforms. They are different
@@ -75,6 +74,8 @@ rng_normal <- function(key, n = 1L, mean = 0, sd = 1,
                        method = c("ziggurat", "mcfarland"), offset = 0) {
   method <- match.arg(method)
   .Call(C_rng_normal, key, n, mean, sd,
+        # ZURAND_NORMAL_MCFARLAND = 1, ZURAND_NORMAL_ZIGGURAT = 0
+        # (inst/include/zurand.h, shared with the C API).
         if (method == "mcfarland") 1L else 0L, offset)
 }
 

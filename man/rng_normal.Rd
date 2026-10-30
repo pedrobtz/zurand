@@ -27,10 +27,9 @@ rng_normal(
 \item \code{"ziggurat"} (the default): Marsaglia and Tsang's ziggurat on NumPy's
 256-layer tables.
 \item \code{"mcfarland"}: McFarland's modified ziggurat (2016). Its common case
-needs no table comparison: 20-35\% less time per value in the
-transform on every CPU measured, and for large fills with the default
-engine 1.15-1.25x the default method's throughput on x86_64 and
-1.05-1.10x on arm64.
+needs no table comparison, so it is faster than the default on every
+CPU measured, by more on x86_64 than on arm64
+(\code{vignette("performance", package = "zurand")}).
 }
 
 Both are exact samplers of the standard normal (to double precision)
