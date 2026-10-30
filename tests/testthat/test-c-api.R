@@ -77,10 +77,27 @@ test_that("C API reports invalid arguments as return codes", {
   # and streams (chunk 0, no buffer, no consumer, engine, total 0 is fine).
   # Then a NULL output buffer for every fill and fold_int(), which used to
   # crash the session (#60), and a NULL buffer with n = 0, which is fine.
-  expect_identical(ns$client_errors(rng_key(1L)),
-                   c(3L, 1L, 1L, 1L, 1L, 1L, 2L, 2L, 0L, 1L, 1L, 1L, 2L,
-                     1L, 1L, 1L, 1L, 1L, 1L, 2L, 0L,
-                     1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, 0L))
+  # 0 ZURAND_OK, 1 ZURAND_EINVAL, 2 ZURAND_EKEY; "version" is the table's.
+  want <- c(
+    version = 3L, key_get_range = 1L, key_get_null_out = 1L,
+    uniform_min_gt_max = 1L, uniform_inf = 1L, uniform_nan = 1L,
+    uniform_too_long = 1L, normal_sd_neg = 1L, normal_mean_inf = 1L,
+    normal_engine = 2L, normal_n0 = 0L, integer_na = 1L,
+    integer_min_gt_max = 1L, bits64_stream = 2L, method_2 = 1L,
+    method_neg = 1L, method_sd_neg = 1L, method_engine = 2L,
+    uniform_at_min_gt_max = 1L, uniform_at_overflow = 1L,
+    uniform_at_engine = 2L, normal_at_method = 1L, normal_at_overflow = 1L,
+    normal_at_engine = 2L, stream_chunk_0 = 1L, stream_chunk_too_long = 1L,
+    stream_no_buf = 1L, stream_no_fn = 1L, stream_uniform_engine = 2L,
+    stream_normal_engine = 2L, stream_sd_neg = 1L, stream_method = 1L,
+    stream_total_0 = 0L, fold_engine = 2L,
+    null_uniform = 1L, null_uniform_constant = 1L, null_normal_method = 1L,
+    null_integer = 1L, null_bits64 = 1L, null_normal_at = 1L,
+    null_uniform_at = 1L, null_fold = 1L, null_uniform_n0 = 0L
+  )
+  expect_identical(ns$client_errors(rng_key(1L)), want)
+  # key_get() is the one member that raises R errors, for a non-key.
+  expect_error(ns$client_key_get(1:4), "must be an <rng_key>")
 })
 
 test_that("C API positional fills equal rng_*(offset =), from worker threads", {
