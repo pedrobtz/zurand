@@ -3,7 +3,7 @@
 # state the one-chunk cache is in.
 
 test_that("lazy vectors equal the samplers, read every way", {
-  set.seed(1)
+  withr::local_seed(1)
   for (engine in engines) {
     k <- rng_key(3L, engine = engine)
     # Lengths off the engine chunks (512; 4096 or 5120 for xoshiro256pp).
@@ -44,7 +44,7 @@ test_that("reads are right whatever the cache holds", {
     probe <- c(1, 511, 512, 513, 4096, 4097, 5120, 5121, 10240, 10241, 29999, n)
     region <- 5000:15500
     for (mode in 0:2) {
-      old <- cache_mode(mode)
+      local_cache_mode(mode)
       prime <- list(
         empty = function(x) NULL,
         walked = function(x) for (i in 1:6000) x[[i]],
@@ -60,7 +60,6 @@ test_that("reads are right whatever the cache holds", {
         expect_identical(x[region], ref[region], info = paste(engine, mode, p))
         expect_false(materialised(x))
       }
-      cache_mode(old)
     }
   }
 })
@@ -229,11 +228,10 @@ test_that("large lazy sums match with threads on and off", {
   skip_on_cran()
   k <- rng_key(6L)
   ref <- sum(rng_uniform(k, 1e7, -1, 3))
-  old <- rng_threads(1L)
+  local_threads(1L)
   one <- sum(rng_lazy_uniform(k, 1e7, -1, 3))
   rng_threads(0L)
   all <- sum(rng_lazy_uniform(k, 1e7, -1, 3))
-  rng_threads(old)
   expect_identical(one, ref)
   expect_identical(all, ref)
 })

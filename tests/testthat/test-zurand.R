@@ -378,8 +378,7 @@ test_that("rng_threads() caps parallelism without changing results", {
   mk <- rng_normal(key, 70001L, method = "mcfarland")
   mm <- rng_normal(keys, 40001L, method = "mcfarland")
 
-  raw <- rng_threads(1L)
-  on.exit(rng_threads(raw))
+  raw <- local_threads(1L)
   expect_gte(raw, 0L)
   expect_identical(rng_threads(), 1L)
   expect_identical(rng_uniform(key, 70001L), u)
@@ -413,14 +412,14 @@ test_that("an uncapped fill equals a single-threaded one", {
   # Uses every core the OpenMP runtime offers, which CRAN forbids.
   skip_on_cran()
   key <- rng_key(31L)
-  raw <- rng_threads(1L)
-  on.exit(rng_threads(raw))
+  local_threads(1L)
   u <- rng_uniform(key, 70001L)
   rng_threads(0L)
   expect_identical(rng_uniform(key, 70001L), u)
 })
 
 test_that("stateless functions do not touch .Random.seed", {
+  withr::local_preserve_seed()
   set.seed(123)
   before <- .Random.seed
   key <- rng_key(42L)
@@ -435,6 +434,7 @@ test_that("stateless functions do not touch .Random.seed", {
 })
 
 test_that("rng_key_from_r() consumes R's RNG state intentionally", {
+  withr::local_preserve_seed()
   set.seed(123)
   key <- rng_key_from_r(n = 3L)
   after <- .Random.seed
@@ -514,13 +514,12 @@ test_that("offset draws the same positions as a longer fill", {
 test_that("offset fills are the same with threads", {
   key <- rng_key(5L)
   full <- rng_normal(key, 3e5)
-  old <- rng_threads(1L)
+  local_threads(1L)
   one <- rng_normal(key, 2e5, offset = 777)
-  rng_threads(0L)
-  all <- rng_normal(key, 2e5, offset = 777)
-  rng_threads(old)
+  rng_threads(2L)                  # the most CRAN allows (see setup.R)
+  two <- rng_normal(key, 2e5, offset = 777)
   expect_identical(one, full[777 + seq_len(2e5)])
-  expect_identical(all, one)
+  expect_identical(two, one)
 })
 
 test_that("offset is validated", {
