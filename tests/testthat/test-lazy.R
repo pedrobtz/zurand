@@ -15,22 +15,24 @@ test_that("lazy vectors equal the samplers, read every way", {
         list(function() rng_lazy_normal(k, n, 1, 3, "mcfarland"),
              rng_normal(k, n, 1, 3, "mcfarland")),
         list(function() rng_lazy_normal(k, n, 4, 0), rng_normal(k, n, 4, 0)))
-      for (cs in cases) {
+      for (ci in seq_along(cases)) {
+        cs <- cases[[ci]]
         ref <- cs[[2]]
         idx <- c(n, 1, sample(n, min(n, 200), replace = TRUE),
                  seq_len(min(n, 40)) + max(0, n - 60))
         x <- cs[[1]]()
-        expect_identical(length(x), as.integer(n))
-        expect_identical(x[idx], ref[idx])
-        expect_identical(vapply(idx, function(i) x[[i]], 0), ref[idx])
-        expect_identical(x[seq_len(n)], ref)
-        expect_identical(rev(x), rev(ref))
-        expect_identical(sum(x), sum(ref))
-        expect_identical(x[c(NA, n + 1, 1)], ref[c(NA, n + 1, 1)])
-        expect_false(materialised(x))
-        expect_identical(x + 0, ref + 0)     # materialises
-        expect_true(materialised(x))
-        expect_identical(x[idx], ref[idx])
+        info <- paste(engine, "n", n, "case", ci)
+        expect_identical(length(x), as.integer(n), info = info)
+        expect_identical(x[idx], ref[idx], info = info)
+        expect_identical(vapply(idx, function(i) x[[i]], 0), ref[idx], info = info)
+        expect_identical(x[seq_len(n)], ref, info = info)
+        expect_identical(rev(x), rev(ref), info = info)
+        expect_identical(sum(x), sum(ref), info = info)
+        expect_identical(x[c(NA, n + 1, 1)], ref[c(NA, n + 1, 1)], info = info)
+        expect_false(materialised(x), info = info)
+        expect_identical(x + 0, ref + 0, info = info)  # materialises
+        expect_true(materialised(x), info = info)
+        expect_identical(x[idx], ref[idx], info = info)
       }
     }
   }

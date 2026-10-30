@@ -91,6 +91,18 @@ test_that("rng_fold() derives stable keys", {
     c(
       "rng_key[a11aab0f92e75bb8303c089c13db8156]"
     ))
+  # Doubles past int: 2^31, 2^40 and both ends of the exact-integer range,
+  # which fold as 64-bit integers (computed 2026-10-30, macOS x86_64).
+  big <- c(2^31, 2^40, 2^53 - 1, -(2^53 - 1))
+  expect_identical(
+    vapply(big, function(d) format(rng_fold(rng_key(42L, engine = "philox4x64"), d)), ""),
+    c(
+      "rng_key[70c468a6e71abb0ff8451089952d8acf]",
+      "rng_key[2c87083884b7c97e46afc61628dfa42b]",
+      "rng_key[b2cadad773bc9bbe71f5c2027eceac5b]",
+      "rng_key[a7e7add420ff7944e7c8354965517196]"
+    )
+  )
 })
 
 test_that("multi-key matrices are bit-stable", {
@@ -202,8 +214,9 @@ test_that("draw i does not depend on n", {
     key <- rng_key(99L, engine = eng)
     # 511/512/513 straddle the xoshiro chunk boundary.
     for (nn in c(3L, 17L, 64L, 257L, 511L, 512L, 513L, 1000L)) {
-      expect_identical(rng_uniform(key, nn), rng_uniform(key, 1000L)[seq_len(nn)])
-      expect_identical(rng_normal(key, nn), rng_normal(key, 1000L)[seq_len(nn)])
+      info <- paste(eng, "n", nn)
+      expect_identical(rng_uniform(key, nn), rng_uniform(key, 1000L)[seq_len(nn)], info = info)
+      expect_identical(rng_normal(key, nn), rng_normal(key, 1000L)[seq_len(nn)], info = info)
     }
   }
 })

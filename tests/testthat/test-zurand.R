@@ -117,7 +117,8 @@ test_that("rng_fold() folds whole-number doubles and integers identically", {
 
   expect_identical(rng_fold(key, 1), rng_fold(key, 1L))
   expect_identical(rng_fold(key, c(-2, 0, 7)), rng_fold(key, c(-2L, 0L, 7L)))
-  expect_identical(rng_fold(key, 2^40), rng_fold(key, 2^40))
+  # Large doubles are pinned in test-golden.R; here they must stay distinct.
+  expect_false(identical(rng_fold(key, 2^40), rng_fold(key, 2^40 + 1)))
   expect_false(identical(rng_fold(key, 1), rng_fold(key, TRUE)))
   expect_false(identical(rng_fold(key, 1), rng_fold(key, as.raw(1))))
 })
@@ -499,13 +500,14 @@ test_that("offset draws the same positions as a longer fill", {
                      5121, 10240, 20000)) {
       for (n in c(0L, 1L, 7L, 5121L, 9999L)) {
         i <- offset + seq_len(n)
+        info <- sprintf("%s, offset %s, n %d", engine, offset, n)
         expect_identical(rng_uniform(keys, n, -1, 2, offset = offset),
-                         full_u[i, , drop = FALSE])
+                         full_u[i, , drop = FALSE], info = info)
         expect_identical(rng_normal(keys, n, 0.5, 3, offset = offset),
-                         full_z[i, , drop = FALSE])
+                         full_z[i, , drop = FALSE], info = info)
         expect_identical(rng_normal(keys, n, method = "mcfarland",
                                     offset = offset),
-                         full_m[i, , drop = FALSE])
+                         full_m[i, , drop = FALSE], info = info)
       }
     }
   }
