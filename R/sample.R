@@ -70,13 +70,26 @@ rng_uniform <- function(key, n = 1L, min = 0, max = 1, offset = 0) {
 #' rng_normal(key, 5L)
 #' rng_normal(key, 5L, method = "mcfarland")
 #' identical(rng_normal(key, 5L, offset = 5), rng_normal(key, 10L)[6:10])
-rng_normal <- function(key, n = 1L, mean = 0, sd = 1,
-                       method = c("ziggurat", "mcfarland"), offset = 0) {
+rng_normal <- function(
+  key,
+  n = 1L,
+  mean = 0,
+  sd = 1,
+  method = c("ziggurat", "mcfarland"),
+  offset = 0
+) {
   method <- match.arg(method)
-  .Call(C_rng_normal, key, n, mean, sd,
-        # ZURAND_NORMAL_MCFARLAND = 1, ZURAND_NORMAL_ZIGGURAT = 0
-        # (inst/include/zurand.h, shared with the C API).
-        if (method == "mcfarland") 1L else 0L, offset)
+  .Call(
+    C_rng_normal,
+    key,
+    n,
+    mean,
+    sd,
+    # ZURAND_NORMAL_MCFARLAND = 1, ZURAND_NORMAL_ZIGGURAT = 0
+    # (inst/include/zurand.h, shared with the C API).
+    if (method == "mcfarland") 1L else 0L,
+    offset
+  )
 }
 
 #' Draw integer random values

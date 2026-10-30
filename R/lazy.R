@@ -62,8 +62,13 @@
 #' x <- rng_lazy_normal(key, 1e9)      # instant; no values yet
 #' x[c(1, 5e8, 1e9)]
 #' identical(rng_lazy_normal(key, 10)[], rng_normal(key, 10))
-rng_lazy_normal <- function(key, n, mean = 0, sd = 1,
-                            method = c("ziggurat", "mcfarland")) {
+rng_lazy_normal <- function(
+  key,
+  n,
+  mean = 0,
+  sd = 1,
+  method = c("ziggurat", "mcfarland")
+) {
   method <- match.arg(method)
   # ZURAND_DIST_NORMAL_MCF = 2, ZURAND_DIST_NORMAL = 1 (src/zurand.c); 0 is
   # ZURAND_DIST_UNIFORM, below. Not the C API's method codes.
@@ -85,5 +90,6 @@ rng_lazy_materialised <- function(x) .Call(C_rng_lazy_materialised, x)
 # computes the value alone, 2 fills the engine chunk around it, 1 (the
 # default) fills the chunk only when reads walk forward. Returns the
 # previous mode.
-rng_lazy_cache <- function(mode = NULL)
+rng_lazy_cache <- function(mode = NULL) {
   .Call(C_rng_lazy_cache, if (is.null(mode)) NULL else as.integer(mode))
+}

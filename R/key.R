@@ -59,9 +59,11 @@
 #' key <- rng_key(42L)
 #' keys <- rng_key(42L, n = 4L)
 #' key
-rng_key <- function(seed, n = 1L,
-                    engine = c("xoshiro256pp", "philox4x64",
-                               "threefry4x64")) {
+rng_key <- function(
+  seed,
+  n = 1L,
+  engine = c("xoshiro256pp", "philox4x64", "threefry4x64")
+) {
   engine <- match.arg(engine)
   .Call(C_rng_key, seed, n, engine)
 }
@@ -84,9 +86,10 @@ rng_key <- function(seed, n = 1L,
 #' # The same seed gives the same key.
 #' set.seed(1)
 #' identical(rng_key_from_r(), key)
-rng_key_from_r <- function(n = 1L,
-                           engine = c("xoshiro256pp", "philox4x64",
-                               "threefry4x64")) {
+rng_key_from_r <- function(
+  n = 1L,
+  engine = c("xoshiro256pp", "philox4x64", "threefry4x64")
+) {
   engine <- match.arg(engine)
   .Call(C_rng_key_from_r, n, engine)
 }
@@ -122,8 +125,12 @@ rng_key_from_r <- function(n = 1L,
 #' layer_key <- rng_fold(key, "layer1")
 rng_fold <- function(key, data) {
   if (is.object(data)) {
-    stop("`data` must be a plain vector, not a <", class(data)[[1L]],
-         ">; fold as.character() or unclass() of it instead", call. = FALSE)
+    stop(
+      "`data` must be a plain vector, not a <",
+      class(data)[[1L]],
+      ">; fold as.character() or unclass() of it instead",
+      call. = FALSE
+    )
   }
   .Call(C_rng_fold, key, data)
 }
@@ -148,7 +155,9 @@ print.rng_key <- function(x, ...) {
     # "rng_key[" plus the first 12 of 32 hex digits
     fp <- paste0(substr(fp, 1L, 20L), "...]")
     show <- min(n, 5L)
-    for (i in seq_len(show)) cat("[", i, "] ", fp[[i]], "\n", sep = "")
+    for (i in seq_len(show)) {
+      cat("[", i, "] ", fp[[i]], "\n", sep = "")
+    }
     if (n > show) cat("... ", n - show, " more\n", sep = "")
   }
   invisible(x)
@@ -173,7 +182,9 @@ length.rng_key <- function(x) {
     stop("a key vector takes one index, `keys[i]`", call. = FALSE)
   }
   words <- unclass(x)
-  if (missing(i)) i <- seq_len(nrow(words))
+  if (missing(i)) {
+    i <- seq_len(nrow(words))
+  }
   check_key_index(i, nrow(words))
   out <- words[i, , drop = FALSE]
   class(out) <- "rng_key"
@@ -222,8 +233,10 @@ check_key_index <- function(i, n) {
 }
 
 stop_key_assignment <- function() {
-  stop("keys are immutable; build a new key vector with c() and `[` instead",
-       call. = FALSE)
+  stop(
+    "keys are immutable; build a new key vector with c() and `[` instead",
+    call. = FALSE
+  )
 }
 
 #' @rdname rng_key
