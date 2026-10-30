@@ -428,8 +428,15 @@ test_that("stateless functions do not touch .Random.seed", {
   rng_fold(key, "layer")
   rng_uniform(key, 10L)
   rng_normal(key, 10L)
+  rng_normal(key, 10L, method = "mcfarland")
+  rng_uniform(key, 10L, offset = 1e6)
+  rng_normal(key, 10L, offset = 1e6)
   rng_integer(key, 10L, 1L, 6L)
   rng_bits(key, 10L)
+  x <- rng_lazy_normal(key, 1e4)
+  x[c(1, 5000)]
+  sum(x)
+  x[]
 
   expect_identical(.Random.seed, before)
 })
@@ -581,4 +588,15 @@ test_that("every argument check reachable from R reports its own error", {
   # Not reachable from R, so not tested here: "<rng_key> has an
   # unrecognised engine" (key_engine_code()), because key_count() runs
   # check_engine() first on every path.
+})
+
+test_that("huge-page advice never changes values", {
+  # 6e5 doubles is 4.8 MB, above the 4 MiB threshold for madvise(); on
+  # Linux in THP "madvise" mode this takes the advised path, elsewhere it
+  # checks only that the option is harmless.
+  key <- rng_key(5L)
+  withr::local_options(zurand.hugepages = TRUE)
+  on <- rng_uniform(key, 6e5)
+  withr::local_options(zurand.hugepages = FALSE)
+  expect_identical(rng_uniform(key, 6e5), on)
 })

@@ -79,3 +79,15 @@ test_that("rng_simd() validates and round-trips", {
   expect_identical(rng_simd(), old)
   expect_error(rng_simd(NA), "TRUE or FALSE")
 })
+
+test_that("CI legs that must have the vector path and threads do", {
+  # rng_simd() is "none" both on a CPU without AVX2/NEON and on a build that
+  # lost its dispatch; rng_threads() is 1 both for a serial build and for a
+  # configure regression. Either way the identity tests above would compare
+  # a path with itself and pass, so legs that must have both say so.
+  want_simd <- identical(Sys.getenv("ZURAND_EXPECT_SIMD"), "true")
+  want_omp <- identical(Sys.getenv("ZURAND_EXPECT_OPENMP"), "true")
+  skip_if_not(want_simd || want_omp, "no ZURAND_EXPECT_* set")
+  if (want_simd) expect_false(identical(rng_simd(), "none"))
+  if (want_omp) expect_gt(rng_threads(), 1L)
+})

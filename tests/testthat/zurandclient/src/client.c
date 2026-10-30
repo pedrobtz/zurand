@@ -86,7 +86,11 @@ SEXP client_fill_at(SEXP keys, SEXP n_, SEXP what_, SEXP a_, SEXP b_,
     int n = Rf_asInteger(n_), what = Rf_asInteger(what_);
     int method = Rf_asInteger(method_);
     double a = Rf_asReal(a_), b = Rf_asReal(b_);
-    uint64_t offset = (uint64_t)Rf_asReal(offset_);
+    /* The start: a double, or c(base, add) for base + add in uint64_t,
+     * which reaches positions a double cannot hold exactly (past 2^53). */
+    uint64_t offset = (uint64_t)REAL(offset_)[0];
+    if (XLENGTH(offset_) > 1)
+        offset += (uint64_t)REAL(offset_)[1];
     int nkey = Rf_nrows(keys);
     zurand_key *ks = (zurand_key *) R_alloc((size_t)nkey, sizeof(zurand_key));
     for (int j = 0; j < nkey; j++)

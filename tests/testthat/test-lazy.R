@@ -294,3 +294,11 @@ test_that("lazy vectors check their arguments", {
   expect_error(rng_lazy_uniform(rng_key(1L), 10, 2, 1), "less than or equal")
   expect_identical(length(rng_lazy_uniform(rng_key(1L), 0)), 0L)
 })
+
+test_that("inspect() describes a lazy vector without materialising it", {
+  x <- rng_lazy_normal(rng_key(1L, engine = "philox4x64"), 1e6, method = "mcfarland")
+  out <- capture.output(.Internal(inspect(x)))
+  expect_match(out[1], "zurand lazy normal (mcfarland), n = 1000000", fixed = TRUE)
+  expect_match(out[1], "engine philox4x64, not materialised", fixed = TRUE)
+  expect_false(materialised(x))
+})

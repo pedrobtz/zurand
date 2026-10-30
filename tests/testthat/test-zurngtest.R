@@ -4,12 +4,16 @@
 #
 # zurngtest is not a dependency of zurand: the test runs where it is
 # installed and skips elsewhere, and never on CRAN, since it compiles a
-# package and runs megabytes of tests.
+# package and runs megabytes of tests. CI's shuffle job installs it from
+# GitHub and sets ZURAND_EXPECT_ZURNGTEST, so there a missing zurngtest is a
+# failure, not a skip.
 
 test_that("zurand streams pass PractRand through zurngtest's C callable", {
   skip_on_cran()
-  skip_if_not(requireNamespace("zurngtest", quietly = TRUE),
-              "zurngtest is not installed")
+  if (!identical(Sys.getenv("ZURAND_EXPECT_ZURNGTEST"), "true")) {
+    skip_if_not(requireNamespace("zurngtest", quietly = TRUE),
+                "zurngtest is not installed")
+  }
   ns <- install_pract_fixture()
   for (engine in c("philox4x64", "threefry4x64", "xoshiro256pp")) {
     res <- ns$pract_zurand(

@@ -129,6 +129,35 @@ test_that("C API positional fills equal rng_*(offset =), from worker threads", {
   }
 })
 
+test_that("C API positional fills are self-consistent beyond R's reach", {
+  # R's offset = stops at 2^53; the C API takes any uint64_t start. The
+  # fixture adds c(base, add) in uint64_t, so the later start is exact at
+  # any magnitude; 256 and 4097 put it mid-chunk on every engine. The later
+  # fill must equal the tail of the earlier one.
+  skip_on_cran()
+  ns <- client()
+  n <- 3000L
+  for (engine in c("xoshiro256pp", "philox4x64", "threefry4x64")) {
+    keys <- rng_key(11L, n = 2L, engine = engine)
+    for (base in c(2^60, 2^63 + 2^40, 2^64 - 2^16)) {
+      for (step in c(256L, 4097L)) {
+        info <- paste(engine, format(base, digits = 20), step)
+        tail <- step + seq_len(n)
+        for (method in c("ziggurat", "mcfarland")) {
+          long <- ns$client_fill_at(keys, n + step, "normal", 1, 2, base, method)
+          expect_identical(
+            ns$client_fill_at(keys, n, "normal", 1, 2, c(base, step), method),
+            long[tail, , drop = FALSE], info = paste(info, method)
+          )
+        }
+        long <- ns$client_fill_at(keys, n + step, "uniform", -1, 3, base)
+        expect_identical(ns$client_fill_at(keys, n, "uniform", -1, 3, c(base, step)),
+                         long[tail, , drop = FALSE], info = info)
+      }
+    }
+  }
+})
+
 test_that("C API streams deliver rng_*() in order, chunk by chunk", {
   skip_on_cran()
   ns <- client()
