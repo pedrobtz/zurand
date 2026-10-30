@@ -59,14 +59,25 @@ typedef struct {
 static R_altrep_class_t zurand_lazy_class;
 
 /* Interrupts. A lazy vector makes a scan of 1e12 values one short
- * expression, and R's own loops over ALTREP regions -- sum(), mean(),
- * range() -- never check for an interrupt, so the read methods do, once
- * per ZURAND_LAZY_INTERRUPT generated values. Checks run on the R thread,
- * after a read has completed and outside any parallel region: the cache is
- * consistent there and no heap memory is held, so unwinding leaks nothing.
- * At 2^22 values a check costs well under 0.1% of the work between checks.
- * Materialisation fills the vector in one call and is bounded by memory;
- * it is not interruptible. */
+ * expression, and R's own region loops -- sum(), mean(), max(), prod(),
+ * everything built on ITERATE_BY_REGION -- run in constant memory and never
+ * check for an interrupt. So Get_region checks once per
+ * ZURAND_LAZY_INTERRUPT values it generates, and so does Extract_subset,
+ * which only R's own subsetting reaches (ExtractSubset() is not API).
+ * Elt does not check: R's loops over REAL_ELT allocate a result as long as
+ * the vector (is.na(), as.integer(), unique()), so they are bounded by
+ * memory like materialisation, or evaluate R code per element (for), where
+ * the evaluator checks; and REAL_ELT is what C and C++ code calls in its
+ * own loops, which choose their own interrupt points -- cpp11's x[i] does
+ * not unwind-protect it, so a longjmp there skips destructors (#77). C code
+ * reading through REAL_GET_REGION (cpp11's doubles iterator) can be
+ * interrupted; ?rng_lazy_normal says so and names the safe alternatives.
+ * Checks run on the R thread after a read has completed, outside any
+ * parallel region: the cache is consistent and no heap memory is held, so
+ * unwinding leaks nothing of ours. Dataptr never checks: R calls it with
+ * the GC disabled (ALTVEC_DATAPTR_EX() in altrep.c), where an interrupt
+ * handler must not run R code, and materialisation is bounded by memory.
+ * At 2^22 values a check costs well under 0.1% of the work between checks. */
 #define ZURAND_LAZY_INTERRUPT ((R_xlen_t)1 << 22)
 static R_xlen_t zurand_lazy_work = 0;
 
@@ -323,9 +334,7 @@ static double lazy_Elt(SEXP x, R_xlen_t i) {
     SEXP v = R_altrep_data2(x);
     if (v != R_NilValue)
         return REAL(v)[i];
-    double value = lazy_elt(lazy_st(x), i);
-    lazy_account(1);
-    return value;
+    return lazy_elt(lazy_st(x), i);
 }
 
 static R_xlen_t lazy_Get_region(SEXP x, R_xlen_t i, R_xlen_t n, double *buf) {

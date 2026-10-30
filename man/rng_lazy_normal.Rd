@@ -59,6 +59,16 @@ than \code{rng_normal()} followed by \code{sum()} -- because R reads lazy vector
 512 values at a time on one thread. The gain is memory, and not paying
 for values that are never read.
 
+Interrupts. Scans that read a lazy vector in blocks -- \code{sum()}, \code{mean()},
+\code{max()}, \code{x[idx]} -- check for a user interrupt every \eqn{2^{22}} values,
+so Ctrl-C stops \code{sum()} over 1e12 values. Reading single elements and
+materialising do not check. For C and C++ code this means that
+\code{REAL_ELT()} and \code{REAL()}/\code{REAL_RO()} on a lazy vector never signal an
+interrupt, but \code{REAL_GET_REGION()} -- which cpp11's \code{doubles} iterator
+uses -- can, by a longjmp that skips C++ destructors. Code that cannot be
+unwound should take the data pointer first (which materialises the
+vector) or read under \code{R_UnwindProtect()} (\code{cpp11::unwind_protect()}).
+
 Materialisation. Anything that needs the whole vector as ordinary memory
 -- most arithmetic such as \code{x * 2}, modifying \code{x}, or C code asking for
 its data pointer -- fills it once, with the usual parallel fill, and

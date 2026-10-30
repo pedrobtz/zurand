@@ -256,46 +256,35 @@ test_that("large lazy sums match with threads on and off", {
 })
 
 test_that("a huge lazy scan stops when interrupted", {
-  # sum() over 1e12 lazy values runs for hours; before the read methods
-  # checked for interrupts it ignored SIGINT and had to be killed. Run it in
-  # a child process, interrupt it, and require the interrupt condition.
-  # processx, not system2(wait = FALSE): a shell's background job starts
-  # with SIGINT ignored.
+  # sum() over 1e12 lazy values runs for hours; before Get_region checked
+  # for interrupts it ignored SIGINT and had to be killed.
   skip_on_cran()
   skip_on_os("windows")    # SIGINT
   skip_if_not_installed("processx")
-  path <- normalizePath(find.package("zurand"), "/")
-  load <- if (dir.exists(file.path(path, "src"))) {
-    # A source tree, as under devtools::test(): reuse its compiled library.
-    sprintf("pkgload::load_all(%s, compile = FALSE, quiet = TRUE)", deparse(path))
-  } else {
-    sprintf("library(zurand, lib.loc = %s)", deparse(dirname(path)))
-  }
-  started <- tempfile()
-  script <- tempfile(fileext = ".R")
-  writeLines(c(
-    load,
+  out <- interrupt_child(c(
     "x <- rng_lazy_normal(rng_key(1L), 1e12)",
-    sprintf("writeLines('scanning', %s)", deparse(started)),
+    "writeLines('scanning', started)",
     "cat(tryCatch({ sum(x); 'finished' }, interrupt = function(e) 'interrupted'))"
-  ), script)
-  child <- processx::process$new(file.path(R.home("bin"), "Rscript"), script,
-                                 stdout = "|", stderr = "|")
-  on.exit({
-    if (child$is_alive()) child$kill()
-    unlink(c(started, script))
-  }, add = TRUE)
-  deadline <- Sys.time() + 60
-  while (child$is_alive() && Sys.time() < deadline &&
-         !(file.exists(started) && file.size(started) > 0)) {
-    Sys.sleep(0.05)
-  }
-  expect_true(child$is_alive())
-  Sys.sleep(1)                               # well into the scan
-  child$interrupt()
-  child$wait(15000)
-  expect_false(child$is_alive())
-  expect_identical(child$read_all_output(), "interrupted")
+  ), after = 1)
+  expect_identical(out, "interrupted")
+})
+
+test_that("reading single elements never signals an interrupt", {
+  # REAL_ELT is what C and C++ code calls in its own loops, which cannot
+  # expect a longjmp (#77). is.na() reads a lazy vector through Elt alone;
+  # interrupted while it runs (about 2 s here), the interrupt must wait for
+  # it to return and land in the Sys.sleep() after it, with `y` assigned.
+  skip_on_cran()
+  skip_on_os("windows")    # SIGINT
+  skip_if_not_installed("processx")
+  out <- interrupt_child(c(
+    "x <- rng_lazy_normal(rng_key(1L, engine = 'philox4x64'), 6e7)",
+    "y <- NULL",
+    "writeLines('reading', started)",
+    "cat(tryCatch({ y <- is.na(x); Sys.sleep(60); 'finished' },",
+    "  interrupt = function(e) if (is.null(y)) 'inside is.na()' else 'after is.na()'))"
+  ), after = 0.3)
+  expect_identical(out, "after is.na()")
 })
 
 test_that("lazy vectors check their arguments", {

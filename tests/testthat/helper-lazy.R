@@ -27,3 +27,38 @@ tamper_lazy <- function(x, dist, meta) {
   stopifnot(length(at) == 1L)
   c(bytes[seq_len(at - 1L)], xdr(meta), bytes[-seq_len(at + length(pat) - 1L)])
 }
+
+
+# Runs `code` (lines of R) in a child Rscript with zurand loaded and sends
+# it SIGINT `after` seconds after it writes "started" to the file named by
+# the variable `started`; returns what the child printed. processx, not
+# system2(wait = FALSE): a shell's background job starts with SIGINT ignored.
+interrupt_child <- function(code, after) {
+  path <- normalizePath(find.package("zurand"), "/")
+  load <- if (dir.exists(file.path(path, "src"))) {
+    # A source tree, as under devtools::test(): reuse its compiled library.
+    sprintf("pkgload::load_all(%s, compile = FALSE, quiet = TRUE)", deparse(path))
+  } else {
+    sprintf("library(zurand, lib.loc = %s)", deparse(dirname(path)))
+  }
+  started <- tempfile()
+  script <- tempfile(fileext = ".R")
+  writeLines(c(load, sprintf("started <- %s", deparse(started)), code), script)
+  child <- processx::process$new(file.path(R.home("bin"), "Rscript"), script,
+                                 stdout = "|", stderr = "|")
+  on.exit({
+    if (child$is_alive()) child$kill()
+    unlink(c(started, script))
+  })
+  deadline <- Sys.time() + 60
+  while (child$is_alive() && Sys.time() < deadline &&
+         !(file.exists(started) && file.size(started) > 0)) {
+    Sys.sleep(0.05)
+  }
+  testthat::expect_true(child$is_alive())
+  Sys.sleep(after)
+  child$interrupt()
+  child$wait(15000)
+  testthat::expect_false(child$is_alive())
+  child$read_all_output()
+}
