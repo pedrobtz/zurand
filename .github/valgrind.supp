@@ -16,3 +16,19 @@
    ...
    fun:GOMP_parallel
 }
+
+# The same pattern from cli, which testthat loads: cli starts a background
+# thread for its progress ticker that lives until exit, so its 368-byte TLS
+# block is "possibly lost" too. Seen once cli's thread began starting under
+# the test reporter (PR #66); no zurand frame is on the stack.
+{
+   cli-ticker-thread-tls
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:calloc
+   ...
+   fun:_dl_allocate_tls
+   ...
+   fun:pthread_create*
+   obj:*/cli/libs/cli.so
+}
