@@ -1192,33 +1192,98 @@ static void fill_normal_key(zurand_engine_t eng, philox4x64_key_t kp,
         fill_normal_column_philox(out, n, kp, par_rows);
 }
 
+/* Positions from the start of engine chunk c0, n of them: c0 = 0 is the
+ * column. */
 static void fill_integer_key(zurand_engine_t eng, philox4x64_key_t kp,
-                             int *out, R_xlen_t n, int min, uint32_t range,
-                             uint32_t threshold, int par_rows) {
+                             int *out, uint64_t c0, R_xlen_t n, int min,
+                             uint32_t range, uint32_t threshold, int par_rows) {
     if (eng == ZURAND_ENG_THREEFRY)
-        fill_integer_column_threefry(out, n, threefry_key_from_philox(kp),
+        fill_integer_column_threefry(out, c0, n, threefry_key_from_philox(kp),
                                      min, range, threshold, par_rows);
     else if (eng == ZURAND_ENG_XOSHIRO)
-        fill_integer_column_xoshiro(out, n, kp, min, range, threshold, par_rows);
+        fill_integer_column_xoshiro(out, c0, n, kp, min, range, threshold,
+                                    par_rows);
     else
-        fill_integer_column_philox(out, n, kp, min, range, threshold, par_rows);
+        fill_integer_column_philox(out, c0, n, kp, min, range, threshold,
+                                   par_rows);
 }
 
 /* Positions start .. start + n - 1 of a double sampler (ZURAND_DIST_*),
- * unscaled: rng_uniform(offset =), rng_normal(offset =) and the C API's
- * positional fills. With start = 0 it gives the column fill's values. */
-static void fill_range_key(zurand_engine_t eng, philox4x64_key_t kp,
-                           double *out, uint64_t start, R_xlen_t n, int dist,
-                           int par_rows) {
+ * unscaled, as part of a fill of `whole` positions (which decides only how
+ * stores are made): a thread's share of a sampler column. */
+static void fill_part_key(zurand_engine_t eng, philox4x64_key_t kp,
+                          double *out, uint64_t start, R_xlen_t n, int dist,
+                          int par_rows, R_xlen_t whole) {
     double stage[ZURAND_MAX_CHUNK_WORDS];
     if (eng == ZURAND_ENG_THREEFRY)
         fill_range_threefry(out, start, n, threefry_key_from_philox(kp), dist,
-                            par_rows, stage);
+                            par_rows, whole, stage);
     else if (eng == ZURAND_ENG_XOSHIRO)
-        fill_range_xoshiro(out, start, n, kp, dist, par_rows, stage);
+        fill_range_xoshiro(out, start, n, kp, dist, par_rows, whole, stage);
     else
-        fill_range_philox(out, start, n, kp, dist, par_rows, stage);
+        fill_range_philox(out, start, n, kp, dist, par_rows, whole, stage);
 }
+
+/* The same as a fill of its own: rng_uniform(offset =), rng_normal(offset =)
+ * and the C API's positional fills. With start = 0 it gives the column
+ * fill's values. */
+static void fill_range_key(zurand_engine_t eng, philox4x64_key_t kp,
+                           double *out, uint64_t start, R_xlen_t n, int dist,
+                           int par_rows) {
+    fill_part_key(eng, kp, out, start, n, dist, par_rows, n);
+}
+
+/* ---- splitting a sampler's columns over threads ----
+ *
+ * A sampler fills nkey columns of n positions, each cut into engine chunks
+ * of w positions (the last may be short). The nkey * nchunk (column, chunk)
+ * pairs, in output order, are dealt to the threads of one parallel region
+ * in equal contiguous runs, and a thread fills its run as segments, each a
+ * range of whole chunks of one column. So every thread gets the same share
+ * whatever nkey is -- two keys on eight threads use eight threads, as one
+ * key does, and seven keys on six threads are not seven columns over six
+ * threads -- and each writes one contiguous stretch of the output. A
+ * segment is filled serially from its first chunk, so the values do not
+ * depend on the split. Off OpenMP the one "thread" gets whole columns. */
+typedef struct {
+    R_xlen_t n, w, nchunk, g, g1;
+} col_split;
+
+static void col_split_init(col_split *s, R_xlen_t nkey, R_xlen_t n,
+                           R_xlen_t w) {
+    R_xlen_t t = 0, nth = 1;
+#ifdef ZURAND_OPENMP
+    t = omp_get_thread_num();
+    nth = omp_get_num_threads();
+#endif
+    R_xlen_t nchunk = (n + w - 1) / w;
+    R_xlen_t pairs = nkey * nchunk;   /* at most nkey * n, already checked */
+    R_xlen_t q = pairs / nth, r = pairs % nth;
+    s->n = n;
+    s->w = w;
+    s->nchunk = nchunk;
+    s->g = t * q + (t < r ? t : r);
+    s->g1 = s->g + q + (t < r);
+}
+
+/* The next segment of this thread's run: column *col, positions
+ * *r0 .. *r0 + *len - 1. */
+static int col_split_next(col_split *s, R_xlen_t *col, R_xlen_t *r0,
+                          R_xlen_t *len) {
+    if (s->g >= s->g1)
+        return 0;
+    R_xlen_t c = s->g % s->nchunk;
+    R_xlen_t cend = s->nchunk - c < s->g1 - s->g ? s->nchunk
+                                                 : c + (s->g1 - s->g);
+    R_xlen_t r1 = cend * s->w < s->n ? cend * s->w : s->n;
+    *col = s->g / s->nchunk;
+    *r0 = c * s->w;
+    *len = r1 - *r0;
+    s->g += cend - c;
+    return 1;
+}
+
+static R_xlen_t engine_chunk_words_raw(zurand_engine_t eng);
 
 /* One engine chunk c of a double sampler, m values, unscaled. */
 static void dist_chunk_key(zurand_engine_t eng, philox4x64_key_t kp,
@@ -1537,19 +1602,24 @@ SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_, SEXP offset_) {
         UNPROTECT(1);
         return ans;
     }
-    int par_cols = nt > 1 && nkey > 1 && total >= ZURAND_OMP_MIN_VALUES;
-    int par_rows = !par_cols && n >= ZURAND_OMP_MIN_VALUES ? nt : 0;
+    R_xlen_t w = engine_chunk_words_raw(eng);
 #ifdef ZURAND_OPENMP
-#pragma omp parallel for if(par_cols) num_threads(nt) default(none) \
-    shared(kw, out, n, nkey, par_rows, eng, offset) schedule(static)
+#pragma omp parallel if(nt > 1 && total >= ZURAND_OMP_MIN_VALUES) \
+    num_threads(nt) default(none) shared(kw, out, n, nkey, w, eng, offset)
 #endif
-    for (R_xlen_t col = 0; col < nkey; col++) {
-        if (offset == 0)
-            fill_uniform_key(eng, key_from_words(kw, nkey, col), out + n * col,
-                             n, par_rows);
-        else
-            fill_range_key(eng, key_from_words(kw, nkey, col), out + n * col,
-                           offset, n, ZURAND_DIST_UNIFORM, par_rows);
+    {
+        col_split s;
+        R_xlen_t col, r0, len;
+        col_split_init(&s, nkey, n, w);
+        while (col_split_next(&s, &col, &r0, &len)) {
+            philox4x64_key_t kp = key_from_words(kw, nkey, col);
+            if (offset == 0 && len == n)
+                fill_uniform_key(eng, kp, out + n * col, n, 0);
+            else
+                fill_part_key(eng, kp, out + n * col + r0,
+                              offset + (uint64_t)r0, len,
+                              ZURAND_DIST_UNIFORM, 0, n);
+        }
     }
     scaling_pass(out, total, uniform_scaling(min, max), nt);
     UNPROTECT(1);
@@ -1588,22 +1658,26 @@ SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_, SEXP method_,
         UNPROTECT(1);
         return ans;
     }
-    int par_cols = nt > 1 && nkey > 1 && total >= ZURAND_OMP_MIN_VALUES;
-    int par_rows = !par_cols && n >= ZURAND_OMP_MIN_VALUES ? nt : 0;
+    int dist = method == ZURAND_NORMAL_MCFARLAND ? ZURAND_DIST_NORMAL_MCF
+                                                 : ZURAND_DIST_NORMAL;
+    R_xlen_t w = engine_chunk_words_raw(eng);
 #ifdef ZURAND_OPENMP
-#pragma omp parallel for if(par_cols) num_threads(nt) default(none) \
-    shared(kw, out, n, nkey, par_rows, eng, method, offset) schedule(static)
+#pragma omp parallel if(nt > 1 && total >= ZURAND_OMP_MIN_VALUES) \
+    num_threads(nt) default(none) \
+    shared(kw, out, n, nkey, w, eng, method, dist, offset)
 #endif
-    for (R_xlen_t col = 0; col < nkey; col++) {
-        if (offset == 0)
-            fill_normal_key(eng, key_from_words(kw, nkey, col), out + n * col,
-                            n, par_rows, method);
-        else
-            fill_range_key(eng, key_from_words(kw, nkey, col), out + n * col,
-                           offset, n,
-                           method == ZURAND_NORMAL_MCFARLAND
-                               ? ZURAND_DIST_NORMAL_MCF : ZURAND_DIST_NORMAL,
-                           par_rows);
+    {
+        col_split s;
+        R_xlen_t col, r0, len;
+        col_split_init(&s, nkey, n, w);
+        while (col_split_next(&s, &col, &r0, &len)) {
+            philox4x64_key_t kp = key_from_words(kw, nkey, col);
+            if (offset == 0 && len == n)
+                fill_normal_key(eng, kp, out + n * col, n, 0, method);
+            else
+                fill_part_key(eng, kp, out + n * col + r0,
+                              offset + (uint64_t)r0, len, dist, 0, n);
+        }
     }
     if (mean != 0.0 || sd != 1.0)
         affine_pass(out, total, mean, sd, nt);
@@ -1632,16 +1706,22 @@ SEXP C_rng_integer(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     set_sample_dim(ans, n, nkey);
     int *out = INTEGER(ans);
     int nt = zurand_threads();
-    int par_cols = nt > 1 && nkey > 1 && total >= ZURAND_OMP_MIN_VALUES;
-    int par_rows = !par_cols && n >= ZURAND_OMP_MIN_VALUES ? nt : 0;
+    (void)nt;  /* used only by the OpenMP pragma */
+    R_xlen_t w = engine_chunk_words_raw(eng);
 #ifdef ZURAND_OPENMP
-#pragma omp parallel for if(par_cols) num_threads(nt) default(none) \
-    shared(kw, out, n, nkey, min, range, threshold, par_rows, eng) \
-    schedule(static)
+#pragma omp parallel if(nt > 1 && total >= ZURAND_OMP_MIN_VALUES) \
+    num_threads(nt) default(none) \
+    shared(kw, out, n, nkey, w, min, range, threshold, eng)
 #endif
-    for (R_xlen_t col = 0; col < nkey; col++)
-        fill_integer_key(eng, key_from_words(kw, nkey, col), out + n * col, n,
-                         min, range, threshold, par_rows);
+    {
+        col_split s;
+        R_xlen_t col, r0, len;
+        col_split_init(&s, nkey, n, w);
+        while (col_split_next(&s, &col, &r0, &len))
+            fill_integer_key(eng, key_from_words(kw, nkey, col),
+                             out + n * col + r0, (uint64_t)(r0 / w), len, min,
+                             range, threshold, 0);
+    }
     UNPROTECT(1);
     return ans;
 }
@@ -1856,7 +1936,7 @@ static int api_fill_integer(zurand_key k, size_t n, int min, int max,
         return ZURAND_EINVAL;
     uint32_t range = (uint32_t)((int64_t)max - (int64_t)min + 1);
     uint32_t threshold = (uint32_t)((UINT64_C(0x100000000) - range) % range);
-    fill_integer_key((zurand_engine_t)k.engine, api_philox_key(k), out,
+    fill_integer_key((zurand_engine_t)k.engine, api_philox_key(k), out, 0,
                      (R_xlen_t)n, min, range, threshold, 0);
     return ZURAND_OK;
 }

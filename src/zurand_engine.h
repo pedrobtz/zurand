@@ -469,26 +469,29 @@ static uint32_t ZE_N(bounded_u32_retry)(ZE_KEY_T k, uint64_t index,
     }
 }
 
-static void ZE_N(fill_integer_column)(int *out, R_xlen_t n, ZE_KEY_T key,
-                                int min, uint32_t range, uint32_t threshold,
-                                int threads) {
+/* Positions c0 * ZE_CHUNK_WORDS onward, n of them: the whole column when
+ * c0 = 0, or a run of whole chunks of it (the samplers' column split). */
+static void ZE_N(fill_integer_column)(int *out, uint64_t c0, R_xlen_t n,
+                                ZE_KEY_T key, int min, uint32_t range,
+                                uint32_t threshold, int threads) {
     R_xlen_t nchunk = (n + ZE_CHUNK_WORDS - 1) / ZE_CHUNK_WORDS;
 #ifdef ZURAND_OPENMP
 #pragma omp parallel for if(threads > 1) \
     num_threads(threads > 0 ? threads : 1) default(none) \
-    shared(out, n, nchunk, key, min, range, threshold) schedule(static)
+    shared(out, c0, n, nchunk, key, min, range, threshold) schedule(static)
 #endif
     for (R_xlen_t c = 0; c < nchunk; c++) {
         uint64_t buf[ZURAND_MAX_CHUNK_WORDS + ZURAND_CHUNK_SLACK];
         R_xlen_t w0 = c * ZE_CHUNK_WORDS;
+        uint64_t p0 = (c0 + (uint64_t)c) * (uint64_t)ZE_CHUNK_WORDS;
         int m = (int)(n - w0 < ZE_CHUNK_WORDS ? n - w0 : ZE_CHUNK_WORDS);
-        ZE_N(chunk_words)(key, (uint64_t)c, ZURAND_PURPOSE_INTEGER, buf, m);
+        ZE_N(chunk_words)(key, c0 + (uint64_t)c, ZURAND_PURPOSE_INTEGER, buf, m);
 
         int *o = out + w0;
         for (int j = 0; j < m; j++) {
             uint32_t offset;
             if (!lemire_accept((uint32_t)buf[j], range, threshold, &offset))
-                offset = ZE_N(bounded_u32_retry)(key, (uint64_t)(w0 + j),
+                offset = ZE_N(bounded_u32_retry)(key, p0 + (uint64_t)j,
                                                  range, threshold);
             /* offset can exceed INT_MAX when max - min >= 2^31; the sum
              * itself lies in [min, max], so widen, add, then narrow. */
@@ -509,23 +512,26 @@ static void ZE_N(dist_chunk)(ZE_KEY_T key, uint64_t c, double *o, int m,
 }
 
 /* Positions start .. start + n - 1 of a double sampler into out[0 .. n-1]:
- * the column fill from an offset. Chunks are generated from their first
- * position, so a range that starts inside a chunk generates that chunk's
- * head into a stack buffer and copies the part it needs; every later chunk
- * is written in place, and the last may be short, as in a column fill.
- * `stage` holds ZE_CHUNK_WORDS doubles. */
+ * the column fill from an offset, or a thread's share of a column. Chunks
+ * are generated from their first position, so a range that starts inside a
+ * chunk generates that chunk's head into a stack buffer and copies the part
+ * it needs; every later chunk is written in place, and the last may be
+ * short, as in a column fill. `stage` holds ZE_CHUNK_WORDS doubles. `whole`
+ * is the length of the fill the range belongs to: as in the column fill,
+ * the uniforms' `large` is decided on it, not on this range. */
 static void ZE_N(fill_range)(double *out, uint64_t start, R_xlen_t n,
                              ZE_KEY_T key, int dist, int threads,
-                             double *stage) {
+                             R_xlen_t whole, double *stage) {
     if (n <= 0)
         return;
     uint64_t c0 = start / (uint64_t)ZE_CHUNK_WORDS;
     int head = (int)(start % (uint64_t)ZE_CHUNK_WORDS);
     R_xlen_t done = 0;
 #ifdef ZE_UNIFORM_FAST
-    int large = n >= ZURAND_ZVA_MIN_VALUES;
+    int large = whole >= ZURAND_ZVA_MIN_VALUES;
 #else
     int large = 0;
+    (void)whole;
 #endif
     if (head) {
         R_xlen_t room = ZE_CHUNK_WORDS - head;
