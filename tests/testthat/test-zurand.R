@@ -545,3 +545,37 @@ test_that("offset + n is checked exactly at 2^53", {
     expect_length(sampler(key, 0L, offset = 2^53), 0L)
   }
 })
+
+test_that("every argument check reachable from R reports its own error", {
+  k <- rng_key(1L)
+  # Non-finite scaling would otherwise reach the scaling pass.
+  expect_error(rng_normal(k, 2, mean = Inf), "`mean` must be finite")
+  expect_error(rng_normal(k, 2, sd = NaN), "`sd` must be finite")
+  expect_error(rng_uniform(k, 2, min = -Inf), "`min` must be finite")
+  expect_error(rng_uniform(k, 2, max = Inf), "`max` must be finite")
+  # Missing data must not fold as some other value (NA_integer_ is INT_MIN).
+  expect_error(rng_fold(k, c(1L, NA)), "must not contain missing values")
+  expect_error(rng_fold(k, NA), "must not contain missing values")
+  expect_error(rng_fold(k, NA_character_), "must not contain missing values")
+  expect_error(rng_fold(k, Inf), "finite whole numbers")
+  expect_error(rng_fold(k, NA_real_), "finite whole numbers")
+  expect_error(rng_fold(k, 1.5), "finite whole numbers")
+  expect_error(rng_fold(k, 2^60), "exactly representable")
+  expect_error(
+    c(rng_key(1L, engine = "philox4x64"), rng_key(1L, engine = "threefry4x64")),
+    "same engine"
+  )
+  bad <- k
+  dim(bad) <- c(2L, 2L)
+  expect_error(rng_uniform(bad, 1), "invalid internal shape")
+  expect_error(rng_uniform(k, 2^53), "too large for an R vector")
+  expect_error(rng_key(1L, n = 2^40), "too many keys")
+  expect_error(rng_integer(k, 1, 2^31, 2^31 + 2), "integer range")
+  expect_error(rng_integer(k, 1, 1.5, 3), "must be a whole number")
+  expect_error(rng_threads(NA), "integer or double scalar")
+  # Not reachable from R, so not tested here: "<rng_key> has an
+  # unrecognised engine" (key_engine_code()), because key_count() runs
+  # check_engine() first on every path; and "multi-key output dimensions
+  # are too large", which needs more than 2^31 values per key, i.e. a
+  # 16 GB allocation, before the check can fire.
+})
