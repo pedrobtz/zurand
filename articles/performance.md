@@ -1,0 +1,222 @@
+# Performance
+
+This article reports what zurand costs and how that was measured. The
+code below is not run when the vignette is built: a fair benchmark takes
+minutes and needs every competing package installed.
+
+## Results
+
+Millions of values per second for `n = 1e7`, median of five rounds, from
+the package’s `benchmark` workflow: on a GitHub-hosted runner for Linux
+(2026-09-26), and the workflow’s code run locally on an Apple M1
+(2026-09-27).
+
+|  | Linux x86_64, 1 thread | Linux x86_64, 4 threads | Apple M1, 1 thread | Apple M1, 8 threads |
+|----|---:|---:|---:|---:|
+| **uniform** |  |  |  |  |
+| zurand (`xoshiro256pp`) | **864** | **1801** | **2196** | **4984** |
+| zurand (`philox4x64`) | 276 | 594 | 574 | 2404 |
+| randompack (`x256++simd`) | 688 | 684 | 1918 | 1888 |
+| randompack (`philox`) | 252 | 252 | 574 | 572 |
+| dqrng | 368 | 367 | 311 | 310 |
+| base R [`runif()`](https://rdrr.io/r/stats/Uniform.html) | 104 | 104 | 213 | 210 |
+| **normal** |  |  |  |  |
+| zurand (`xoshiro256pp`) | **366** | **919** | **739** | **3143** |
+| zurand (`philox4x64`) | 215 | 501 | 377 | 1622 |
+| randompack (`x256++simd`) | 355 | 355 | 718 | 708 |
+| randompack (`philox`) | 184 | 184 | 375 | 369 |
+| RcppZiggurat (MT) | 125 | 124 | 225 | 221 |
+| dqrng | 143 | 143 | 235 | 233 |
+| base R [`rnorm()`](https://rdrr.io/r/stats/Normal.html) | 28 | 28 | 43 | 42 |
+
+- **Linux:** AMD EPYC 7763, 4 cores, AVX2, OpenMP.
+- **Apple M1:** a MacBook Air (fanless), 8 cores (4 performance and 4
+  efficiency), 16 GB, NEON, on mains power, with OpenMP through the
+  runtime R ships (see *Threads*). Not a CI runner: GitHub’s M1 runner
+  is a virtualised 3-core slice whose numbers moved by a third between
+  runs (1364-1837 M/s uniform on one thread).
+
+## Reading the table
+
+- **Against dqrng and RcppZiggurat**, zurand’s default engine is 2.3-7x
+  faster on uniform and 2.9-3.3x on normal, single-threaded.
+- **Against randompack’s SIMD engine**, the fastest single-threaded
+  competitor, zurand leads on every row. Uniform: 1.26x on x86_64, and
+  1.15x on the M1 for fills of 1e6 and 1e7 values (0.97x for 1e5, a fill
+  small enough to stay in cache; same-machine A/B, one thread). Normal:
+  1.03x on this Zen 3, 1.08x on a Xeon 6973P (the same-machine A/B
+  behind \#43) and 1.01-1.03x on the M1, where `method = "mcfarland"`
+  (below) is 1.09x. Both vectorise the generator (AVX2 on x86_64, NEON
+  on arm64), and both use NumPy’s ziggurat, scalar, for normals;
+  zurand’s takes the sign from a signed table, is unrolled by four, and
+  keeps its rare slow path as plain out-of-line code.
+- **With threads**, zurand is the only package here that parallelizes at
+  the R level, and the threaded output is bit-identical to the serial
+  one. On four EPYC cores it is 2.6x randompack on both. On the M1’s
+  eight it is 2.6x on uniform and 4.4x on normal: normals scale to 4.3x
+  one thread, while uniform stops at about 2.3x, where it is writing 40
+  GB/s. Half of the M1’s cores are efficiency cores, and all eight still
+  beat the four performance cores alone, by 4-13% on normals, so leave
+  [`rng_threads()`](https://pedrobtz.github.io/zurand/reference/rng_threads.md)
+  uncapped there.
+- **The engines differ in speed, not in guarantees.** Philox and
+  Threefry are counter-based: each value is computed from its position.
+  The default xoshiro256pp reseeds a cheap recurrence from Philox every
+  512 values.
+
+## What was tried and rejected
+
+- **Non-temporal stores** for large uniform fills: faster in a synthetic
+  harness, slower at the R level on both Intel and AMD, one thread and
+  four. R’s fresh vectors cost page faults, which streaming stores do
+  not avoid.
+- **A vectorised ziggurat fast path** for normals: with AVX2 gathers it
+  was 1.8x slower on Intel CPUs carrying the “Downfall” microcode fix;
+  with plain loads it gained up to 9% on some Intel CPUs, nothing on
+  AMD, and lost 6% for philox on another. The table lookups, not the
+  arithmetic, are the cost.
+- **Other ziggurat restructurings**, all bit-identical: branch-free with
+  a fix-up pass (1.4-1.6x slower; the ~1% reject branch is nearly free),
+  randompack’s in-place structure, a packed `{ki, wi}` table (both
+  tables already sit in L1 cache), and computing the rejected draws’
+  retry blocks four at a time (+2% for xoshiro, but 2% slower for
+  threefry). What did pay was fewer instructions per draw: the sign
+  folded into a signed table and the loop unrolled by four. The
+  ziggurat’s implementation is now frozen; a faster Gaussian would be a
+  different method.
+- **Fusing the generator with the ziggurat transform**, so no word
+  buffer exists: slower on every CPU tried (i5, Zen 3, Zen 4, Xeon
+  6973P), by 12-95%. The 32 KiB buffer costs nothing; the transform is
+  the cost.
+- **Non-temporal stores, again**, this time on freshly allocated memory
+  with R’s 16-byte alignment: 1.3-3.3x slower than ordinary stores on
+  every CPU. Closed.
+- **Pre-faulting the output** (`MADV_POPULATE_WRITE`): no gain. The page
+  size is what matters; see *Page size on Linux* below.
+- **Vectorised Box-Muller** (VectorizedRNG.jl’s approach), made
+  reproducible by evaluating `log`, `sin` and `cos` without fused
+  multiply-add, so every vector lane and platform agrees with the scalar
+  path. It was 3.5-13x slower per value than McFarland’s method on every
+  CPU tried; allowing fused multiply-add gained at most 1.33x and
+  changed 7% of values in the last bits. A divide, a square root and two
+  polynomials cost more than one table load.
+- **`DC ZVA` for normals on Apple Silicon.** It is what lets zurand’s
+  uniform fill beat randompack there, because that fill writes ten
+  interleaved streams. Normals write one sequential stream, which the
+  core already handles, and zeroing first made them slower.
+
+## Method
+
+Every number comes from one protocol:
+
+- an `-O2` build, never `devtools::load_all()` in its default debug
+  mode, which compiles `-O0` and runs about ten times slower;
+- every package measured in the same `bench::mark()` call on the same
+  machine, and the ratio reported over repeated rounds, because absolute
+  throughput on a shared machine moves by more than the differences
+  being measured;
+- each competitor on its fastest engine, with its counter-based engine
+  alongside where it has one.
+
+``` r
+
+library(zurand)
+library(bench)
+
+n <- 1e7
+key <- rng_key(42L)                  # xoshiro256pp, the default
+rp <- randompack::randompack_rng()   # randompack's fastest engine
+
+rng_threads(1L)
+bench::mark(
+  zurand     = rng_uniform(key, n),
+  randompack = rp$unif(len = n),
+  dqrng      = dqrng::dqrunif(n),
+  base       = runif(n),
+  check = FALSE, min_iterations = 10
+)
+```
+
+The full comparison is `tools/benchmark.R` in the source repository, and
+the `benchmark` workflow runs it on any GitHub-hosted runner.
+
+## Threads
+
+[`rng_threads()`](https://pedrobtz.github.io/zurand/reference/rng_threads.md)
+caps how many threads zurand uses. The cap changes speed, never values:
+
+``` r
+
+key <- rng_key(1L)
+rng_threads(1L); one <- rng_normal(key, 1e7)
+rng_threads(0L); all <- rng_normal(key, 1e7)   # 0 removes the cap
+identical(one, all)
+#> [1] TRUE
+```
+
+Fills go parallel above 32,768 values. With several keys the threads
+split the keys; with one key they split its positions.
+
+On macOS R does not set OpenMP compiler flags, so the package’s
+`configure` script tries the OpenMP runtime that R itself ships
+(`libomp.dylib` in `R.home("lib")`, see
+<https://mac.r-project.org/openmp/>), the same route data.table’s CRAN
+binaries take. It needs the OpenMP headers at build time, which CRAN’s
+build machines have; without them the build is single-threaded, and
+[`rng_threads()`](https://pedrobtz.github.io/zurand/reference/rng_threads.md)
+reports 1.
+
+## Two normal methods
+
+[`rng_normal()`](https://pedrobtz.github.io/zurand/reference/rng_normal.md)
+has a second method, McFarland’s (2016) modified ziggurat, selected with
+`method = "mcfarland"`. Its common case (253 draws in 256) uses the
+word’s low byte as the layer and returns
+`X[i] * (the word as a signed integer)`. That needs no table comparison,
+and the sign comes free. It is about 8 instructions per value where the
+NumPy-table ziggurat needs 13. One thread, default engine, M/s relative
+to the default method in the same `bench::mark()` call:
+
+|                   |  1e5 |  1e6 |  1e7 |
+|-------------------|-----:|-----:|-----:|
+| EPYC 7763 (Zen 3) | 1.08 | 1.15 | 1.17 |
+| EPYC 9V74 (Zen 4) | 1.07 | 1.16 | 1.25 |
+| Neoverse N2       | 1.04 | 1.07 | 1.10 |
+| Apple M1          | 1.09 | 1.09 | 1.08 |
+
+The default stays the NumPy-table ziggurat: changing it would change
+every existing normal stream. The two methods are separate streams: the
+same key gives unrelated values under each.
+
+## Page size on Linux
+
+R serves a large vector from `malloc()`, which glibc maps fresh, so the
+fill is the first touch of every page and pays one page fault per page.
+With 4 KiB pages that costs more than generating the values. On the CI
+runner’s kernel, which uses 2 MiB pages for everything
+(`transparent_hugepage/enabled` = `always`), forcing 4 KiB pages took
+the uniform fill of 1e7 values from 837 to 242 M/s and the normal fill
+from 338 to 162. Kernels in `madvise` mode – the Ubuntu default – give a
+mapping 2 MiB pages only when asked, and zurand asks, on output vectors
+of 4 MiB and more (`options(zurand.hugepages = FALSE)` stops it). On the
+`ubuntu-24.04-arm` runner, a Neoverse N2 in `madvise` mode, one thread:
+
+| M/s, n = 1e7 | zurand without the request | zurand with it | randompack |
+|--------------|---------------------------:|---------------:|-----------:|
+| uniform      |                        268 |        **532** |        271 |
+| normal       |                        214 |        **344** |        200 |
+
+No value changes; the kernel only tags the mapping. In `always` mode the
+request is skipped: the pages are already large, and asking explicitly
+also opts the mapping into synchronous compaction, measured 6-9% slower.
+macOS has no equivalent for memory it did not map itself.
+
+## Beyond R
+
+The C API in `zurand.h` fills buffers the caller owns, from the caller’s
+own threads, with the values the R functions return. For a simulation
+that consumes random numbers as it goes, filling a reused buffer avoids
+allocating a new R vector per call. For large vectors that allocation is
+a large share of the time: on the Linux runner, allocating and zeroing a
+vector of 1e7 doubles alone runs at about 1,250 M/s, the same order as
+zurand’s four-thread fill.
