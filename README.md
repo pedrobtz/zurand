@@ -3,7 +3,7 @@
 <!-- badges: start -->
 [![R-CMD-check](https://github.com/pedrobtz/zurand/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pedrobtz/zurand/actions/workflows/R-CMD-check.yaml)
 [![native-checks](https://github.com/pedrobtz/zurand/actions/workflows/native-checks.yaml/badge.svg)](https://github.com/pedrobtz/zurand/actions/workflows/native-checks.yaml)
-![Coverage](https://github.com/pedrobtz/zurand/raw/main/.github/badges/coverage.svg)
+[![Coverage](https://github.com/pedrobtz/zurand/raw/gh-pages/badges/coverage.svg)](https://github.com/pedrobtz/zurand/actions/workflows/coverage.yaml)
 <!-- badges: end -->
 
 Fast, stateless random numbers for R. The default engine is xoshiro256++,
