@@ -28,3 +28,27 @@ jobs:
       # rmarkdown or testthat. tests/testthat.R guards library(testthat) and
       # the one processx test is skipped without it.
       nosuggests: true
+
+  # Every test must pass in any order (testthat's shuffle = TRUE reorders
+  # each file's top-level expressions), so helpers live in helper-*.R and
+  # global state is restored with withr. NOT_CRAN so nothing is skipped
+  # that could hide an order dependence.
+  shuffle:
+    runs-on: ubuntu-latest
+    env:
+      NOT_CRAN: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          needs: check
+      - name: Install
+        run: R CMD INSTALL .
+      - name: Tests in shuffled order
+        shell: Rscript {0}
+        run: |
+          r <- as.data.frame(testthat::test_dir(
+            "tests/testthat", package = "zurand", load_package = "installed",
+            shuffle = TRUE, stop_on_failure = TRUE))
+          cat("tests:", nrow(r), " skipped:", sum(r$skipped), "\n")

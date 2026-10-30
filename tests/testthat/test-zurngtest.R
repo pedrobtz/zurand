@@ -6,32 +6,6 @@
 # installed and skips elsewhere, and never on CRAN, since it compiles a
 # package and runs megabytes of tests.
 
-install_pract_fixture <- function() {
-  inc <- c(
-    system.file("include", package = "zurand"),
-    system.file("include", package = "zurngtest")
-  )
-  src <- file.path(tempfile("zurandpract-src"), "zurandpract")
-  dir.create(src, recursive = TRUE)
-  file.copy(list.files(test_path("zurandpract"), full.names = TRUE), src,
-            recursive = TRUE)
-  writeLines(
-    sprintf("PKG_CPPFLAGS = %s",
-            paste0('-I"', normalizePath(inc, "/"), '"', collapse = " ")),
-    file.path(src, "src", "Makevars")
-  )
-  lib <- tempfile("zurandpract-lib")
-  dir.create(lib)
-  out <- suppressWarnings(system2(
-    file.path(R.home("bin"), "R"),
-    c("CMD", "INSTALL", "--no-test-load", "--no-multiarch",
-      paste0("--library=", shQuote(lib)), shQuote(src)),
-    stdout = TRUE, stderr = TRUE))
-  if (!is.null(attr(out, "status")) && attr(out, "status") != 0)
-    stop("building the zurngtest fixture failed:\n", paste(out, collapse = "\n"))
-  loadNamespace("zurandpract", lib.loc = lib)
-}
-
 test_that("zurand streams pass PractRand through zurngtest's C callable", {
   skip_on_cran()
   skip_if_not(requireNamespace("zurngtest", quietly = TRUE),

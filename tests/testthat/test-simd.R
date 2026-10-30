@@ -2,18 +2,6 @@
 # observed in the output. That is not a property to assert in a comment --
 # these run both paths and compare.
 
-skip_if_no_simd <- function() {
-  if (identical(rng_simd(), "none"))
-    skip("no vectorised path on this CPU; both branches would be the scalar one")
-}
-
-with_simd <- function(on, code) {
-  old <- rng_simd()
-  on.exit(rng_simd(!identical(old, "none")), add = TRUE)
-  rng_simd(on)
-  force(code)
-}
-
 test_that("the vectorised and portable paths produce identical values", {
   skip_if_no_simd()
   key <- rng_key(42L, engine = "xoshiro256pp")
