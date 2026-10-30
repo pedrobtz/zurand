@@ -109,6 +109,23 @@ test_that("lazy vectors serialise as their recipe, and modified ones as values",
   expect_identical(w[-5], rng_uniform(k, 100)[-5])
 })
 
+test_that("long regions of lazy normals match the sampler at an offset", {
+  # x[a:b] with b - a + 1 >= 32,768 goes through the parallel range fill
+  # (ZURAND_LAZY_BIG_REGION); start it off every engine's chunk boundary.
+  for (engine in engines) {
+    k <- rng_key(12L, engine = engine)
+    for (method in c("ziggurat", "mcfarland")) {
+      x <- rng_lazy_normal(k, 1e5, mean = 2, sd = 0.5, method = method)
+      expect_identical(
+        x[777:(777 + 40000)],
+        rng_normal(k, 40001, mean = 2, sd = 0.5, method = method, offset = 776),
+        info = paste(engine, method)
+      )
+      expect_false(materialised(x))
+    }
+  }
+})
+
 test_that("a lazy vector that was only read still saves as its recipe", {
   k <- rng_key(8L)
   x <- rng_lazy_normal(k, 1e5)
