@@ -22,6 +22,10 @@ jobs:
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       _R_CHECK_FORCE_SUGGESTS_: false
+      # arm64 has NEON and this job builds with OpenMP; test-simd.R fails,
+      # rather than skips, if either went missing.
+      ZURAND_EXPECT_SIMD: true
+      ZURAND_EXPECT_OPENMP: true
     steps:
       - uses: actions/checkout@v4
       - name: OpenMP headers (LLVM 19.1.5, for Xcode 16.3+), as CRAN's machines

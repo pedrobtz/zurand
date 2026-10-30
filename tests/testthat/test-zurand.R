@@ -117,7 +117,8 @@ test_that("rng_fold() folds whole-number doubles and integers identically", {
 
   expect_identical(rng_fold(key, 1), rng_fold(key, 1L))
   expect_identical(rng_fold(key, c(-2, 0, 7)), rng_fold(key, c(-2L, 0L, 7L)))
-  expect_identical(rng_fold(key, 2^40), rng_fold(key, 2^40))
+  # Large doubles are pinned in test-golden.R; here they must stay distinct.
+  expect_false(identical(rng_fold(key, 2^40), rng_fold(key, 2^40 + 1)))
   expect_false(identical(rng_fold(key, 1), rng_fold(key, TRUE)))
   expect_false(identical(rng_fold(key, 1), rng_fold(key, as.raw(1))))
 })
@@ -378,8 +379,7 @@ test_that("rng_threads() caps parallelism without changing results", {
   mk <- rng_normal(key, 70001L, method = "mcfarland")
   mm <- rng_normal(keys, 40001L, method = "mcfarland")
 
-  raw <- rng_threads(1L)
-  on.exit(rng_threads(raw))
+  raw <- local_threads(1L)
   expect_gte(raw, 0L)
   expect_identical(rng_threads(), 1L)
   expect_identical(rng_uniform(key, 70001L), u)
@@ -413,14 +413,14 @@ test_that("an uncapped fill equals a single-threaded one", {
   # Uses every core the OpenMP runtime offers, which CRAN forbids.
   skip_on_cran()
   key <- rng_key(31L)
-  raw <- rng_threads(1L)
-  on.exit(rng_threads(raw))
+  local_threads(1L)
   u <- rng_uniform(key, 70001L)
   rng_threads(0L)
   expect_identical(rng_uniform(key, 70001L), u)
 })
 
 test_that("stateless functions do not touch .Random.seed", {
+  withr::local_preserve_seed()
   set.seed(123)
   before <- .Random.seed
   key <- rng_key(42L)
@@ -428,13 +428,21 @@ test_that("stateless functions do not touch .Random.seed", {
   rng_fold(key, "layer")
   rng_uniform(key, 10L)
   rng_normal(key, 10L)
+  rng_normal(key, 10L, method = "mcfarland")
+  rng_uniform(key, 10L, offset = 1e6)
+  rng_normal(key, 10L, offset = 1e6)
   rng_integer(key, 10L, 1L, 6L)
   rng_bits(key, 10L)
+  x <- rng_lazy_normal(key, 1e4)
+  x[c(1, 5000)]
+  sum(x)
+  x[]
 
   expect_identical(.Random.seed, before)
 })
 
 test_that("rng_key_from_r() consumes R's RNG state intentionally", {
+  withr::local_preserve_seed()
   set.seed(123)
   key <- rng_key_from_r(n = 3L)
   after <- .Random.seed
@@ -499,13 +507,14 @@ test_that("offset draws the same positions as a longer fill", {
                      5121, 10240, 20000)) {
       for (n in c(0L, 1L, 7L, 5121L, 9999L)) {
         i <- offset + seq_len(n)
+        info <- sprintf("%s, offset %s, n %d", engine, offset, n)
         expect_identical(rng_uniform(keys, n, -1, 2, offset = offset),
-                         full_u[i, , drop = FALSE])
+                         full_u[i, , drop = FALSE], info = info)
         expect_identical(rng_normal(keys, n, 0.5, 3, offset = offset),
-                         full_z[i, , drop = FALSE])
+                         full_z[i, , drop = FALSE], info = info)
         expect_identical(rng_normal(keys, n, method = "mcfarland",
                                     offset = offset),
-                         full_m[i, , drop = FALSE])
+                         full_m[i, , drop = FALSE], info = info)
       }
     }
   }
@@ -514,13 +523,12 @@ test_that("offset draws the same positions as a longer fill", {
 test_that("offset fills are the same with threads", {
   key <- rng_key(5L)
   full <- rng_normal(key, 3e5)
-  old <- rng_threads(1L)
+  local_threads(1L)
   one <- rng_normal(key, 2e5, offset = 777)
-  rng_threads(0L)
-  all <- rng_normal(key, 2e5, offset = 777)
-  rng_threads(old)
+  rng_threads(2L)                  # the most CRAN allows (see setup.R)
+  two <- rng_normal(key, 2e5, offset = 777)
   expect_identical(one, full[777 + seq_len(2e5)])
-  expect_identical(all, one)
+  expect_identical(two, one)
 })
 
 test_that("offset is validated", {
@@ -545,4 +553,50 @@ test_that("offset + n is checked exactly at 2^53", {
     expect_length(sampler(key, 3L, offset = 2^53 - 3), 3L)
     expect_length(sampler(key, 0L, offset = 2^53), 0L)
   }
+})
+
+test_that("every argument check reachable from R reports its own error", {
+  k <- rng_key(1L)
+  # Non-finite scaling would otherwise reach the scaling pass.
+  expect_error(rng_normal(k, 2, mean = Inf), "`mean` must be finite")
+  expect_error(rng_normal(k, 2, sd = NaN), "`sd` must be finite")
+  expect_error(rng_uniform(k, 2, min = -Inf), "`min` must be finite")
+  expect_error(rng_uniform(k, 2, max = Inf), "`max` must be finite")
+  # Missing data must not fold as some other value (NA_integer_ is INT_MIN).
+  expect_error(rng_fold(k, c(1L, NA)), "must not contain missing values")
+  expect_error(rng_fold(k, NA), "must not contain missing values")
+  expect_error(rng_fold(k, NA_character_), "must not contain missing values")
+  expect_error(rng_fold(k, Inf), "finite whole numbers")
+  expect_error(rng_fold(k, NA_real_), "finite whole numbers")
+  expect_error(rng_fold(k, 1.5), "finite whole numbers")
+  expect_error(rng_fold(k, 2^60), "exactly representable")
+  expect_error(
+    c(rng_key(1L, engine = "philox4x64"), rng_key(1L, engine = "threefry4x64")),
+    "same engine"
+  )
+  bad <- k
+  dim(bad) <- c(2L, 2L)
+  expect_error(rng_uniform(bad, 1), "invalid internal shape")
+  expect_error(rng_uniform(k, 2^53), "too large for an R vector")
+  expect_error(rng_key(1L, n = 2^40), "too many keys")
+  expect_error(rng_integer(k, 1, 2^31, 2^31 + 2), "integer range")
+  expect_error(rng_integer(k, 1, 1.5, 3), "must be a whole number")
+  expect_error(rng_threads(NA), "integer or double scalar")
+  # Checked before allocating (#75), so this costs nothing.
+  expect_error(rng_uniform(rng_key(1L, n = 2L), 2^31), "dimensions are too large")
+  expect_error(rng_bits(rng_key(1L, n = 2L), 2^31), "dimensions are too large")
+  # Not reachable from R, so not tested here: "<rng_key> has an
+  # unrecognised engine" (key_engine_code()), because key_count() runs
+  # check_engine() first on every path.
+})
+
+test_that("huge-page advice never changes values", {
+  # 6e5 doubles is 4.8 MB, above the 4 MiB threshold for madvise(); on
+  # Linux in THP "madvise" mode this takes the advised path, elsewhere it
+  # checks only that the option is harmless.
+  key <- rng_key(5L)
+  withr::local_options(zurand.hugepages = TRUE)
+  on <- rng_uniform(key, 6e5)
+  withr::local_options(zurand.hugepages = FALSE)
+  expect_identical(rng_uniform(key, 6e5), on)
 })

@@ -1,0 +1,62 @@
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+name: R-CMD-check
+
+permissions: read-all
+
+jobs:
+  R-CMD-check:
+    uses: pedrobtz/r-actions/.github/workflows/r-cmd-check.yml@8caf5119301bb2a3bd433b92045b8c75b3097096 # v1.24.0
+    with:
+      # The default four, plus two. R 4.1 is the floor DESCRIPTION's
+      # Depends claims. GCC on arm64: GCC contracts a + b * c into a fused
+      # multiply-add by default wherever the target has one, and every
+      # arm64 target does; clang-on-arm64 (macOS) and GCC-on-x86_64 (no FMA
+      # in the baseline ISA) never exercise that. That leg is what proves
+      # the golden values survive it.
+      runners: >-
+        [{"os": "macos-latest", "r": "release"},
+         {"os": "windows-latest", "r": "release"},
+         {"os": "ubuntu-latest", "r": "release"},
+         {"os": "ubuntu-latest", "r": "oldrel-1"},
+         {"os": "ubuntu-latest", "r": "4.1"},
+         {"os": "ubuntu-24.04-arm", "r": "release"}]
+      # CRAN's NOSUGGESTS flavour: the package without knitr, processx,
+      # rmarkdown or testthat. tests/testthat.R guards library(testthat) and
+      # the one processx test is skipped without it.
+      nosuggests: true
+
+  # Every test must pass in any order (testthat's shuffle = TRUE reorders
+  # each file's top-level expressions), so helpers live in helper-*.R and
+  # global state is restored with withr. NOT_CRAN so nothing is skipped
+  # that could hide an order dependence.
+  shuffle:
+    runs-on: ubuntu-latest
+    env:
+      NOT_CRAN: true
+      # x86_64 runners have AVX2 and R's OpenMP flags: test-simd.R fails,
+      # rather than skips, if either path went missing from the build.
+      ZURAND_EXPECT_SIMD: true
+      ZURAND_EXPECT_OPENMP: true
+      # test-zurngtest.R's PractRand smoke test runs here, the only leg
+      # with zurngtest (not a dependency; installed from GitHub).
+      ZURAND_EXPECT_ZURNGTEST: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: github::pedrobtz/zurngtest
+          needs: check
+      - name: Install
+        run: R CMD INSTALL .
+      - name: Tests in shuffled order
+        shell: Rscript {0}
+        run: |
+          r <- as.data.frame(testthat::test_dir(
+            "tests/testthat", package = "zurand", load_package = "installed",
+            shuffle = TRUE, stop_on_failure = TRUE))
+          cat("tests:", nrow(r), " skipped:", sum(r$skipped), "\n")

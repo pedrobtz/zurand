@@ -12,28 +12,28 @@ permissions: read-all
 
 jobs:
   sanitizers:
-    uses: pedrobtz/r-actions/.github/workflows/sanitizers.yml@v1
+    uses: pedrobtz/r-actions/.github/workflows/sanitizers.yml@8caf5119301bb2a3bd433b92045b8c75b3097096 # v1.24.0
     with:
       asan: true
 
   valgrind:
-    uses: pedrobtz/r-actions/.github/workflows/valgrind.yml@v1
+    uses: pedrobtz/r-actions/.github/workflows/valgrind.yml@8caf5119301bb2a3bd433b92045b8c75b3097096 # v1.24.0
     with:
       # libgomp's pooled worker threads keep their TLS until exit, which
       # --leak-check=full reports as "possibly lost". See the file.
       suppressions: .github/valgrind.supp
 
   lto:
-    uses: pedrobtz/r-actions/.github/workflows/lto.yml@v1
+    uses: pedrobtz/r-actions/.github/workflows/lto.yml@8caf5119301bb2a3bd433b92045b8c75b3097096 # v1.24.0
 
   gctorture:
-    uses: pedrobtz/r-actions/.github/workflows/gctorture.yml@v1
+    uses: pedrobtz/r-actions/.github/workflows/gctorture.yml@8caf5119301bb2a3bd433b92045b8c75b3097096 # v1.24.0
 
   rchk:
-    uses: pedrobtz/r-actions/.github/workflows/rchk.yml@v1
+    uses: pedrobtz/r-actions/.github/workflows/rchk.yml@8caf5119301bb2a3bd433b92045b8c75b3097096 # v1.24.0
 
   analyzers:
-    uses: pedrobtz/r-actions/.github/workflows/analyzers.yml@v1
+    uses: pedrobtz/r-actions/.github/workflows/analyzers.yml@8caf5119301bb2a3bd433b92045b8c75b3097096 # v1.24.0
     with:
       # Random123 and NumPy's ziggurat tables are vendored (verbatim; NumPy's
       # trimmed to the tables used) and are
@@ -47,6 +47,6 @@ jobs:
   # above reproduces. Full runs only: `quick`, which skips all three, on
   # pull requests; full on every other event.
   cran-special:
-    uses: pedrobtz/r-actions/.github/workflows/cran-special.yml@v1
+    uses: pedrobtz/r-actions/.github/workflows/cran-special.yml@8caf5119301bb2a3bd433b92045b8c75b3097096 # v1.24.0
     with:
       profile: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-ci') && 'quick' || 'full' }}

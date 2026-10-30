@@ -86,7 +86,11 @@ SEXP client_fill_at(SEXP keys, SEXP n_, SEXP what_, SEXP a_, SEXP b_,
     int n = Rf_asInteger(n_), what = Rf_asInteger(what_);
     int method = Rf_asInteger(method_);
     double a = Rf_asReal(a_), b = Rf_asReal(b_);
-    uint64_t offset = (uint64_t)Rf_asReal(offset_);
+    /* The start: a double, or c(base, add) for base + add in uint64_t,
+     * which reaches positions a double cannot hold exactly (past 2^53). */
+    uint64_t offset = (uint64_t)REAL(offset_)[0];
+    if (XLENGTH(offset_) > 1)
+        offset += (uint64_t)REAL(offset_)[1];
     int nkey = Rf_nrows(keys);
     zurand_key *ks = (zurand_key *) R_alloc((size_t)nkey, sizeof(zurand_key));
     for (int j = 0; j < nkey; j++)
@@ -224,51 +228,90 @@ SEXP client_fold(SEXP key, SEXP data_) {
     return Rf_mkString(buf);
 }
 
-/* Return codes for invalid calls, and the table's version. */
+/* Return codes for invalid calls, and the table's version, as a named
+ * integer vector so a failing case names itself. */
+#define CASE(name, call) do {                                         \
+        names[nc] = name;                                             \
+        codes[nc++] = (call);                                         \
+    } while (0)
+
 SEXP client_errors(SEXP key) {
     const zurand_api *zr = zurand_get_api();
-    zurand_key k, bad;
+    zurand_key k, bad, nokey;
     double d[4]; int iv[4];
+    const char *names[64]; int codes[64], nc = 0;
     if (zr->key_get(key, 0, &k) != ZURAND_OK) Rf_error("key_get failed");
-    SEXP ans = PROTECT(Rf_allocVector(INTSXP, 30));
-    int *r = INTEGER(ans);
-    r[0] = zr->version;
-    r[1] = zr->key_get(key, 5, &bad);                         /* out of range */
-    r[2] = zr->fill_uniform(k, 4, 1.0, 0.0, d);               /* min > max */
-    r[3] = zr->fill_normal(k, 4, 0.0, -1.0, d);               /* sd < 0 */
-    r[4] = zr->fill_uniform(k, 4, 0.0, R_PosInf, d);          /* infinite */
-    r[5] = zr->fill_integer(k, 4, NA_INTEGER, 3, iv);         /* NA bound */
-    bad = k; bad.engine = 7;
-    r[6] = zr->fill_normal(bad, 4, 0.0, 1.0, d);              /* engine */
+    nokey = k; nokey.engine = 7;
+    const size_t too_long = (size_t)R_XLEN_T_MAX + 1;
+    CASE("version", zr->version);
+    CASE("key_get_range", zr->key_get(key, 5, &bad));
+    CASE("key_get_null_out", zr->key_get(key, 0, NULL));
+    CASE("uniform_min_gt_max", zr->fill_uniform(k, 4, 1.0, 0.0, d));
+    CASE("uniform_inf", zr->fill_uniform(k, 4, 0.0, R_PosInf, d));
+    CASE("uniform_nan", zr->fill_uniform(k, 4, R_NaN, 1.0, d));
+    CASE("uniform_too_long", zr->fill_uniform(k, too_long, 0.0, 1.0, d));
+    CASE("normal_sd_neg", zr->fill_normal(k, 4, 0.0, -1.0, d));
+    CASE("normal_mean_inf", zr->fill_normal(k, 4, R_PosInf, 1.0, d));
+    CASE("normal_engine", zr->fill_normal(nokey, 4, 0.0, 1.0, d));
+    CASE("normal_n0", zr->fill_normal(k, 0, 0.0, 1.0, d));
+    CASE("integer_na", zr->fill_integer(k, 4, NA_INTEGER, 3, iv));
+    CASE("integer_min_gt_max", zr->fill_integer(k, 4, 3, 1, iv));
     bad = k; bad.stream = 2;
-    r[7] = zr->fill_bits64(bad, 4, (uint64_t *) d);           /* stream */
-    r[8] = zr->fill_normal(k, 0, 0.0, 1.0, d);                /* n = 0 is fine */
-    r[9] = zr->fill_normal_method(k, 4, 0.0, 1.0, 2, d);      /* method */
-    r[10] = zr->fill_normal_method(k, 4, 0.0, 1.0, -1, d);    /* method */
-    r[11] = zr->fill_normal_method(k, 4, 0.0, -1.0, ZURAND_NORMAL_MCFARLAND, d);
-    bad = k; bad.engine = 7;
-    r[12] = zr->fill_normal_method(bad, 4, 0.0, 1.0, ZURAND_NORMAL_MCFARLAND, d);
+    CASE("bits64_stream", zr->fill_bits64(bad, 4, (uint64_t *) d));
+    CASE("method_2", zr->fill_normal_method(k, 4, 0.0, 1.0, 2, d));
+    CASE("method_neg", zr->fill_normal_method(k, 4, 0.0, 1.0, -1, d));
+    CASE("method_sd_neg",
+         zr->fill_normal_method(k, 4, 0.0, -1.0, ZURAND_NORMAL_MCFARLAND, d));
+    CASE("method_engine",
+         zr->fill_normal_method(nokey, 4, 0.0, 1.0, ZURAND_NORMAL_MCFARLAND, d));
     /* version 3 */
-    r[13] = zr->fill_uniform_at(k, 10, 4, 1.0, 0.0, d);                  /* min > max */
-    r[14] = zr->fill_normal_at(k, 10, 4, 0.0, 1.0, 2, d);                /* method */
-    r[15] = zr->fill_normal_at(k, UINT64_MAX - 2, 4, 0.0, 1.0, 0, d);    /* overflow */
-    r[16] = zr->stream_normal(k, 10, 0.0, 1.0, 0, d, 0, never, NULL);    /* chunk 0 */
-    r[17] = zr->stream_normal(k, 10, 0.0, 1.0, 0, NULL, 4, never, NULL); /* no buf */
-    r[18] = zr->stream_uniform(k, 10, 0.0, 1.0, d, 4, NULL, NULL);       /* no fn */
-    r[19] = zr->stream_uniform(bad, 10, 0.0, 1.0, d, 4, never, NULL);    /* engine */
-    r[20] = zr->stream_normal(k, 0, 0.0, 1.0, 1, d, 4, never, NULL);     /* total 0 */
+    CASE("uniform_at_min_gt_max", zr->fill_uniform_at(k, 10, 4, 1.0, 0.0, d));
+    CASE("uniform_at_overflow",
+         zr->fill_uniform_at(k, UINT64_MAX - 2, 4, 0.0, 1.0, d));
+    CASE("uniform_at_engine", zr->fill_uniform_at(nokey, 10, 4, 0.0, 1.0, d));
+    CASE("normal_at_method", zr->fill_normal_at(k, 10, 4, 0.0, 1.0, 2, d));
+    CASE("normal_at_overflow",
+         zr->fill_normal_at(k, UINT64_MAX - 2, 4, 0.0, 1.0, 0, d));
+    CASE("normal_at_engine", zr->fill_normal_at(nokey, 10, 4, 0.0, 1.0, 0, d));
+    CASE("stream_chunk_0", zr->stream_normal(k, 10, 0.0, 1.0, 0, d, 0, never, NULL));
+    CASE("stream_chunk_too_long",
+         zr->stream_normal(k, 10, 0.0, 1.0, 0, d, too_long, never, NULL));
+    CASE("stream_no_buf", zr->stream_normal(k, 10, 0.0, 1.0, 0, NULL, 4, never, NULL));
+    CASE("stream_no_fn", zr->stream_uniform(k, 10, 0.0, 1.0, d, 4, NULL, NULL));
+    CASE("stream_uniform_engine",
+         zr->stream_uniform(nokey, 10, 0.0, 1.0, d, 4, never, NULL));
+    CASE("stream_normal_engine",
+         zr->stream_normal(nokey, 10, 0.0, 1.0, 0, d, 4, never, NULL));
+    CASE("stream_sd_neg", zr->stream_normal(k, 10, 0.0, -1.0, 0, d, 4, never, NULL));
+    CASE("stream_method", zr->stream_normal(k, 10, 0.0, 1.0, 2, d, 4, never, NULL));
+    CASE("stream_total_0", zr->stream_normal(k, 0, 0.0, 1.0, 1, d, 4, never, NULL));
+    CASE("fold_engine", zr->fold_int(nokey, 1, &bad));
     /* NULL outputs (#60): EINVAL, not a segfault; fine when n = 0 */
-    r[21] = zr->fill_uniform(k, 1, 0.0, 1.0, NULL);
-    r[22] = zr->fill_uniform(k, 5, 2.0, 2.0, NULL);                      /* constant */
-    r[23] = zr->fill_normal_method(k, 1, 0.0, 1.0, 1, NULL);
-    r[24] = zr->fill_integer(k, 1, 0, 5, NULL);
-    r[25] = zr->fill_bits64(k, 1, NULL);
-    r[26] = zr->fill_normal_at(k, 7, 1, 0.0, 1.0, 0, NULL);
-    r[27] = zr->fill_uniform_at(k, 7, 1, 0.0, 1.0, NULL);
-    r[28] = zr->fold_int(k, 1, NULL);
-    r[29] = zr->fill_uniform(k, 0, 0.0, 1.0, NULL);                      /* n = 0 */
-    UNPROTECT(1);
+    CASE("null_uniform", zr->fill_uniform(k, 1, 0.0, 1.0, NULL));
+    CASE("null_uniform_constant", zr->fill_uniform(k, 5, 2.0, 2.0, NULL));
+    CASE("null_normal_method", zr->fill_normal_method(k, 1, 0.0, 1.0, 1, NULL));
+    CASE("null_integer", zr->fill_integer(k, 1, 0, 5, NULL));
+    CASE("null_bits64", zr->fill_bits64(k, 1, NULL));
+    CASE("null_normal_at", zr->fill_normal_at(k, 7, 1, 0.0, 1.0, 0, NULL));
+    CASE("null_uniform_at", zr->fill_uniform_at(k, 7, 1, 0.0, 1.0, NULL));
+    CASE("null_fold", zr->fold_int(k, 1, NULL));
+    CASE("null_uniform_n0", zr->fill_uniform(k, 0, 0.0, 1.0, NULL));
+    SEXP ans = PROTECT(Rf_allocVector(INTSXP, nc));
+    SEXP nm = PROTECT(Rf_allocVector(STRSXP, nc));
+    for (int i = 0; i < nc; i++) {
+        INTEGER(ans)[i] = codes[i];
+        SET_STRING_ELT(nm, i, Rf_mkChar(names[i]));
+    }
+    Rf_setAttrib(ans, R_NamesSymbol, nm);
+    UNPROTECT(2);
     return ans;
+}
+
+/* key_get() on anything but a key vector: an R error, the one member that
+ * may raise one (it is called on the R thread). */
+SEXP client_key_get(SEXP x) {
+    zurand_key k;
+    return Rf_ScalarInteger(zurand_get_api()->key_get(x, 0, &k));
 }
 
 /* The team size of an OpenMP parallel region in this fixture: 1 when it
@@ -287,6 +330,7 @@ static const R_CallMethodDef entries[] = {
     {"C_client_fill",   (DL_FUNC) &client_fill,   5},
     {"C_client_fold",   (DL_FUNC) &client_fold,   2},
     {"C_client_errors", (DL_FUNC) &client_errors, 1},
+    {"C_client_key_get", (DL_FUNC) &client_key_get, 1},
     {"C_client_fill_at", (DL_FUNC) &client_fill_at, 7},
     {"C_client_stream", (DL_FUNC) &client_stream, 8},
     {"C_client_stream_par", (DL_FUNC) &client_stream_par, 7},

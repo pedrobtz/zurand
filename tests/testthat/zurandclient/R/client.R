@@ -6,6 +6,7 @@ client_fill <- function(keys, n, what, a = 0, b = 1) {
 }
 client_fold <- function(key, data) .Call(C_client_fold, key, as.double(data))
 client_errors <- function(key) .Call(C_client_errors, key)
+client_key_get <- function(x) .Call(C_client_key_get, x)
 
 dist_code <- function(what) match(what, c("uniform", "normal")) - 1L
 method_code <- function(method) if (method == "mcfarland") 1L else 0L

@@ -17,7 +17,7 @@ jobs:
     # The 32-bit leg is the only thing that compiles the portable C99
     # mulhilo64 fallback that src/Makevars defines R123_USE_MULHILO64_C99 for;
     # every other leg in CI has __uint128_t and takes the fast path.
-    uses: pedrobtz/r-actions/.github/workflows/arch.yml@v1
+    uses: pedrobtz/r-actions/.github/workflows/arch.yml@8caf5119301bb2a3bd433b92045b8c75b3097096 # v1.24.0
     with:
       # The default targets, plus the system libraries testthat's dependency
       # tree needs when built from source: fs links libuv, and ps includes

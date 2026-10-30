@@ -1,0 +1,12 @@
+# Keeps the commit-pinned pedrobtz/r-actions references (and the other
+# actions) current: each bump is a pull request that runs the full CI.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      r-actions:
+        patterns:
+          - "pedrobtz/r-actions*"

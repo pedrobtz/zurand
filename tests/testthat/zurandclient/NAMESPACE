@@ -1,3 +1,4 @@
 useDynLib(zurandclient, .registration = TRUE)
-export(client_fill, client_fold, client_errors, client_fill_at,
+export(client_fill, client_fold, client_errors, client_key_get,
+       client_fill_at,
        client_stream, client_stream_par, client_threads)

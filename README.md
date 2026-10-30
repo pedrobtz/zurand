@@ -1,8 +1,8 @@
 # zurand
 
 <!-- badges: start -->
-[![R-CMD-check](https://github.com/pedrobtz/zurand/actions/workflows/R-CMD-check.yml/badge.svg)](https://github.com/pedrobtz/zurand/actions/workflows/R-CMD-check.yml)
-[![native-checks](https://github.com/pedrobtz/zurand/actions/workflows/native-checks.yml/badge.svg)](https://github.com/pedrobtz/zurand/actions/workflows/native-checks.yml)
+[![R-CMD-check](https://github.com/pedrobtz/zurand/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pedrobtz/zurand/actions/workflows/R-CMD-check.yaml)
+[![native-checks](https://github.com/pedrobtz/zurand/actions/workflows/native-checks.yaml/badge.svg)](https://github.com/pedrobtz/zurand/actions/workflows/native-checks.yaml)
 ![Coverage](https://github.com/pedrobtz/zurand/raw/main/.github/badges/coverage.svg)
 <!-- badges: end -->
 

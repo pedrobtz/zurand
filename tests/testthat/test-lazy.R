@@ -2,12 +2,8 @@
 # must give the materialised sampler's values, on every engine, whatever
 # state the one-chunk cache is in.
 
-engines <- c("xoshiro256pp", "philox4x64", "threefry4x64")
-materialised <- function(x) zurand:::rng_lazy_materialised(x)
-cache_mode <- function(m) zurand:::rng_lazy_cache(m)
-
 test_that("lazy vectors equal the samplers, read every way", {
-  set.seed(1)
+  withr::local_seed(1)
   for (engine in engines) {
     k <- rng_key(3L, engine = engine)
     # Lengths off the engine chunks (512; 4096 or 5120 for xoshiro256pp).
@@ -19,22 +15,24 @@ test_that("lazy vectors equal the samplers, read every way", {
         list(function() rng_lazy_normal(k, n, 1, 3, "mcfarland"),
              rng_normal(k, n, 1, 3, "mcfarland")),
         list(function() rng_lazy_normal(k, n, 4, 0), rng_normal(k, n, 4, 0)))
-      for (cs in cases) {
+      for (ci in seq_along(cases)) {
+        cs <- cases[[ci]]
         ref <- cs[[2]]
         idx <- c(n, 1, sample(n, min(n, 200), replace = TRUE),
                  seq_len(min(n, 40)) + max(0, n - 60))
         x <- cs[[1]]()
-        expect_identical(length(x), as.integer(n))
-        expect_identical(x[idx], ref[idx])
-        expect_identical(vapply(idx, function(i) x[[i]], 0), ref[idx])
-        expect_identical(x[seq_len(n)], ref)
-        expect_identical(rev(x), rev(ref))
-        expect_identical(sum(x), sum(ref))
-        expect_identical(x[c(NA, n + 1, 1)], ref[c(NA, n + 1, 1)])
-        expect_false(materialised(x))
-        expect_identical(x + 0, ref + 0)     # materialises
-        expect_true(materialised(x))
-        expect_identical(x[idx], ref[idx])
+        info <- paste(engine, "n", n, "case", ci)
+        expect_identical(length(x), as.integer(n), info = info)
+        expect_identical(x[idx], ref[idx], info = info)
+        expect_identical(vapply(idx, function(i) x[[i]], 0), ref[idx], info = info)
+        expect_identical(x[seq_len(n)], ref, info = info)
+        expect_identical(rev(x), rev(ref), info = info)
+        expect_identical(sum(x), sum(ref), info = info)
+        expect_identical(x[c(NA, n + 1, 1)], ref[c(NA, n + 1, 1)], info = info)
+        expect_false(materialised(x), info = info)
+        expect_identical(x + 0, ref + 0, info = info)  # materialises
+        expect_true(materialised(x), info = info)
+        expect_identical(x[idx], ref[idx], info = info)
       }
     }
   }
@@ -48,7 +46,7 @@ test_that("reads are right whatever the cache holds", {
     probe <- c(1, 511, 512, 513, 4096, 4097, 5120, 5121, 10240, 10241, 29999, n)
     region <- 5000:15500
     for (mode in 0:2) {
-      old <- cache_mode(mode)
+      local_cache_mode(mode)
       prime <- list(
         empty = function(x) NULL,
         walked = function(x) for (i in 1:6000) x[[i]],
@@ -64,7 +62,6 @@ test_that("reads are right whatever the cache holds", {
         expect_identical(x[region], ref[region], info = paste(engine, mode, p))
         expect_false(materialised(x))
       }
-      cache_mode(old)
     }
   }
 })
@@ -112,6 +109,70 @@ test_that("lazy vectors serialise as their recipe, and modified ones as values",
   w <- unserialize(serialize(z, NULL))
   expect_identical(w[5], 0)
   expect_identical(w[-5], rng_uniform(k, 100)[-5])
+})
+
+test_that("long regions of lazy normals match the sampler at an offset", {
+  # x[a:b] with b - a + 1 >= 32,768 goes through the parallel range fill
+  # (ZURAND_LAZY_BIG_REGION); start it off every engine's chunk boundary.
+  for (engine in engines) {
+    k <- rng_key(12L, engine = engine)
+    for (method in c("ziggurat", "mcfarland")) {
+      x <- rng_lazy_normal(k, 1e5, mean = 2, sd = 0.5, method = method)
+      expect_identical(
+        x[777:(777 + 40000)],
+        rng_normal(k, 40001, mean = 2, sd = 0.5, method = method, offset = 776),
+        info = paste(engine, method)
+      )
+      expect_false(materialised(x))
+    }
+  }
+})
+
+test_that("a lazy vector that was only read still saves as its recipe", {
+  k <- rng_key(8L)
+  x <- rng_lazy_normal(k, 1e5)
+  expect_identical(sd(x), sd(rng_normal(k, 1e5)))   # REAL(): writable pointer
+  expect_true(materialised(x))
+  expect_lt(length(serialize(x, NULL)), 1000)
+  y <- unserialize(serialize(x, NULL))
+  expect_false(materialised(y))
+  expect_identical(y[], rng_normal(k, 1e5))
+
+  x[7] <- x[7]                               # written, but unchanged
+  expect_lt(length(serialize(x, NULL)), 1000)
+  x[7] <- 0
+  expect_gt(length(serialize(x, NULL)), 8e5)
+  expect_identical(unserialize(serialize(x, NULL))[7], 0)
+
+  z <- rng_lazy_uniform(k, 10, min = 3, max = 3)    # constant: s == 0
+  invisible(sd(z))
+  expect_lt(length(serialize(z, NULL)), 1000)
+})
+
+test_that("restoring a lazy vector refuses saved arguments it cannot have written", {
+  x <- rng_lazy_normal(rng_key(1L), 10)
+  u <- rng_lazy_uniform(rng_key(1L), 10)
+  ok <- tamper_lazy(x, 1, c(10, 1, 0, 1))
+  expect_identical(unserialize(ok)[], rng_normal(rng_key(1L), 10))
+  bad <- list(
+    distribution = c(10, 9, 0, 1),           # e.g. a later rng_lazy_exponential()
+    distribution = c(10, 1.5, 0, 1),
+    arguments = 10,
+    arguments = c(10, 1, NaN, 1),
+    arguments = c(10, 1, 0, Inf),
+    length = c(-5, 1, 0, 1),
+    length = c(1e300, 1, 0, 1),
+    length = c(10.5, 1, 0, 1),
+    scale = c(10, 1, 0, -1),
+    scaling = c(10, 1, 0, 1, 1)              # the doubled scaling is uniform-only
+  )
+  for (i in seq_along(bad)) {
+    expect_error(unserialize(tamper_lazy(x, 1, bad[[i]])),
+                 paste("saved", names(bad)[i], "is invalid"),
+                 info = deparse(bad[[i]]))
+  }
+  expect_error(unserialize(tamper_lazy(u, 0, c(10, 0, 0, 1, 2))),
+               "saved scaling is invalid")
 })
 
 test_that("lazy uniforms with bounds more than DBL_MAX apart match the sampler", {
@@ -166,65 +227,64 @@ test_that("real indices are range-checked before conversion", {
   skip_if(.Machine$sizeof.pointer < 8)
   x <- rng_lazy_normal(rng_key(1L), 10L)
   ref <- rng_normal(rng_key(1L), 10L)
-  idx <- c(0.5, 1.5, 10.9, 11, 1e300, Inf, NA)
+  idx <- c(0.5, 1.5, 10.9, 11, NA)
   expect_identical(x[idx], ref[idx])
-  expect_true(all(is.na(x[c(11, 1e300, Inf)])))
+  expect_true(is.na(x[11]))
+  # Indices past R_XLEN_T_MAX give NA up to R 4.6 and "subscript too large"
+  # from R-devel r90777 (PR#19261) on; a lazy vector does what a plain one
+  # does on the running R.
+  for (big in list(c(1, 1e300), c(1, Inf))) {
+    want <- tryCatch(ref[big], error = function(e) e)
+    if (inherits(want, "error")) {
+      expect_error(x[big], conditionMessage(want), fixed = TRUE)
+    } else {
+      expect_identical(x[big], want)
+    }
+  }
 })
 
 test_that("large lazy sums match with threads on and off", {
   skip_on_cran()
   k <- rng_key(6L)
   ref <- sum(rng_uniform(k, 1e7, -1, 3))
-  old <- rng_threads(1L)
+  local_threads(1L)
   one <- sum(rng_lazy_uniform(k, 1e7, -1, 3))
   rng_threads(0L)
   all <- sum(rng_lazy_uniform(k, 1e7, -1, 3))
-  rng_threads(old)
   expect_identical(one, ref)
   expect_identical(all, ref)
 })
 
 test_that("a huge lazy scan stops when interrupted", {
-  # sum() over 1e12 lazy values runs for hours; before the read methods
-  # checked for interrupts it ignored SIGINT and had to be killed. Run it in
-  # a child process, interrupt it, and require the interrupt condition.
-  # processx, not system2(wait = FALSE): a shell's background job starts
-  # with SIGINT ignored.
+  # sum() over 1e12 lazy values runs for hours; before Get_region checked
+  # for interrupts it ignored SIGINT and had to be killed.
   skip_on_cran()
   skip_on_os("windows")    # SIGINT
   skip_if_not_installed("processx")
-  path <- normalizePath(find.package("zurand"), "/")
-  load <- if (dir.exists(file.path(path, "src"))) {
-    # A source tree, as under devtools::test(): reuse its compiled library.
-    sprintf("pkgload::load_all(%s, compile = FALSE, quiet = TRUE)", deparse(path))
-  } else {
-    sprintf("library(zurand, lib.loc = %s)", deparse(dirname(path)))
-  }
-  started <- tempfile()
-  script <- tempfile(fileext = ".R")
-  writeLines(c(
-    load,
+  out <- interrupt_child(c(
     "x <- rng_lazy_normal(rng_key(1L), 1e12)",
-    sprintf("writeLines('scanning', %s)", deparse(started)),
+    "writeLines('scanning', started)",
     "cat(tryCatch({ sum(x); 'finished' }, interrupt = function(e) 'interrupted'))"
-  ), script)
-  child <- processx::process$new(file.path(R.home("bin"), "Rscript"), script,
-                                 stdout = "|", stderr = "|")
-  on.exit({
-    if (child$is_alive()) child$kill()
-    unlink(c(started, script))
-  }, add = TRUE)
-  deadline <- Sys.time() + 60
-  while (child$is_alive() && Sys.time() < deadline &&
-         !(file.exists(started) && file.size(started) > 0)) {
-    Sys.sleep(0.05)
-  }
-  expect_true(child$is_alive())
-  Sys.sleep(1)                               # well into the scan
-  child$interrupt()
-  child$wait(15000)
-  expect_false(child$is_alive())
-  expect_identical(child$read_all_output(), "interrupted")
+  ), after = 1)
+  expect_identical(out, "interrupted")
+})
+
+test_that("reading single elements never signals an interrupt", {
+  # REAL_ELT is what C and C++ code calls in its own loops, which cannot
+  # expect a longjmp (#77). is.na() reads a lazy vector through Elt alone;
+  # interrupted while it runs (about 2 s here), the interrupt must wait for
+  # it to return and land in the Sys.sleep() after it, with `y` assigned.
+  skip_on_cran()
+  skip_on_os("windows")    # SIGINT
+  skip_if_not_installed("processx")
+  out <- interrupt_child(c(
+    "x <- rng_lazy_normal(rng_key(1L, engine = 'philox4x64'), 6e7)",
+    "y <- NULL",
+    "writeLines('reading', started)",
+    "cat(tryCatch({ y <- is.na(x); Sys.sleep(60); 'finished' },",
+    "  interrupt = function(e) if (is.null(y)) 'inside is.na()' else 'after is.na()'))"
+  ), after = 0.3)
+  expect_identical(out, "after is.na()")
 })
 
 test_that("lazy vectors check their arguments", {
@@ -233,4 +293,12 @@ test_that("lazy vectors check their arguments", {
   expect_error(rng_lazy_normal(rng_key(1L), 10, sd = -1), "non-negative")
   expect_error(rng_lazy_uniform(rng_key(1L), 10, 2, 1), "less than or equal")
   expect_identical(length(rng_lazy_uniform(rng_key(1L), 0)), 0L)
+})
+
+test_that("inspect() describes a lazy vector without materialising it", {
+  x <- rng_lazy_normal(rng_key(1L, engine = "philox4x64"), 1e6, method = "mcfarland")
+  out <- capture.output(.Internal(inspect(x)))
+  expect_match(out[1], "zurand lazy normal (mcfarland), n = 1000000", fixed = TRUE)
+  expect_match(out[1], "engine philox4x64, not materialised", fixed = TRUE)
+  expect_false(materialised(x))
 })

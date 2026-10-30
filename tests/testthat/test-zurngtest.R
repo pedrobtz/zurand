@@ -4,38 +4,20 @@
 #
 # zurngtest is not a dependency of zurand: the test runs where it is
 # installed and skips elsewhere, and never on CRAN, since it compiles a
-# package and runs megabytes of tests.
-
-install_pract_fixture <- function() {
-  inc <- c(
-    system.file("include", package = "zurand"),
-    system.file("include", package = "zurngtest")
-  )
-  src <- file.path(tempfile("zurandpract-src"), "zurandpract")
-  dir.create(src, recursive = TRUE)
-  file.copy(list.files(test_path("zurandpract"), full.names = TRUE), src,
-            recursive = TRUE)
-  writeLines(
-    sprintf("PKG_CPPFLAGS = %s",
-            paste0('-I"', normalizePath(inc, "/"), '"', collapse = " ")),
-    file.path(src, "src", "Makevars")
-  )
-  lib <- tempfile("zurandpract-lib")
-  dir.create(lib)
-  out <- suppressWarnings(system2(
-    file.path(R.home("bin"), "R"),
-    c("CMD", "INSTALL", "--no-test-load", "--no-multiarch",
-      paste0("--library=", shQuote(lib)), shQuote(src)),
-    stdout = TRUE, stderr = TRUE))
-  if (!is.null(attr(out, "status")) && attr(out, "status") != 0)
-    stop("building the zurngtest fixture failed:\n", paste(out, collapse = "\n"))
-  loadNamespace("zurandpract", lib.loc = lib)
-}
+# package and runs megabytes of tests. CI's shuffle job installs it from
+# GitHub and sets ZURAND_EXPECT_ZURNGTEST, so there a missing zurngtest is a
+# failure, not a skip.
 
 test_that("zurand streams pass PractRand through zurngtest's C callable", {
   skip_on_cran()
-  skip_if_not(requireNamespace("zurngtest", quietly = TRUE),
-              "zurngtest is not installed")
+  # Loading zurngtest registers the C callable the fixture looks up, so it
+  # is loaded either way; where CI expects it, a missing one is an error.
+  if (identical(Sys.getenv("ZURAND_EXPECT_ZURNGTEST"), "true")) {
+    loadNamespace("zurngtest")
+  } else {
+    skip_if_not(requireNamespace("zurngtest", quietly = TRUE),
+                "zurngtest is not installed")
+  }
   ns <- install_pract_fixture()
   for (engine in c("philox4x64", "threefry4x64", "xoshiro256pp")) {
     res <- ns$pract_zurand(

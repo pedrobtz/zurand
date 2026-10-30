@@ -12,14 +12,6 @@
 #      round counts, including the two counters zurand cannot reach --
 #      before it is trusted to generate anything here.
 
-# A key is an opaque S3 object;;these tests reach past that on purpose, to
-# set the exact key words a reference vector requires. Package code must
-# not do this.
-raw_key <- function(words) {
-  structure(matrix(as.integer(words), nrow = 1L),
-            class = "rng_key", engine = "philox4x64")
-}
-
 test_that("rng_bits() reproduces Random123's published vector", {
   # tests/kat_vectors: philox4x64 10 <ctr=0 x4> <key=0 x2>
   # zurand block b uses ctr = {b, 0, 0, 0} and purpose BITS = 0, so a zero

@@ -25,12 +25,13 @@ Version:    1.14.0
 Revision:   9545ff6 (upstream main, five commits after the v1.14.0 tag)
 
 The Version field above is the pinned upstream release, and it is the only
-`Version:` line in this file on purpose: .github/workflows/vendor-upstream.yml
+`Version:` line in this file on purpose: .github/workflows/vendor-upstream.yaml
 reads it with `sed -n 's/^Version: *//p'` to ask whether upstream has shipped
 a newer release. Keep it in step when re-vendoring.
 
 Provides the counter-based generators behind every sampler in this package:
-Philox4x64-10 (the default engine) and Threefry4x64-13. Reference: J. K. Salmon, M. A. Moraes,
+Philox4x64-10, which also reseeds the default xoshiro256pp engine, and
+Threefry4x64-13. Reference: J. K. Salmon, M. A. Moraes,
 R. O. Dror and D. E. Shaw (2011), "Parallel random numbers: as easy as
 1, 2, 3", SC '11, <doi:10.1145/2063384.2063405>.
 

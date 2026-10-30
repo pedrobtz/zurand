@@ -59,14 +59,25 @@ typedef struct {
 static R_altrep_class_t zurand_lazy_class;
 
 /* Interrupts. A lazy vector makes a scan of 1e12 values one short
- * expression, and R's own loops over ALTREP regions -- sum(), mean(),
- * range() -- never check for an interrupt, so the read methods do, once
- * per ZURAND_LAZY_INTERRUPT generated values. Checks run on the R thread,
- * after a read has completed and outside any parallel region: the cache is
- * consistent there and no heap memory is held, so unwinding leaks nothing.
- * At 2^22 values a check costs well under 0.1% of the work between checks.
- * Materialisation fills the vector in one call and is bounded by memory;
- * it is not interruptible. */
+ * expression, and R's own region loops -- sum(), mean(), max(), prod(),
+ * everything built on ITERATE_BY_REGION -- run in constant memory and never
+ * check for an interrupt. So Get_region checks once per
+ * ZURAND_LAZY_INTERRUPT values it generates, and so does Extract_subset,
+ * which only R's own subsetting reaches (ExtractSubset() is not API).
+ * Elt does not check: R's loops over REAL_ELT allocate a result as long as
+ * the vector (is.na(), as.integer(), unique()), so they are bounded by
+ * memory like materialisation, or evaluate R code per element (for), where
+ * the evaluator checks; and REAL_ELT is what C and C++ code calls in its
+ * own loops, which choose their own interrupt points -- cpp11's x[i] does
+ * not unwind-protect it, so a longjmp there skips destructors (#77). C code
+ * reading through REAL_GET_REGION (cpp11's doubles iterator) can be
+ * interrupted; ?rng_lazy_normal says so and names the safe alternatives.
+ * Checks run on the R thread after a read has completed, outside any
+ * parallel region: the cache is consistent and no heap memory is held, so
+ * unwinding leaks nothing of ours. Dataptr never checks: R calls it with
+ * the GC disabled (ALTVEC_DATAPTR_EX() in altrep.c), where an interrupt
+ * handler must not run R code, and materialisation is bounded by memory.
+ * At 2^22 values a check costs well under 0.1% of the work between checks. */
 #define ZURAND_LAZY_INTERRUPT ((R_xlen_t)1 << 22)
 static R_xlen_t zurand_lazy_work = 0;
 
@@ -323,9 +334,7 @@ static double lazy_Elt(SEXP x, R_xlen_t i) {
     SEXP v = R_altrep_data2(x);
     if (v != R_NilValue)
         return REAL(v)[i];
-    double value = lazy_elt(lazy_st(x), i);
-    lazy_account(1);
-    return value;
+    return lazy_elt(lazy_st(x), i);
 }
 
 static R_xlen_t lazy_Get_region(SEXP x, R_xlen_t i, R_xlen_t n, double *buf) {
@@ -407,11 +416,44 @@ static int lazy_No_NA(SEXP x) {
     return !lazy_st(x)->written;
 }
 
+/* Whether the materialised values are still the ones the key generates.
+ * R hands out a writable data pointer for reads too (REAL() is how sd(),
+ * sort() and cumsum() read), so `written` only says the values may have
+ * changed; this regenerates them block by block and compares bit patterns,
+ * so a vector that was only read still saves as its recipe (#68). */
+#define ZURAND_LAZY_COMPARE ((R_xlen_t)1 << 16)
+
+static int lazy_unchanged(SEXP x) {
+    SEXP v = R_altrep_data2(x);
+    if (v == R_NilValue)
+        return 1;
+    const lazy_state *st = lazy_st(x);
+    const double *have = REAL(v);
+    const void *vmax = vmaxget();
+    R_xlen_t bn = st->n < ZURAND_LAZY_COMPARE ? st->n : ZURAND_LAZY_COMPARE;
+    double *buf = (double *) R_alloc((size_t)(bn > 0 ? bn : 1), sizeof(double));
+    int nt = zurand_threads(), same = 1;
+    for (R_xlen_t i = 0; same && i < st->n; i += bn) {
+        R_xlen_t m = st->n - i < bn ? st->n - i : bn;
+        if (st->s == 0.0) {
+            for (R_xlen_t j = 0; j < m; j++)
+                buf[j] = st->a;
+        } else {
+            fill_range_key((zurand_engine_t)st->engine, st->kp, buf, (uint64_t)i,
+                           m, st->dist, m >= ZURAND_OMP_MIN_VALUES ? nt : 0);
+            scaling_pass(buf, m, lazy_scaling(st), nt);
+        }
+        same = memcmp(buf, have + i, (size_t)m * sizeof(double)) == 0;
+    }
+    vmaxset(vmax);
+    return same;
+}
+
 /* The key and arguments, so a lazy vector saves as a few hundred bytes --
- * unless its data pointer has gone out writable: then it may have been
- * modified, and NULL makes R save the values as a plain vector. */
+ * unless its values have changed since its data pointer went out writable:
+ * then NULL makes R save the values as a plain vector. */
 static SEXP lazy_Serialized_state(SEXP x) {
-    if (lazy_st(x)->written)
+    if (lazy_st(x)->written && !lazy_unchanged(x))
         return NULL;
     SEXP d1 = R_altrep_data1(x);
     SEXP s = PROTECT(Rf_allocVector(VECSXP, 2));
@@ -421,8 +463,39 @@ static SEXP lazy_Serialized_state(SEXP x) {
     return s;
 }
 
+/* A saved state is data from a file: check everything lazy_make() relies
+ * on, so a damaged file, or one written by a later zurand with a
+ * distribution this one does not know, is an error rather than wrong
+ * values or an out-of-bounds read (#67). */
+static void lazy_check_state(SEXP state) {
+    const char *bad = "cannot restore a zurand lazy vector: its saved %s is "
+                      "invalid (the file is damaged or was written by a "
+                      "newer version of zurand)";
+    if (TYPEOF(state) != VECSXP || XLENGTH(state) != 2)
+        Rf_error(bad, "state");
+    SEXP key = VECTOR_ELT(state, 0), meta = VECTOR_ELT(state, 1);
+    if (key_count(key) != 1)            /* also the engine and stream */
+        Rf_error(bad, "key");
+    if (TYPEOF(meta) != REALSXP || (XLENGTH(meta) != 4 && XLENGTH(meta) != 5))
+        Rf_error(bad, "arguments");
+    const double *m = REAL(meta);
+    for (R_xlen_t j = 0; j < XLENGTH(meta); j++)
+        if (!R_FINITE(m[j]))
+            Rf_error(bad, "arguments");
+    if (m[0] < 0 || m[0] > (double)R_XLEN_T_MAX || m[0] != trunc(m[0]))
+        Rf_error(bad, "length");
+    if (m[1] != ZURAND_DIST_UNIFORM && m[1] != ZURAND_DIST_NORMAL &&
+        m[1] != ZURAND_DIST_NORMAL_MCF)
+        Rf_error(bad, "distribution");
+    if (m[3] < 0)
+        Rf_error(bad, "scale");
+    if (XLENGTH(meta) == 5 && (m[4] != 1.0 || m[1] != ZURAND_DIST_UNIFORM))
+        Rf_error(bad, "scaling");
+}
+
 static SEXP lazy_Unserialize(SEXP cls, SEXP state) {
     (void)cls;
+    lazy_check_state(state);
     return lazy_make(VECTOR_ELT(state, 0), VECTOR_ELT(state, 1));
 }
 

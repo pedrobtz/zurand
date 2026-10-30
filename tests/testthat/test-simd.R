@@ -2,18 +2,6 @@
 # observed in the output. That is not a property to assert in a comment --
 # these run both paths and compare.
 
-skip_if_no_simd <- function() {
-  if (identical(rng_simd(), "none"))
-    skip("no vectorised path on this CPU; both branches would be the scalar one")
-}
-
-with_simd <- function(on, code) {
-  old <- rng_simd()
-  on.exit(rng_simd(!identical(old, "none")), add = TRUE)
-  rng_simd(on)
-  force(code)
-}
-
 test_that("the vectorised and portable paths produce identical values", {
   skip_if_no_simd()
   key <- rng_key(42L, engine = "xoshiro256pp")
@@ -76,19 +64,30 @@ test_that("multi-key and threaded fills are path-independent too", {
                    with_simd(FALSE, rng_normal(keys, 3000L)))
   # 3 x 20000 values crosses the 32,768 threshold, so two threads really
   # split the fill; two is the most CRAN allows (see setup.R).
-  raw <- rng_threads(1L)
-  on.exit(rng_threads(raw), add = TRUE)
+  local_threads(1L)
   one <- with_simd(TRUE, rng_uniform(keys, 20000L))
   rng_threads(2L)
   expect_identical(with_simd(TRUE, rng_uniform(keys, 20000L)), one)
 })
 
 test_that("rng_simd() validates and round-trips", {
-  expect_true(rng_simd() %in% c("avx2", "neon", "none"))
   old <- rng_simd()
-  expect_identical(rng_simd(FALSE), old)      # returns the previous value
+  expect_true(old %in% c("avx2", "neon", "none"))
+  expect_identical(local_simd(FALSE), old)   # returns the previous value
   expect_identical(rng_simd(), "none")
   rng_simd(!identical(old, "none"))
   expect_identical(rng_simd(), old)
   expect_error(rng_simd(NA), "TRUE or FALSE")
+})
+
+test_that("CI legs that must have the vector path and threads do", {
+  # rng_simd() is "none" both on a CPU without AVX2/NEON and on a build that
+  # lost its dispatch; rng_threads() is 1 both for a serial build and for a
+  # configure regression. Either way the identity tests above would compare
+  # a path with itself and pass, so legs that must have both say so.
+  want_simd <- identical(Sys.getenv("ZURAND_EXPECT_SIMD"), "true")
+  want_omp <- identical(Sys.getenv("ZURAND_EXPECT_OPENMP"), "true")
+  skip_if_not(want_simd || want_omp, "no ZURAND_EXPECT_* set")
+  if (want_simd) expect_false(identical(rng_simd(), "none"))
+  if (want_omp) expect_gt(rng_threads(), 1L)
 })

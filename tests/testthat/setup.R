@@ -4,5 +4,5 @@
 # as in CI and devtools::test()) the machine's default stays, so the
 # threaded paths are exercised at full width.
 if (!identical(Sys.getenv("NOT_CRAN"), "true")) {
-  rng_threads(2L)
+  local_threads(2L, .env = testthat::teardown_env())
 }
