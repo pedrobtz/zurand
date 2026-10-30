@@ -11,6 +11,7 @@ Fast, stateless, deterministic random number generation. Random values are pure 
 \seealso{
 Useful links:
 \itemize{
+  \item \url{https://pedrobtz.github.io/zurand/}
   \item \url{https://github.com/pedrobtz/zurand}
   \item Report bugs at \url{https://github.com/pedrobtz/zurand/issues}
 }

@@ -3,6 +3,7 @@
 #include <Rinternals.h>
 #include <R_ext/Rdynload.h>
 #include <R_ext/Random.h>
+#include <R_ext/Visibility.h>
 #include "zurand.h"   /* the public C API, from inst/include */
 #include <stdint.h>
 #include <inttypes.h>
@@ -2134,7 +2135,7 @@ static const R_CallMethodDef CallEntries[] = {
     {NULL, NULL, 0}
 };
 
-void R_init_zurand(DllInfo *dll) {
+void attribute_visible R_init_zurand(DllInfo *dll) {
     R_registerRoutines(dll, NULL, CallEntries, NULL, NULL);
     R_useDynamicSymbols(dll, FALSE);
     R_RegisterCCallable("zurand", "zurand_api", (DL_FUNC) &zurand_api_get);

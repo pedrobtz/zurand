@@ -1,6 +1,12 @@
-url: ~
+url: https://pedrobtz.github.io/zurand/
 template:
   bootstrap: 5
+
+# A release version (0.1.0) builds the site at the root; a development
+# version (0.1.0.9000) builds it into dev/, leaving the released docs at the
+# root. The deploy step keeps both (clean: false in pkgdown.yaml).
+development:
+  mode: auto
 
 reference:
   - title: Keys
@@ -14,6 +20,9 @@ reference:
       - rng_normal
       - rng_integer
       - rng_bits
+  - title: Lazy vectors
+    contents:
+      - rng_lazy_normal
   - title: Performance controls
     desc: Change speed, never values.
     contents:

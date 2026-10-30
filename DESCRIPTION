@@ -25,9 +25,12 @@ Description: Fast, stateless, deterministic random number generation.
     as key vectors with rng_key(seed, n) or derived explicitly with
     rng_fold().
 License: MIT + file LICENSE
-URL: https://github.com/pedrobtz/zurand
+Depends:
+    R (>= 4.1)
+URL: https://pedrobtz.github.io/zurand/, https://github.com/pedrobtz/zurand
 BugReports: https://github.com/pedrobtz/zurand/issues
 Encoding: UTF-8
+Language: en-GB
 Roxygen: list(markdown = TRUE)
 Suggests:
     knitr,
