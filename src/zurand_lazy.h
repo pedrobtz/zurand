@@ -407,11 +407,44 @@ static int lazy_No_NA(SEXP x) {
     return !lazy_st(x)->written;
 }
 
+/* Whether the materialised values are still the ones the key generates.
+ * R hands out a writable data pointer for reads too (REAL() is how sd(),
+ * sort() and cumsum() read), so `written` only says the values may have
+ * changed; this regenerates them block by block and compares bit patterns,
+ * so a vector that was only read still saves as its recipe (#68). */
+#define ZURAND_LAZY_COMPARE ((R_xlen_t)1 << 16)
+
+static int lazy_unchanged(SEXP x) {
+    SEXP v = R_altrep_data2(x);
+    if (v == R_NilValue)
+        return 1;
+    const lazy_state *st = lazy_st(x);
+    const double *have = REAL(v);
+    const void *vmax = vmaxget();
+    R_xlen_t bn = st->n < ZURAND_LAZY_COMPARE ? st->n : ZURAND_LAZY_COMPARE;
+    double *buf = (double *) R_alloc((size_t)(bn > 0 ? bn : 1), sizeof(double));
+    int nt = zurand_threads(), same = 1;
+    for (R_xlen_t i = 0; same && i < st->n; i += bn) {
+        R_xlen_t m = st->n - i < bn ? st->n - i : bn;
+        if (st->s == 0.0) {
+            for (R_xlen_t j = 0; j < m; j++)
+                buf[j] = st->a;
+        } else {
+            fill_range_key((zurand_engine_t)st->engine, st->kp, buf, (uint64_t)i,
+                           m, st->dist, m >= ZURAND_OMP_MIN_VALUES ? nt : 0);
+            scaling_pass(buf, m, lazy_scaling(st), nt);
+        }
+        same = memcmp(buf, have + i, (size_t)m * sizeof(double)) == 0;
+    }
+    vmaxset(vmax);
+    return same;
+}
+
 /* The key and arguments, so a lazy vector saves as a few hundred bytes --
- * unless its data pointer has gone out writable: then it may have been
- * modified, and NULL makes R save the values as a plain vector. */
+ * unless its values have changed since its data pointer went out writable:
+ * then NULL makes R save the values as a plain vector. */
 static SEXP lazy_Serialized_state(SEXP x) {
-    if (lazy_st(x)->written)
+    if (lazy_st(x)->written && !lazy_unchanged(x))
         return NULL;
     SEXP d1 = R_altrep_data1(x);
     SEXP s = PROTECT(Rf_allocVector(VECSXP, 2));
@@ -421,8 +454,39 @@ static SEXP lazy_Serialized_state(SEXP x) {
     return s;
 }
 
+/* A saved state is data from a file: check everything lazy_make() relies
+ * on, so a damaged file, or one written by a later zurand with a
+ * distribution this one does not know, is an error rather than wrong
+ * values or an out-of-bounds read (#67). */
+static void lazy_check_state(SEXP state) {
+    const char *bad = "cannot restore a zurand lazy vector: its saved %s is "
+                      "invalid (the file is damaged or was written by a "
+                      "newer version of zurand)";
+    if (TYPEOF(state) != VECSXP || XLENGTH(state) != 2)
+        Rf_error(bad, "state");
+    SEXP key = VECTOR_ELT(state, 0), meta = VECTOR_ELT(state, 1);
+    if (key_count(key) != 1)            /* also the engine and stream */
+        Rf_error(bad, "key");
+    if (TYPEOF(meta) != REALSXP || (XLENGTH(meta) != 4 && XLENGTH(meta) != 5))
+        Rf_error(bad, "arguments");
+    const double *m = REAL(meta);
+    for (R_xlen_t j = 0; j < XLENGTH(meta); j++)
+        if (!R_FINITE(m[j]))
+            Rf_error(bad, "arguments");
+    if (m[0] < 0 || m[0] > (double)R_XLEN_T_MAX || m[0] != trunc(m[0]))
+        Rf_error(bad, "length");
+    if (m[1] != ZURAND_DIST_UNIFORM && m[1] != ZURAND_DIST_NORMAL &&
+        m[1] != ZURAND_DIST_NORMAL_MCF)
+        Rf_error(bad, "distribution");
+    if (m[3] < 0)
+        Rf_error(bad, "scale");
+    if (XLENGTH(meta) == 5 && (m[4] != 1.0 || m[1] != ZURAND_DIST_UNIFORM))
+        Rf_error(bad, "scaling");
+}
+
 static SEXP lazy_Unserialize(SEXP cls, SEXP state) {
     (void)cls;
+    lazy_check_state(state);
     return lazy_make(VECTOR_ELT(state, 0), VECTOR_ELT(state, 1));
 }
 

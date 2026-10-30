@@ -2,10 +2,6 @@
 # must give the materialised sampler's values, on every engine, whatever
 # state the one-chunk cache is in.
 
-engines <- c("xoshiro256pp", "philox4x64", "threefry4x64")
-materialised <- function(x) zurand:::rng_lazy_materialised(x)
-cache_mode <- function(m) zurand:::rng_lazy_cache(m)
-
 test_that("lazy vectors equal the samplers, read every way", {
   set.seed(1)
   for (engine in engines) {
@@ -112,6 +108,53 @@ test_that("lazy vectors serialise as their recipe, and modified ones as values",
   w <- unserialize(serialize(z, NULL))
   expect_identical(w[5], 0)
   expect_identical(w[-5], rng_uniform(k, 100)[-5])
+})
+
+test_that("a lazy vector that was only read still saves as its recipe", {
+  k <- rng_key(8L)
+  x <- rng_lazy_normal(k, 1e5)
+  expect_identical(sd(x), sd(rng_normal(k, 1e5)))   # REAL(): writable pointer
+  expect_true(materialised(x))
+  expect_lt(length(serialize(x, NULL)), 1000)
+  y <- unserialize(serialize(x, NULL))
+  expect_false(materialised(y))
+  expect_identical(y[], rng_normal(k, 1e5))
+
+  x[7] <- x[7]                               # written, but unchanged
+  expect_lt(length(serialize(x, NULL)), 1000)
+  x[7] <- 0
+  expect_gt(length(serialize(x, NULL)), 8e5)
+  expect_identical(unserialize(serialize(x, NULL))[7], 0)
+
+  z <- rng_lazy_uniform(k, 10, min = 3, max = 3)    # constant: s == 0
+  invisible(sd(z))
+  expect_lt(length(serialize(z, NULL)), 1000)
+})
+
+test_that("restoring a lazy vector refuses saved arguments it cannot have written", {
+  x <- rng_lazy_normal(rng_key(1L), 10)
+  u <- rng_lazy_uniform(rng_key(1L), 10)
+  ok <- tamper_lazy(x, 1, c(10, 1, 0, 1))
+  expect_identical(unserialize(ok)[], rng_normal(rng_key(1L), 10))
+  bad <- list(
+    distribution = c(10, 9, 0, 1),           # e.g. a later rng_lazy_exponential()
+    distribution = c(10, 1.5, 0, 1),
+    arguments = 10,
+    arguments = c(10, 1, NaN, 1),
+    arguments = c(10, 1, 0, Inf),
+    length = c(-5, 1, 0, 1),
+    length = c(1e300, 1, 0, 1),
+    length = c(10.5, 1, 0, 1),
+    scale = c(10, 1, 0, -1),
+    scaling = c(10, 1, 0, 1, 1)              # the doubled scaling is uniform-only
+  )
+  for (i in seq_along(bad)) {
+    expect_error(unserialize(tamper_lazy(x, 1, bad[[i]])),
+                 paste("saved", names(bad)[i], "is invalid"),
+                 info = deparse(bad[[i]]))
+  }
+  expect_error(unserialize(tamper_lazy(u, 0, c(10, 0, 0, 1, 2))),
+               "saved scaling is invalid")
 })
 
 test_that("lazy uniforms with bounds more than DBL_MAX apart match the sampler", {
