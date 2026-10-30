@@ -104,7 +104,15 @@ rng_key_from_r <- function(n = 1L,
 #'   such as factors and dates are an error: a factor would fold as its
 #'   level codes, whose meaning changes with the level set. Fold
 #'   `as.character(f)` or `unclass(d)` instead. Names and dimensions are
-#'   ignored: a matrix folds as its values in column order.
+#'   ignored: a matrix folds as its values in column order. Strings are
+#'   folded as their UTF-8 bytes, whatever their declared encoding.
+#' @details
+#' The data are hashed to 64 bits before they derive the key, so two
+#' different values can in principle fold to the same key. Among `m`
+#' distinct values the chance of any such collision is about
+#' `m^2 / 2^65`: under one in a million for a million values, but not
+#' negligible near `2^32` of them. For that many independent streams,
+#' request them up front with `rng_key(seed, n)`, which never collides.
 #' @return An `rng_key` vector with the same length as `key`.
 #' @export
 #' @examples

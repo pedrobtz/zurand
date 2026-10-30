@@ -47,3 +47,14 @@ test_that("c() refuses to mix stream versions", {
   attr(b, "stream") <- 2L
   expect_error(c(a, b), "same stream version")
 })
+
+test_that("a malformed stream attribute is an error, not a cast", {
+  k <- rng_key(1L)
+  for (bad in list(NaN, Inf, 2^40, 0, 1.5, NA_real_)) {
+    attr(k, "stream") <- bad
+    expect_error(rng_uniform(k, 1), "invalid `stream` attribute",
+                 info = format(bad))
+  }
+  attr(k, "stream") <- 1
+  expect_identical(rng_uniform(k, 1), rng_uniform(rng_key(1L), 1))
+})

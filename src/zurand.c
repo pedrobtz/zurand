@@ -170,8 +170,9 @@ static inline zurand_v2d zurand_rounded2(zurand_v2d x) {
 #define ZURAND_ENGINE_THREEFRY "threefry4x64"
 #define ZURAND_ENGINE_XOSHIRO  "xoshiro256pp"
 
-/* Both engines produce the same 256-bit block type; only their key types
- * differ. The sampler core is written against this. */
+/* The counter engines produce the same 256-bit block type, and xoshiro256pp
+ * reseeds from Philox blocks; only the key types differ. The sampler core
+ * is written against this. */
 typedef philox4x64_ctr_t zurand_ctr_t;
 
 typedef enum { ZURAND_ENG_PHILOX = ZURAND_ENGINE_PHILOX4X64,
@@ -245,9 +246,12 @@ static int key_stream(SEXP key) {
     int v = NA_INTEGER;
     if (TYPEOF(s) == INTSXP && Rf_xlength(s) == 1)
         v = INTEGER(s)[0];
-    else if (TYPEOF(s) == REALSXP && Rf_xlength(s) == 1 &&
-             REAL(s)[0] == (double)(int)REAL(s)[0])
-        v = (int)REAL(s)[0];
+    else if (TYPEOF(s) == REALSXP && Rf_xlength(s) == 1) {
+        /* Range before the cast, which is undefined for NaN and past int. */
+        double d = REAL(s)[0];
+        if (R_FINITE(d) && d >= 1 && d <= INT_MAX && d == trunc(d))
+            v = (int)d;
+    }
     if (v == NA_INTEGER || v < 1)
         Rf_error("<rng_key> has an invalid `stream` attribute");
     if (v > ZURAND_STREAM_CURRENT)
@@ -511,8 +515,9 @@ static int lemire_accept(uint32_t x, uint32_t range, uint32_t threshold,
 
 /* ---- engine-parameterised sampler cores ----
  *
- * Both engines are Random123 generators, so both give counter-based random
- * access: a value is a pure function of (key, counter) and any index can be
+ * The philox and threefry engines are Random123 generators, so both give
+ * counter-based random access (xoshiro256pp keeps it per 512-word
+ * sub-chunk; see below): a value is a pure function of (key, counter) and any index can be
  * reached directly without iterating. That property is zurand's whole point
  * and is preserved whichever engine a key names.
  *
@@ -682,9 +687,10 @@ static inline int mcf_edge_shortcut(unsigned j, uint64_t u1, uint64_t u2) {
  *     still a pure function of (key, index).
  *
  * What it gives up is O(1) access to an arbitrary index -- reaching word w
- * inside a chunk costs up to 511 recurrence steps. No exported function
- * offers indexed access, so nothing user-visible changes; the philox
- * engine remains for anyone who wants that property held open.
+ * inside a chunk costs up to 511 recurrence steps. Indexed access exists
+ * (`offset =`, lazy vectors), and pays that reseed for a range or a single
+ * value starting mid sub-chunk; the philox engine computes any value
+ * directly, which is why the lazy-vector docs steer scattered reads to it.
  */
 R123_STATIC_INLINE uint64_t zurand_rotl64(uint64_t x, int k) {
     return (x << k) | (x >> (64 - k));
@@ -693,7 +699,7 @@ R123_STATIC_INLINE uint64_t zurand_rotl64(uint64_t x, int k) {
 /* Sub-chunk: the unit a single xoshiro state covers, and the unit the
  * stream is defined in. A fill asks for four of these at a time so four
  * can run in parallel lanes, but sub-chunk s is always seeded at
- * {s, 0, purpose, 0}, so global word w comes from sub-chunk w / 512 at
+ * {s, 0, purpose, ZURAND_TAG_XOSHIRO}, so global word w comes from sub-chunk w / 512 at
  * offset w % 512 whatever the grouping. Grouping is a fill decision; it
  * is not visible in the output. */
 #define ZURAND_XOSHIRO_SUB ZURAND_CHUNK_WORDS
@@ -1032,6 +1038,10 @@ ZURAND_MAYBE_UNUSED static inline void zurand_zva_region(double *p, size_t bytes
 }
 
 static int zurand_avx2_available = -1;
+/* Set by rng_simd(FALSE); every dispatch site reads it. C API fills read it
+ * on worker threads without synchronisation while rng_simd() may write it
+ * on the R thread. The race is benign: both paths give identical output
+ * (test-simd.R), so a fill that sees either value is correct. */
 static int zurand_simd_off = 0;
 
 static int zurand_use_neon(void) {
@@ -1264,10 +1274,14 @@ static uint64_t hash_data(SEXP data) {
             SEXP s = STRING_ELT(data, i);
             if (s == NA_STRING)
                 Rf_error("`data` must not contain missing values");
+            /* A translation is R_alloc()ed; release it per element so a
+             * long non-UTF-8 vector does not hold every copy until return. */
+            const void *vmax = vmaxget();
             const char *utf8 = Rf_translateCharUTF8(s);
             size_t len = strlen(utf8);
             hash_u64(&h, (uint64_t)len);
             hash_bytes(&h, (const unsigned char *)utf8, len);
+            vmaxset(vmax);
         }
         break;
 
@@ -1358,11 +1372,21 @@ static R_xlen_t checked_product(R_xlen_t a, R_xlen_t b, const char *what) {
     return a * b;
 }
 
+/* The length of a sampler's output, n values per key, checked before
+ * anything is allocated: a multi-key result is an n x K matrix, so its
+ * dimensions must fit in int, and asking for one too large is that error,
+ * not a failed 16 GB allocation first (#75). */
+static R_xlen_t sample_total(R_xlen_t n, R_xlen_t nkey) {
+    R_xlen_t total = checked_product(n, nkey, "sample");
+    if (nkey > 1 && (n > INT_MAX || nkey > INT_MAX))
+        Rf_error("multi-key output dimensions are too large");
+    return total;
+}
+
+/* Dimensions sample_total() has already checked. */
 static void set_sample_dim(SEXP ans, R_xlen_t n, R_xlen_t nkey) {
     if (nkey == 1)
         return;
-    if (n > INT_MAX || nkey > INT_MAX)
-        Rf_error("multi-key output dimensions are too large");
     SEXP dim = PROTECT(Rf_allocVector(INTSXP, 2));
     INTEGER(dim)[0] = (int)n;
     INTEGER(dim)[1] = (int)nkey;
@@ -1490,7 +1514,7 @@ SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_, SEXP offset_) {
     zurand_engine_t eng = key_engine_code(key);
     R_xlen_t n = length_scalar(n_, "n");
     uint64_t offset = offset_scalar(offset_, n);
-    R_xlen_t total = checked_product(n, nkey, "sample");
+    R_xlen_t total = sample_total(n, nkey);
     double min = finite_scalar(min_, "min");
     double max = finite_scalar(max_, "max");
     if (min > max)
@@ -1538,7 +1562,7 @@ SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_, SEXP method_,
     zurand_engine_t eng = key_engine_code(key);
     R_xlen_t n = length_scalar(n_, "n");
     uint64_t offset = offset_scalar(offset_, n);
-    R_xlen_t total = checked_product(n, nkey, "sample");
+    R_xlen_t total = sample_total(n, nkey);
     double mean = finite_scalar(mean_, "mean");
     double sd = finite_scalar(sd_, "sd");
     if (sd < 0)
@@ -1594,7 +1618,7 @@ SEXP C_rng_integer(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     R_xlen_t nkey = key_count(key);
     zurand_engine_t eng = key_engine_code(key);
     R_xlen_t n = length_scalar(n_, "n");
-    R_xlen_t total = checked_product(n, nkey, "sample");
+    R_xlen_t total = sample_total(n, nkey);
     int min = integer_bound(min_, "min");
     int max = integer_bound(max_, "max");
     if (min > max)
@@ -1665,7 +1689,7 @@ SEXP C_rng_bits(SEXP key, SEXP n_, SEXP bits_) {
     R_xlen_t nkey = key_count(key);
     zurand_engine_t eng = key_engine_code(key);
     R_xlen_t n = length_scalar(n_, "n");
-    R_xlen_t total = checked_product(n, nkey, "sample");
+    R_xlen_t total = sample_total(n, nkey);
     int bits = bits_scalar(bits_);
     const int *kw = INTEGER(key);
 
@@ -1700,7 +1724,7 @@ SEXP C_rng_bits(SEXP key, SEXP n_, SEXP bits_) {
         philox4x64_key_t kp = key_from_words(kw, nkey, col);
         threefry4x64_key_t kt = key_from_words_threefry(kw, nkey, col);
         R_xlen_t cw = engine_chunk_words(eng);
-            R_xlen_t nchunk = (n + cw - 1) / cw;
+        R_xlen_t nchunk = (n + cw - 1) / cw;
         for (R_xlen_t c = 0; c < nchunk; c++) {
             uint64_t buf[ZURAND_MAX_CHUNK_WORDS + ZURAND_CHUNK_SLACK];
             R_xlen_t w0 = c * cw;
@@ -1710,6 +1734,9 @@ SEXP C_rng_bits(SEXP key, SEXP n_, SEXP bits_) {
                 snprintf(hex, sizeof hex, "%016" PRIx64, buf[j]);
                 SET_STRING_ELT(ans, w0 + j + n * col, Rf_mkChar(hex));
             }
+            /* One string per value on the R thread is slow enough that a
+             * large n must be stoppable; nothing outside PROTECT is held. */
+            R_CheckUserInterrupt();
         }
     }
     UNPROTECT(1);

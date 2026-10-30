@@ -67,7 +67,11 @@ from then on \code{x} holds all \code{n} values like any vector.
 Saving. \code{\link[=saveRDS]{saveRDS()}} and \code{\link[=serialize]{serialize()}} store only the key and the
 arguments, so a lazy vector of 1e9 values saves as a few hundred bytes
 and comes back lazy. A lazy vector that has been modified saves its
-values.
+values. Reading is not modifying: after C code has had the data pointer
+(\code{sd()}, \code{sort()} and \code{cumsum()} all take it), saving regenerates the
+values and compares them with what the vector holds, which costs about
+one more fill, and stores only the key when nothing changed. Restoring
+checks the saved arguments and refuses ones it cannot have written.
 
 Engines. The vector uses its key's engine, so its values are that
 engine's. For scattered reads, \code{x[sample(n, k)]} or random indices in a
