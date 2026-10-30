@@ -166,9 +166,20 @@ test_that("real indices are range-checked before conversion", {
   skip_if(.Machine$sizeof.pointer < 8)
   x <- rng_lazy_normal(rng_key(1L), 10L)
   ref <- rng_normal(rng_key(1L), 10L)
-  idx <- c(0.5, 1.5, 10.9, 11, 1e300, Inf, NA)
+  idx <- c(0.5, 1.5, 10.9, 11, NA)
   expect_identical(x[idx], ref[idx])
-  expect_true(all(is.na(x[c(11, 1e300, Inf)])))
+  expect_true(is.na(x[11]))
+  # Indices past R_XLEN_T_MAX give NA up to R 4.6 and "subscript too large"
+  # from R-devel r90777 (PR#19261) on; a lazy vector does what a plain one
+  # does on the running R.
+  for (big in list(c(1, 1e300), c(1, Inf))) {
+    want <- tryCatch(ref[big], error = function(e) e)
+    if (inherits(want, "error")) {
+      expect_error(x[big], conditionMessage(want), fixed = TRUE)
+    } else {
+      expect_identical(x[big], want)
+    }
+  }
 })
 
 test_that("large lazy sums match with threads on and off", {
