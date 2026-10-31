@@ -66,8 +66,8 @@ Scans that read a lazy vector in blocks -- \code{sum()}, \code{mean()},
 so Ctrl-C stops \code{sum()} over 1e12 values. Reading single elements and
 materialising do not check. For C and C++ code this means that
 \code{REAL_ELT()} and \code{REAL()}/\code{REAL_RO()} on a lazy vector never signal an
-interrupt, but \code{REAL_GET_REGION()} -- which cpp11's \code{doubles} iterator
-uses -- can, by a longjmp that skips C++ destructors. Code that cannot be
+interrupt, but \code{REAL_GET_REGION()} -- which the \code{doubles} iterator of
+'cpp11' uses -- can, by a \code{longjmp} that skips C++ destructors. Code that cannot be
 unwound should take the data pointer first (which materialises the
 vector) or read under \code{R_UnwindProtect()} (\code{cpp11::unwind_protect()}).
 }

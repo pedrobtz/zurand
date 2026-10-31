@@ -34,7 +34,8 @@ This is a first submission.
 
 ## Test environments
 
-GitHub Actions: macOS (arm64), Windows and Ubuntu (R release and
-oldrel-1), Ubuntu arm64 (GCC), R-devel with clang and GCC 16 (r-hub
-containers), plus ASan, UBSan, valgrind, rchk, LTO and gctorture; weekly
-32-bit i386 and musl.
+GitHub Actions (pedrobtz/r-actions): macOS (arm64), Windows and Ubuntu
+R-release, Ubuntu R-oldrel-1, Ubuntu R 4.1 (the declared minimum), Windows
+R-devel, Ubuntu arm64 (GCC); the clang23, ubuntu-clang and ubuntu-gcc16
+R-devel containers; nosuggests and nold; ASan, UBSan, valgrind, rchk, LTO
+and gctorture; the test suite in shuffled order; weekly 32-bit i386 and musl.
