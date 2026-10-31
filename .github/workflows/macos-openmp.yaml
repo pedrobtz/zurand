@@ -27,7 +27,7 @@ jobs:
       ZURAND_EXPECT_SIMD: true
       ZURAND_EXPECT_OPENMP: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: OpenMP headers (LLVM 19.1.5, for Xcode 16.3+), as CRAN's machines
         run: |
           curl -sSL -o "$RUNNER_TEMP/openmp.tar.gz" https://mac.r-project.org/openmp/openmp-19.1.5-darwin20-Release.tar.gz
