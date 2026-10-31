@@ -110,7 +110,7 @@ jobs:
     env:
       NAME: ${{ matrix.sampler }}-${{ matrix.method }}-${{ matrix.engine }}-${{ matrix.mode }}-${{ matrix.gb }}GB
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: r-lib/actions/setup-r@v2
         with:
@@ -185,7 +185,7 @@ jobs:
             echo "| \`$NAME\` | ${reached:-none} | $secs | $(cat audit/$NAME.runner 2>/dev/null) | $fail | $weak | $v |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: audit-${{ env.NAME }}
