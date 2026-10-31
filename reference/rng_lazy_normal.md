@@ -83,10 +83,10 @@ user interrupt every \\2^{22}\\ values, so Ctrl-C stops
 [`sum()`](https://rdrr.io/r/base/sum.html) over 1e12 values. Reading
 single elements and materialising do not check. For C and C++ code this
 means that `REAL_ELT()` and `REAL()`/`REAL_RO()` on a lazy vector never
-signal an interrupt, but `REAL_GET_REGION()` – which cpp11's `doubles`
-iterator uses – can, by a longjmp that skips C++ destructors. Code that
-cannot be unwound should take the data pointer first (which materialises
-the vector) or read under `R_UnwindProtect()`
+signal an interrupt, but `REAL_GET_REGION()` – which the `doubles`
+iterator of 'cpp11' uses – can, by a `longjmp` that skips C++
+destructors. Code that cannot be unwound should take the data pointer
+first (which materialises the vector) or read under `R_UnwindProtect()`
 (`cpp11::unwind_protect()`).
 
 ## Materialisation

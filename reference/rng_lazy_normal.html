@@ -129,8 +129,8 @@ for values that are never read.</p>
 so Ctrl-C stops <code><a href="https://rdrr.io/r/base/sum.html" class="external-link">sum()</a></code> over 1e12 values. Reading single elements and
 materialising do not check. For C and C++ code this means that
 <code>REAL_ELT()</code> and <code>REAL()</code>/<code>REAL_RO()</code> on a lazy vector never signal an
-interrupt, but <code>REAL_GET_REGION()</code> – which cpp11's <code>doubles</code> iterator
-uses – can, by a longjmp that skips C++ destructors. Code that cannot be
+interrupt, but <code>REAL_GET_REGION()</code> – which the <code>doubles</code> iterator of
+'cpp11' uses – can, by a <code>longjmp</code> that skips C++ destructors. Code that cannot be
 unwound should take the data pointer first (which materialises the
 vector) or read under <code>R_UnwindProtect()</code> (<code>cpp11::unwind_protect()</code>).</p>
     </div>
