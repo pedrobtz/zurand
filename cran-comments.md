@@ -37,5 +37,5 @@ This is a first submission.
 GitHub Actions (pedrobtz/r-actions): macOS (arm64), Windows and Ubuntu
 R-release, Ubuntu R-oldrel-1, Ubuntu R 4.1 (the declared minimum), Windows
 R-devel, Ubuntu arm64 (GCC); the clang23, ubuntu-clang and ubuntu-gcc16
-R-devel containers; nosuggests and nold; ASan, UBSan, valgrind, rchk, LTO
+R-devel containers; nosuggests; ASan, UBSan, valgrind, rchk, LTO
 and gctorture; the test suite in shuffled order; weekly 32-bit i386 and musl.
