@@ -9,7 +9,7 @@ permissions: read-all
 
 jobs:
   R-CMD-check:
-    uses: pedrobtz/r-actions/.github/workflows/r-cmd-check.yml@8caf5119301bb2a3bd433b92045b8c75b3097096 # v1.24.0
+    uses: pedrobtz/r-actions/.github/workflows/r-cmd-check.yml@8781563ab183217e586e11d90fdda7fd7ea697a3 # v1.25.0
     with:
       # The default four, plus three. R 4.1 is the floor DESCRIPTION's
       # Depends claims. Windows R-devel is CRAN's flavour that nothing else
