@@ -578,7 +578,11 @@ test_that("every argument check reachable from R reports its own error", {
   dim(bad) <- c(2L, 2L)
   expect_error(rng_uniform(bad, 1), "invalid internal shape")
   expect_error(rng_uniform(k, 2^53), "too large for an R vector")
-  expect_error(rng_key(1L, n = 2^40), "too many keys")
+  # 2^40 exceeds R_XLEN_T_MAX on 32-bit builds, so i386 rejects it earlier.
+  expect_error(
+    rng_key(1L, n = 2^40),
+    "too many keys|too large for an R vector"
+  )
   expect_error(rng_integer(k, 1, 2^31, 2^31 + 2), "integer range")
   expect_error(rng_integer(k, 1, 1.5, 3), "must be a whole number")
   expect_error(rng_threads(NA), "integer or double scalar")
