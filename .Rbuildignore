@@ -11,3 +11,8 @@
 ^pkgdown$
 ^cran-comments\.md$
 ^CRAN-SUBMISSION$
+^\.agents$
+^\.superpowers$
+^\.worktrees$
+^CLAUDE\.md$
+^AGENTS\.md$
