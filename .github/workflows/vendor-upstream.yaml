@@ -2,7 +2,7 @@ on:
   schedule:
     # Weekly. A new upstream release is not urgent, and a daily job that
     # finds nothing 364 times a year is one people stop reading.
-    - cron: "0 6 * * 1"
+    - cron: "29 16 * * 0"
   workflow_dispatch:
 
 name: vendor-upstream
