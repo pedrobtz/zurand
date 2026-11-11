@@ -1,14 +1,13 @@
 # CLAUDE.md
 
 <!-- markdownlint-disable-next-line MD013 -->
-This file provides guidance to Claude Code (claude.ai/code) when working with
-code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Shared conventions
 
 The portfolio's shared rules are synced into `.claude/shared/` from
-`pedrobtz/packages:claude/shared/`. Never edit them here. Where this file and a
-shared file disagree, this file wins for this package.
+`pedrobtz/packages:claude/shared/`. Never edit them here. Where this file and
+a shared file disagree, this file wins for this package.
 
 @.claude/shared/workflow.md
 @.claude/shared/r-package.md
