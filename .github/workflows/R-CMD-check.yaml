@@ -35,11 +35,19 @@ jobs:
       # the one processx test is skipped without it.
       nosuggests: true
 
+  # A documentation-only pull request skips shuffle (pedrobtz/zurand#102).
+  changes:
+    uses: pedrobtz/r-actions/.github/workflows/changes.yml@4062705ecc3560e85ec8045b30d0e9951fa447a2 # v1.30.0
+    with:
+      name: shuffle
+
   # Every test must pass in any order (testthat's shuffle = TRUE reorders
   # each file's top-level expressions), so helpers live in helper-*.R and
   # global state is restored with withr. NOT_CRAN so nothing is skipped
   # that could hide an order dependence.
   shuffle:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     env:
       NOT_CRAN: true
