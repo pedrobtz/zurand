@@ -90,6 +90,15 @@ values. Reading is not modifying: after C code has had the data pointer
 values and compares them with what the vector holds, which costs about
 one more fill, and stores only the key when nothing changed. Restoring
 checks the saved arguments and refuses ones it cannot have written.
+Reading the file needs zurand: without it, R restores a lazy vector as
+a zero-length vector, with only a warning.
+
+On R 4.6.2 and later, a lazy vector of 64 or more values that has been given
+attributes with \code{\link[=structure]{structure()}} can refuse scans (\code{sum()}, arithmetic)
+after it has been read, saved and read again, with "REFCNT on locked
+WRAPPER data". No values are wrong. This is a defect in R's wrapper
+class, not in zurand; \code{y <- as.numeric(x)} or \code{x[] <- x} before adding
+attributes avoids it.
 }
 
 \section{Engines}{

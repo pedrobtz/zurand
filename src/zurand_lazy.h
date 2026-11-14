@@ -491,6 +491,13 @@ static void lazy_check_state(SEXP state) {
         zurand_error(bad, "scale");
     if (XLENGTH(meta) == 5 && (m[4] != 1.0 || m[1] != ZURAND_DIST_UNIFORM))
         zurand_error(bad, "scaling");
+    /* A uniform spans [a, a + s], doubled when the fifth element is set;
+     * rng_lazy_uniform() only ever writes finite ends (#119). */
+    if (m[1] == ZURAND_DIST_UNIFORM) {
+        double k = XLENGTH(meta) == 5 ? 2.0 : 1.0;
+        if (!R_FINITE(k * m[2]) || !R_FINITE(k * (m[2] + m[3])))
+            zurand_error(bad, "arguments");
+    }
 }
 
 static SEXP lazy_Unserialize(SEXP cls, SEXP state) {
