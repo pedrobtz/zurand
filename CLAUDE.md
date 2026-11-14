@@ -366,6 +366,10 @@ The package's own workflows:
 `shuffle` and `macos-openmp` gate on r-actions' `changes.yml`, so a
 documentation-only pull request skips them.
 
+The gate counts `dev/*.md` as code (it is neither top-level Markdown nor
+under a dot directory), so label a pull request that only edits `dev/`
+prose `ci:docs`.
+
 ## Vendored native code
 
 `src/Random123/` (philox.h, array.h, features/, LICENSE) is copied verbatim from
