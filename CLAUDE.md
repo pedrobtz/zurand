@@ -347,6 +347,8 @@ comment (v1.24.0):
   i386 leg is the only one that compiles the portable C99 `mulhilo64`
   fallback.
 - `coverage.yaml`, and `vendor-upstream.yaml` (weekly upstream check).
+- `assurance.yaml`: holds `.agents/assurance.md` to
+  `.claude/shared/assurance.md` on every pull request.
 - `cran-release.yaml`: on a push that changes `CRAN-SUBMISSION`, tags the
   submitted commit, publishes the release and opens the `.9000` bump.
 - `pkgdown.yaml`: the site, from r-actions' `pkgdown.yml`.

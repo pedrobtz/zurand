@@ -1,0 +1,19 @@
+# Holds .agents/assurance.md to the portfolio standard
+# (.claude/shared/assurance.md), and the package's own workflows to ci.md's
+# gating rule. Seconds; not gated, since the file is Markdown under a dot
+# directory.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  workflow_dispatch:
+
+name: assurance
+
+permissions:
+  contents: read
+
+jobs:
+  assurance:
+    uses: pedrobtz/r-actions/.github/workflows/assurance.yml@af3de72ac23bc0776ded7c934d84e03d3a406a46 # v1.41.0
+    with:
+      ungated-jobs: fail
