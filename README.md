@@ -121,6 +121,9 @@ keys, and `rng_uniform()`, `rng_normal()`, `rng_integer()` and
 
 - `vignette("zurand")`: stateless random numbers, key vectors, folding
   and engines.
+- `vignette("simulations")`: simulation studies that stay reproducible
+  as they grow, run in parallel, and stop and resume.
+- `vignette("lazy")`: random vectors too big for memory.
 - `vignette("performance")`: how fast zurand is against other
   generators, and how threads are used.
 - `vignette("c-api")`: drawing the same values from C in other packages.
