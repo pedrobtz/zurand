@@ -81,7 +81,11 @@ later changes to the process-wide OpenMP maximum.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
-    <p>Draws below an internal size threshold always run single-threaded.</p>
+    <p>Draws below an internal size threshold always run single-threaded, and so
+does every fill in a forked child process (<code><a href="https://rdrr.io/r/parallel/mclapply.html" class="external-link">parallel::mclapply()</a></code>,
+<code><a href="https://rdrr.io/r/parallel/mcparallel.html" class="external-link">parallel::mcparallel()</a></code>), where <code>rng_threads()</code> reports 1: GNU OpenMP's
+thread pool does not survive <code>fork()</code>, and a child that used it would hang.
+Parallel maps over forked workers therefore use one thread per worker.</p>
     </div>
     <div class="section level2">
     <h2 id="page-size-on-linux">Page size on Linux<a class="anchor" aria-label="anchor" href="#page-size-on-linux"></a></h2>

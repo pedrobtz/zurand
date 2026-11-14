@@ -33,7 +33,13 @@ process-wide OpenMP maximum.
 
 ## Details
 
-Draws below an internal size threshold always run single-threaded.
+Draws below an internal size threshold always run single-threaded, and
+so does every fill in a forked child process
+([`parallel::mclapply()`](https://rdrr.io/r/parallel/mclapply.html),
+[`parallel::mcparallel()`](https://rdrr.io/r/parallel/mcparallel.html)),
+where `rng_threads()` reports 1: GNU OpenMP's thread pool does not
+survive `fork()`, and a child that used it would hang. Parallel maps
+over forked workers therefore use one thread per worker.
 
 ## Page size on Linux
 
