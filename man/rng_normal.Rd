@@ -52,6 +52,11 @@ A numeric vector of length \code{n} for one key, or an \code{n} by
 Stateless normal sampling. \code{rng_normal(key, n, mean, sd)} is a pure function
 of its arguments and returns ordinary numeric vectors or matrices.
 }
+\details{
+Values are \code{mean + sd * z}, so finite arguments can give infinite values
+when the result overflows: with \code{sd = .Machine$double.xmax}, about a third
+of draws are \code{Inf} or \code{-Inf}, as with \code{\link[stats:rnorm]{stats::rnorm()}}.
+}
 \examples{
 key <- rng_key(42L)
 rng_normal(key)

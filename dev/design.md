@@ -73,7 +73,11 @@ the counter instead (§3.2). `rng_fold(key, data)` derives
 `{k0, k1} = philox4x64({h, h ^ 0x9e3779b97f4a7c15, PURPOSE_FOLD, 0}, key)[0:1]`,
 with `h` the 64-bit hash of the typed data, for
 philox- and xoshiro-engine keys, and the threefry analogue for threefry
-keys.
+keys. The hash is FNV-1a-shaped with a final mix, but its offset basis is
+`1469598103934665603` (`src/zurand.c`), not FNV-1a's `14695981039346656037`:
+the last digit is dropped. That constant is part of stream 1; an outside
+reimplementation must use it. Strings are hashed as their text in UTF-8
+whatever the locale (#123).
 
 ### 3.2 Counters
 
@@ -82,8 +86,14 @@ per word:
 
 | word | meaning |
 |---|---|
-| 0 | block index (`position >> 2` for the counter engines; sub-chunk index for xoshiro seeding) |
-| 1 | domain: 0 on the fast path; attempt number `g >= 1` for ziggurat and integer retry words; `h ^ 0x9e37...` for fold (whose word 0 is `h`) |
+| 0 | block index (`position >> 2` for the counter engines; sub-chunk index for xoshiro seeding); for the normals' retry blocks, the position itself |
+| 1 | domain: 0 on the fast path; attempt number `g >= 1` for ziggurat, McFarland and integer retry words; `h ^ 0x9e37...` for fold (whose word 0 is `h`) |
+
+The two retry schemes differ, and both are stream 1. An integer retry takes
+the same word a fast-path draw would, `position & 3`, of the block at
+`{position >> 2, g, purpose}`. A normal retry (ziggurat wedge and tail,
+McFarland overhang and tail) reads the block at `{position, g, purpose}` word
+by word, all four, before moving to `g + 1`.
 | 2 | purpose: 0 bits, 1 uniform, 2 normal, 3 integer, 4 fold; 5 exponential and 6 normal-by-inversion reserved; 7 normal by McFarland's method; 8+ free |
 | 3 | **engine tag**: 0 for the philox engine's own output, **1 for every Philox evaluation made on behalf of `xoshiro256pp`** (sub-chunk seeds and ziggurat retry words) |
 
