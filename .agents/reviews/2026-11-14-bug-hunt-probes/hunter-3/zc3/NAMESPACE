@@ -1,0 +1,2 @@
+useDynLib(zc3, .registration = TRUE)
+export(zc_key_get, zc_fill, zc_fill_at, zc_stream, zc_fold, zc_null, zc_par)
