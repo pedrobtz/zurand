@@ -16,3 +16,4 @@
 ^\.worktrees$
 ^CLAUDE\.md$
 ^AGENTS\.md$
+^README\.Rmd$

@@ -37,3 +37,4 @@ articles:
     contents:
       - zurand
       - performance
+      - c-api

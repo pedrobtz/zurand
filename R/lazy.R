@@ -15,8 +15,12 @@
 #' engine chunk read (at most 5120 values), so `sum()` over 1e9 lazy values
 #' runs in the memory R itself uses. Full scans cost more than
 #' `rng_normal()` followed by `sum()` would, because R reads lazy vectors
-#' 512 values at a time on one thread. The gain is memory, and not paying
-#' for values that are never read.
+#' 512 values at a time on one thread: `sum()` and `mean()` measured
+#' 1.6-2.7x slower than `rng_normal()` then `sum()`. The gain is memory
+#' (`sum()` of a lazy 1e9 vector peaked at the 71 MB R itself uses on an
+#' Apple M1, where the vector would need 7.6 GB) and not paying for values
+#' that are never read: `x[1:1e6]` of a lazy 1e8 vector took a tenth of the
+#' time of generating all 1e8.
 #'
 #' @section Interrupts:
 #' Scans that read a lazy vector in blocks -- `sum()`, `mean()`,
