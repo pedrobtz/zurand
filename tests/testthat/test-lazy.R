@@ -173,6 +173,19 @@ test_that("restoring a lazy vector refuses saved arguments it cannot have writte
   }
   expect_error(unserialize(tamper_lazy(u, 0, c(10, 0, 0, 1, 2))),
                "saved scaling is invalid")
+  # #119: a uniform whose ends are not finite, which rng_lazy_uniform()
+  # never writes -- with and without the doubled scaling.
+  for (meta in list(c(10, 0, 1.7e308, 1.7e308), c(10, 0, -1.7e308, Inf),
+                    c(10, 0, 1e308, 1e308, 1))) {
+    expect_error(unserialize(tamper_lazy(u, 0, meta)),
+                 class = "zurand_error", info = deparse(meta))
+  }
+  # The widest bounds rng_lazy_uniform() writes still restore.
+  w <- rng_lazy_uniform(rng_key(1L), 10, -.Machine$double.xmax,
+                        .Machine$double.xmax)
+  expect_identical(unserialize(serialize(w, NULL))[],
+                   rng_uniform(rng_key(1L), 10, -.Machine$double.xmax,
+                               .Machine$double.xmax))
 })
 
 test_that("lazy uniforms with bounds more than DBL_MAX apart match the sampler", {
@@ -301,4 +314,19 @@ test_that("inspect() describes a lazy vector without materialising it", {
   expect_match(out[1], "zurand lazy normal (mcfarland), n = 1000000", fixed = TRUE)
   expect_match(out[1], "engine philox4x64, not materialised", fixed = TRUE)
   expect_false(materialised(x))
+})
+
+test_that("a wrapped lazy vector stays usable after scan, save, scan (#127)", {
+  # R 4.6.2's wrapper class raises "REFCNT on locked WRAPPER data" here for
+  # any ALTREP class whose Duplicate method returns ALTREP; a base-R toy
+  # class reproduces it (pedrobtz/zurand#127). Not zurand's to fix.
+  skip_if(getRversion() == "4.6.2", "R 4.6.2 wrapper defect (#127)")
+  x <- rng_lazy_normal(rng_key(1L), 64)
+  y <- structure(x, unit = "cm")
+  s1 <- sum(y)
+  f <- withr::local_tempfile(fileext = ".rds")
+  saveRDS(y, f)
+  expect_identical(sum(y), s1)
+  expect_identical(as.vector(y[]), rng_normal(rng_key(1L), 64))
+  expect_identical(readRDS(f)[], y[])
 })

@@ -285,6 +285,18 @@ SEXP client_errors(SEXP key) {
     CASE("stream_sd_neg", zr->stream_normal(k, 10, 0.0, -1.0, 0, d, 4, never, NULL));
     CASE("stream_method", zr->stream_normal(k, 10, 0.0, 1.0, 2, d, 4, never, NULL));
     CASE("stream_total_0", zr->stream_normal(k, 0, 0.0, 1.0, 1, d, 4, never, NULL));
+    /* #132: a range may end at 2^64 - 1. #133: an empty stream needs no
+     * buffer. */
+    CASE("uniform_at_last", zr->fill_uniform_at(k, UINT64_MAX, 1, 0.0, 1.0, d));
+    CASE("uniform_at_to_end",
+         zr->fill_uniform_at(k, UINT64_MAX - 3, 4, 0.0, 1.0, d));
+    CASE("uniform_at_past_end",
+         zr->fill_uniform_at(k, UINT64_MAX - 2, 4, 0.0, 1.0, d));
+    CASE("normal_at_last", zr->fill_normal_at(k, UINT64_MAX, 1, 0.0, 1.0, 0, d));
+    CASE("stream_total_0_no_buf",
+         zr->stream_uniform(k, 0, 0.0, 1.0, NULL, 4, never, NULL));
+    CASE("stream_total_0_chunk_0",
+         zr->stream_uniform(k, 0, 0.0, 1.0, d, 0, never, NULL));
     CASE("fold_engine", zr->fold_int(nokey, 1, &bad));
     /* NULL outputs (#60): EINVAL, not a segfault; fine when n = 0 */
     CASE("null_uniform", zr->fill_uniform(k, 1, 0.0, 1.0, NULL));

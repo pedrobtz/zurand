@@ -2037,7 +2037,9 @@ static void api_scale(double *x, R_xlen_t n, const api_dist *d) {
 
 static int api_fill_at(zurand_key k, uint64_t start, size_t n,
                        const api_dist *d, double *out) {
-    if (n > (size_t)R_XLEN_T_MAX || start > UINT64_MAX - (uint64_t)n ||
+    /* The last position, start + n - 1, may be 2^64 - 1 (#132). */
+    if (n > (size_t)R_XLEN_T_MAX ||
+        (n > 0 && start > UINT64_MAX - ((uint64_t)n - 1)) ||
         (out == NULL && n > 0))
         return ZURAND_EINVAL;
     if (d->s != 0.0)
@@ -2077,8 +2079,13 @@ static int api_fill_normal_at(zurand_key k, uint64_t start, size_t n,
 static int api_stream(zurand_key k, uint64_t total, const api_dist *d,
                       double *buf, size_t chunk, zurand_consumer fn,
                       void *ctx) {
-    if (buf == NULL || fn == NULL || chunk == 0 ||
-        chunk > (size_t)R_XLEN_T_MAX)
+    if (fn == NULL)
+        return ZURAND_EINVAL;
+    /* An empty stream needs no buffer, as a fill of n = 0 needs no output
+     * (#133); fn is never called. */
+    if (total == 0)
+        return ZURAND_OK;
+    if (buf == NULL || chunk == 0 || chunk > (size_t)R_XLEN_T_MAX)
         return ZURAND_EINVAL;
     uint64_t pos = 0;     /* positions poured into buf so far */
     size_t fill = 0;      /* values in buf now */
