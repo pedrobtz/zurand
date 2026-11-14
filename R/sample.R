@@ -52,7 +52,7 @@ rng_uniform <- function(key, n = 1L, min = 0, max = 1, offset = 0) {
 #'   * `"mcfarland"`: McFarland's modified ziggurat (2016). Its common case
 #'     needs no table comparison, so it is faster than the default on every
 #'     CPU measured, by more on x86_64 than on arm64
-#'     (`vignette("performance", package = "zurand")`).
+#'     (the [performance article](https://pedrobtz.github.io/zurand/articles/performance.html)).
 #'
 #'   Both are exact samplers of the standard normal (to double precision)
 #'   and both are bit-reproducible across platforms. They are different
