@@ -10,7 +10,7 @@ name: coverage
 
 jobs:
   coverage:
-    uses: pedrobtz/r-actions/.github/workflows/coverage.yml@8caf5119301bb2a3bd433b92045b8c75b3097096 # v1.24.0
+    uses: pedrobtz/r-actions/.github/workflows/coverage.yml@4062705ecc3560e85ec8045b30d0e9951fa447a2 # v1.30.0
     permissions:
       contents: write
     with:

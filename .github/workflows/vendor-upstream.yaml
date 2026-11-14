@@ -9,7 +9,7 @@ name: vendor-upstream
 
 jobs:
   upstream:
-    uses: pedrobtz/r-actions/.github/workflows/vendor-upstream.yml@8caf5119301bb2a3bd433b92045b8c75b3097096 # v1.24.0
+    uses: pedrobtz/r-actions/.github/workflows/vendor-upstream.yml@4062705ecc3560e85ec8045b30d0e9951fa447a2 # v1.30.0
     permissions:
       contents: read
       issues: write
