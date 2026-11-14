@@ -1,0 +1,33 @@
+source("helper.R")
+cat("locale:", Sys.getlocale("LC_CTYPE"), " l10n utf8:", l10n_info()$`UTF-8`, "\n")
+k <- rng_key(1L, engine="philox4x64")
+F <- function(x) tryCatch(format(rng_fold(k, x)), error=function(e) paste("ERR", conditionMessage(e)))
+u <- "café"; l <- iconv(u, "UTF-8", "latin1"); Encoding(l)
+b <- l; Encoding(b) <- "bytes"
+n <- l; Encoding(n) <- "unknown"   # native-unknown with latin1 byte
+raw_u <- rawToChar(as.raw(c(0x63,0x61,0x66,0xc3,0xa9)))  # unknown encoding, utf8 bytes
+cat("utf8   ", F(u), "\nlatin1 ", F(l), "\nbytes  ", F(b), "\nunk-l1 ", F(n), "\nunk-u8 ", F(raw_u), "\nenc2nat", F(enc2native(u)), "\n")
+cat("escaped <e9>:", F("caf<e9>"), " caf<U+00E9>:", F("caf<U+00E9>"), "\n")
+cat("newline ", F("a\nb"), " vs 'a b' ", F("a b"), "\n")
+cat("empty   ", F(""), " chr0 ", F(character(0)), " NA ", F(NA_character_), "\n")
+cat("c('a','bbb')", F(c("a","bbb")), " c('ab','bb')", F(c("ab","bb")), " 'abbb'", F("abbb"), "\n")
+cat("named dup", F(c(a="x", a="y")), " plain", F(c("x","y")), "\n")
+cat("int 1:3", F(1:3), " dbl", F(c(1,2,3)), " altrep seq", F(seq_len(3)), " mat", F(matrix(1:3)), "\n")
+cat("TRUE", F(TRUE), " 1L", F(1L), " '1'", F("1"), " raw1", F(as.raw(1)), " 'TRUE'", F("TRUE"), "\n")
+cat("-0", F(-0), " 0", F(0), " 0L", F(0L), "\n")
+cat("neg -1L", F(-1L), " -1", F(-1), " 2^32-1", F(2^32-1), " 2^31", F(2^31), " -2^31", F(-2^31), "\n")
+cat("-(2^53-1)", F(-(2^53-1)), " -2^53", F(-2^53), "\n")
+cat("1e15", F(1e15), " 1e5 int", F(100000L), " 1e5 dbl", F(1e5), "\n")
+cat("attr'd (non-class attr)", F(structure(5L, foo="bar")), " levels-only", F(structure(1L, levels="a")), "\n")
+cat("S4?", F(methods::new("numeric", 5)), "\n")
+cat("oldClass removed factor: ", F(unclass(factor("a"))), " 1L:", F(1L), "\n")
+cat("long string 1e6:", F(strrep("a", 1e6)), "\n")
+# multi-key fold == per-key fold
+ks <- rng_key(7, n=5, engine="philox4x64")
+stopifnot(identical(rng_fold(ks, "x"), do.call(c, lapply(ks, rng_fold, "x"))))
+for (e in c("xoshiro256pp","philox4x64","threefry4x64")) { ks <- rng_key(7, n=5, engine=e); stopifnot(identical(rng_fold(ks, 3L), do.call(c, lapply(ks, rng_fold, 3))), identical(attr(rng_fold(ks,1),"engine"), e), length(rng_fold(ks[0], 1))==0) }
+cat("fold engine differ:", format(rng_fold(rng_key(7, engine="philox4x64"),1)), format(rng_fold(rng_key(7, engine="threefry4x64"),1)), format(rng_fold(rng_key(7, engine="xoshiro256pp"),1)), "\n")
+cat("key engine indep:", format(rng_key(7, engine="philox4x64")), format(rng_key(7, engine="xoshiro256pp")), "\n")
+cat("fold missing data:", tryCatch(format(rng_fold(k)), error=function(e) conditionMessage(e)), "\n")
+cat("fold non-key:", tryCatch(format(rng_fold(1L, 1)), error=function(e) conditionMessage(e)), "\n")
+cat("fold unclassed key:", tryCatch(format(rng_fold(unclass(k), 1)), error=function(e) conditionMessage(e)), "\n")

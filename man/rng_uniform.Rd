@@ -32,8 +32,10 @@ function of its arguments and returns ordinary numeric vectors or matrices.
 With the default bounds every value lies strictly inside \eqn{(0, 1)}: it
 is \eqn{(m + 1/2) 2^{-52}} for a 52-bit integer \eqn{m}, so neither
 endpoint can occur. Other bounds are applied as \code{min + (max - min) * u},
-which, as with \code{\link[stats:runif]{stats::runif()}}, will not return either extreme value
-unless \code{max == min} or \code{max - min} is small compared with \code{min}.
+which, as with \code{\link[stats:runif]{stats::runif()}}, rounds: a bound can be returned whenever
+\verb{[min, max]} holds few representable doubles -- when \code{max - min} is small
+compared with \code{min}, or when the bounds are subnormal. Every value lies
+in \verb{[min, max]}.
 }
 \examples{
 key <- rng_key(42L)

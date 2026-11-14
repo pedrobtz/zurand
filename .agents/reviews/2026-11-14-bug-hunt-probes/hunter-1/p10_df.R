@@ -1,0 +1,13 @@
+source("helper.R")
+keys <- rng_key(42L, n = 4L, engine="philox4x64")
+d <- data.frame(i = 1:4); d$k <- keys
+T_(print(d)); T_(nrow(d)); T_(d[2:3, ]); T_(subset(d, i < 3)); T_(d[order(-d$i), ]); T_(rbind(d, d)); T_(head(d, 2)); T_(d[["k"]][2]); T_(identical(d$k, keys)); T_(d[2, "k"]); T_(merge(d, data.frame(i=1:2))); T_(split(d, d$i)); T_(format(d)); T_(lapply(d$k, format)); T_(with(d, k[i == 2]))
+T_(seq(keys[1])); T_(utils::head(keys, 1)); T_(utils::tail(keys, 1)); T_(utils::head(keys, -1))
+T_(Reduce(function(a, b) b, keys, accumulate=TRUE))
+T_(keys[[2, 3]]); T_(keys[[2, 99, "x"]]); T_(identical(keys[[2, 3]], keys[2])); T_(keys[[]]); T_(keys[1][[]])
+T_(max(keys)); T_(range(keys)); T_(rowSums(keys)); T_(keys %% 2L); T_(!keys[1]); T_(keys & TRUE); T_(round(keys[1])); T_(identical(round(keys), keys)); T_(sqrt(keys[1])); T_(cumsum(keys[1])); T_(keys[1] / 1L); T_(keys[1] - keys[1]); T_(rng_uniform(keys[1] - keys[1])); T_(bitwXor(keys[1], 1L)); T_(as.numeric(keys[1])); T_(as.logical(keys[1])); T_(as.double(keys)); T_(as.character(keys[1])); T_(storage.mode(keys)); T_({k <- keys; storage.mode(k) <- "double"; rng_uniform(k)}); T_({k <- keys; mode(k) <- "character"; k})
+T_({k <- keys; class(k) <- c("mykey", "rng_key"); k[1]}); T_({k <- keys; class(k) <- c("mykey", "rng_key"); class(c(k, k))}); T_({k <- keys; oldClass(k) <- NULL; k[1]})
+T_(rev(keys)[[1]]); T_(identical(rev(keys), keys[4:1])); T_(identical(sample(keys, 4, replace=TRUE)[0], keys[0]))
+T_(rng_key(1, 2, "philox4x64")); T_(rng_key(1, engine="philox4x64", 2)); T_(rng_key(n=2, 1)); T_(rng_key(seed=1, n=1, engine="threefry4x64", 5)); T_(rng_key()); T_(rng_key(1, n=0)); T_(length(rng_key(1, n=0))); T_(c(rng_key(1,n=0), rng_key(1,n=0, engine="philox4x64"))); T_(c(rng_key(1,n=0, engine="philox4x64"), keys)); T_(identical(c(keys[0], keys), keys))
+T_(identical(rng_key(0), rng_key(-0))); T_(identical(rng_key(1e3), rng_key(1000L))); T_(identical(rng_key(2^31), rng_key(2147483648))); T_(format(rng_key(2^53-1, engine="philox4x64"))); T_(format(rng_key(2^53-2, engine="philox4x64"))); T_(format(rng_key(2^32, engine="philox4x64"))); T_(format(rng_key(0, engine="philox4x64"))); T_(anyDuplicated(format(rng_key(0, n=1e5)))); T_(length(unique(rng_key(0, n=1e5))))
+T_(identical(rng_key(3, n=5)[2:5], rng_key(4, n=4))); T_(length(unique(c(rng_key(3, n=50), rng_key(4, n=50), rng_key(5,n=50)))))

@@ -233,8 +233,29 @@ typedef enum { ZURAND_ENG_PHILOX = ZURAND_ENGINE_PHILOX4X64,
  * governs only zurand's own fills, not other OpenMP code in the process. */
 static int zurand_thread_cap = 0;
 
+/* Fork safety (#122). GNU OpenMP's thread pool does not survive fork(): a
+ * forked child (parallel::mclapply(), mcparallel()) that enters a parallel
+ * region after the parent has used one waits forever for threads that no
+ * longer exist. So zurand records the process that loaded it and runs
+ * single-threaded in any other. A pid check rather than pthread_atfork():
+ * an atfork handler cannot be unregistered, and would be left pointing into
+ * an unloaded zurand.so after unloadNamespace() or devtools::load_all(). */
+#if defined(ZURAND_OPENMP) && !defined(_WIN32)
+#  include <unistd.h>
+static pid_t zurand_load_pid = 0;
+static int zurand_in_fork(void) {
+    return getpid() != zurand_load_pid;
+}
+#else
+static int zurand_in_fork(void) {
+    return 0;
+}
+#endif
+
 static int zurand_threads(void) {
 #ifdef ZURAND_OPENMP
+    if (zurand_in_fork())
+        return 1;
     int max = omp_get_max_threads();
     return (zurand_thread_cap > 0 && zurand_thread_cap < max) ? zurand_thread_cap
                                                             : max;
@@ -2284,6 +2305,9 @@ void attribute_visible R_init_zurand(DllInfo *dll) {
     R_registerRoutines(dll, NULL, CallEntries, NULL, NULL);
     R_useDynamicSymbols(dll, FALSE);
     R_RegisterCCallable("zurand", "zurand_api", (DL_FUNC) &zurand_api_get);
+#if defined(ZURAND_OPENMP) && !defined(_WIN32)
+    zurand_load_pid = getpid();
+#endif
     zurand_lazy_init(dll);
     /* Settle the SIMD dispatch now, on the main thread, so C API calls from
      * worker threads only ever read it. */

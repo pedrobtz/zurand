@@ -6,8 +6,10 @@
 #' With the default bounds every value lies strictly inside \eqn{(0, 1)}: it
 #' is \eqn{(m + 1/2) 2^{-52}} for a 52-bit integer \eqn{m}, so neither
 #' endpoint can occur. Other bounds are applied as `min + (max - min) * u`,
-#' which, as with [stats::runif()], will not return either extreme value
-#' unless `max == min` or `max - min` is small compared with `min`.
+#' which, as with [stats::runif()], rounds: a bound can be returned whenever
+#' `[min, max]` holds few representable doubles -- when `max - min` is small
+#' compared with `min`, or when the bounds are subnormal. Every value lies
+#' in `[min, max]`.
 #'
 #' @param key An `rng_key` vector.
 #' @param n A single non-negative whole number. Defaults to one draw per key.
@@ -36,6 +38,10 @@ rng_uniform <- function(key, n = 1L, min = 0, max = 1, offset = 0) {
 #'
 #' Stateless normal sampling. `rng_normal(key, n, mean, sd)` is a pure function
 #' of its arguments and returns ordinary numeric vectors or matrices.
+#'
+#' Values are `mean + sd * z`, so finite arguments can give infinite values
+#' when the result overflows: with `sd = .Machine$double.xmax`, about a third
+#' of draws are `Inf` or `-Inf`, as with [stats::rnorm()].
 #'
 #' @inheritParams rng_uniform
 #' @param mean A single finite numeric mean.
