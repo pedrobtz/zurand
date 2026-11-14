@@ -1,3 +1,5 @@
 .Rproj.user
 docs
 src/Makevars
+tests/testthat/_problems/
+tests/testthat/testthat-problems.rds
