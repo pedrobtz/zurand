@@ -47,7 +47,7 @@
 #' Reading the file needs zurand: without it, R restores a lazy vector as
 #' a zero-length vector, with only a warning.
 #'
-#' On R 4.6.2, a lazy vector of 64 or more values that has been given
+#' On R 4.6.2 and later, a lazy vector of 64 or more values that has been given
 #' attributes with [structure()] can refuse scans (`sum()`, arithmetic)
 #' after it has been read, saved and read again, with "REFCNT on locked
 #' WRAPPER data". No values are wrong. This is a defect in R's wrapper

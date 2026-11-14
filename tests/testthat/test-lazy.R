@@ -320,7 +320,9 @@ test_that("a wrapped lazy vector stays usable after scan, save, scan (#127)", {
   # R 4.6.2's wrapper class raises "REFCNT on locked WRAPPER data" here for
   # any ALTREP class whose Duplicate method returns ALTREP; a base-R toy
   # class reproduces it (pedrobtz/zurand#127). Not zurand's to fix.
-  skip_if(getRversion() == "4.6.2", "R 4.6.2 wrapper defect (#127)")
+  # R 4.6.2 and R-devel (r90888, 2026-11-13) have it; R 4.6.1 does not.
+  # Narrow this once R ships a fix.
+  skip_if(getRversion() >= "4.6.2", "R >= 4.6.2 wrapper defect (#127)")
   x <- rng_lazy_normal(rng_key(1L), 64)
   y <- structure(x, unit = "cm")
   s1 <- sum(y)
