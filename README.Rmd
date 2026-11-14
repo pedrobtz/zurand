@@ -1,0 +1,132 @@
+---
+output: github_document
+---
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+# zurand
+
+<!-- badges: start -->
+[![Lifecycle: experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html#experimental)
+[![R-CMD-check](https://github.com/pedrobtz/zurand/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pedrobtz/zurand/actions/workflows/R-CMD-check.yaml)
+[![native-checks](https://github.com/pedrobtz/zurand/actions/workflows/native-checks.yaml/badge.svg)](https://github.com/pedrobtz/zurand/actions/workflows/native-checks.yaml)
+[![Coverage](https://github.com/pedrobtz/zurand/raw/gh-pages/badges/coverage.svg)](https://github.com/pedrobtz/zurand/actions/workflows/coverage.yaml)
+<!-- badges: end -->
+
+## Overview
+
+Random numbers in R come from a hidden, global state. `set.seed()` fixes
+where it starts, and every draw moves it on. So the numbers you get depend
+on everything drawn before: add one `rnorm()` early in a script and every
+later result changes, and split a loop across workers and the results
+depend on how the work was divided.
+
+zurand has no hidden state. You make a **key**, and each value is worked
+out from the key and the value's position, so the same key always gives
+the same numbers.
+
+* **The same numbers everywhere.** A key gives the same values on Linux,
+  macOS and Windows, on Intel and ARM, and whatever the number of threads.
+* **Nothing to keep track of.** Drawing never changes anything, so drawing
+  more, or drawing in a different order, leaves every other result alone.
+* **Parallel work without worry.** Give each task its own key, and the
+  results no longer depend on how the tasks are scheduled.
+* **Fast.** Several times faster than `runif()` and `rnorm()` on one
+  thread, and it uses more threads for large draws without changing a
+  single value.
+* **Huge vectors for free.** A lazy vector of a billion values takes
+  almost no memory: its values are computed only when you read them.
+
+## Installation
+
+zurand is not on CRAN yet. Install the development version from GitHub:
+
+```r
+# install.packages("pak")
+pak::pak("pedrobtz/zurand")
+```
+
+## Usage
+
+```{r, message = FALSE}
+library(zurand)
+```
+
+A key gives the same numbers every time you use it:
+
+```{r}
+key <- rng_key(2026)
+rng_normal(key, 3)
+rng_normal(key, 3)
+```
+
+Asking for more values extends the sequence rather than changing it:
+
+```{r}
+rng_normal(key, 5)
+```
+
+For a simulation with several replicates, make one key per replicate. Each
+column holds the stream of one replicate:
+
+```{r}
+keys <- rng_key(2026, n = 3)
+rng_uniform(keys, 4)
+```
+
+Replicate 3 gets the same numbers whether or not replicates 1 and 2 ever
+run, on this machine or another:
+
+```{r}
+rng_uniform(keys[3], 4)
+```
+
+When the parts of a computation have names rather than numbers, derive a
+key from the name:
+
+```{r}
+rng_integer(rng_fold(key, "treatment"), 6, min = 1, max = 6)
+rng_integer(rng_fold(key, "control"), 6, min = 1, max = 6)
+```
+
+A lazy vector is created instantly, whatever its length, and computes only
+the values you read. They are the same values `rng_normal()` gave above:
+
+```{r}
+x <- rng_lazy_normal(key, 1e9)
+length(x)
+x[c(1, 2, 3)]
+```
+
+Every function is named `rng_*()`: `rng_key()` and `rng_fold()` make keys,
+and `rng_uniform()`, `rng_normal()`, `rng_integer()` and `rng_bits()` draw
+from them.
+
+## Learn more
+
+* `vignette("zurand")`: stateless random numbers, key vectors, folding and
+  engines.
+* `vignette("performance")`: how fast zurand is against other generators,
+  and how threads are used.
+* `vignette("c-api")`: drawing the same values from C in other packages.
+* The [reference index](https://pedrobtz.github.io/zurand/reference/) lists
+  every function, and the [website](https://pedrobtz.github.io/zurand/) has
+  all of it.
+
+## Acknowledgements
+
+zurand builds on the Philox and Threefry generators of
+[Random123](https://github.com/DEShawResearch/random123) (Salmon, Moraes,
+Dror and Shaw, 2011), the xoshiro256++ generator of Blackman and Vigna
+(2021), the ziggurat method of Marsaglia and Tsang (2000) with NumPy's
+tables, McFarland's (2016) modified ziggurat, and fdlibm's `exp()` and
+`log1p()`. The licences of the code it bundles are in
+[inst/COPYRIGHTS](https://github.com/pedrobtz/zurand/blob/main/inst/COPYRIGHTS).
+zurand itself is MIT licensed.
