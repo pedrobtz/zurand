@@ -2,9 +2,9 @@
 
 Fast, stateless, deterministic random number generation. Random values
 are pure functions of immutable keys and sampler arguments, so sampling
-never reads or mutates '.Random.seed', and output is bit-identical
-across platforms and thread counts. The default engine is xoshiro256++
-(Blackman and Vigna, 2021)
+never touches the session's global random number state, and output is
+bit-identical across platforms and thread counts. The default engine is
+xoshiro256++ (Blackman and Vigna, 2021)
 [doi:10.1145/3460772](https://doi.org/10.1145/3460772) , reseeded from
 the Philox counter-based generator of the 'Random123' library (Salmon,
 Moraes, Dror and Shaw, 2011)

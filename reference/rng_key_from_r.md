@@ -29,7 +29,8 @@ rng_key_from_r(
 
   - `"xoshiro256pp"` (default) – the fastest of the three, and faster
     than dqrng and RcppZiggurat on one thread (x86_64 and Apple Silicon;
-    [`vignette("performance", package = "zurand")`](https://pedrobtz.github.io/zurand/articles/performance.md)
+    the [performance
+    article](https://pedrobtz.github.io/zurand/articles/performance.html)
     has the numbers). Philox derives a fresh 256-bit xoshiro256++ state
     for each 512-value chunk, then a cheap recurrence produces the
     chunk, so a chunk depends only on the key and its index. Reaching an

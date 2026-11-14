@@ -51,5 +51,6 @@ The chunks are exactly `rng_normal(k, 1e9)`, in order. From R, the same
 walk is `rng_normal(key, n, offset = k)`.
 
 Filling a reused buffer also saves the cost of a new R vector per call,
-which for large vectors is a large share of the time (see
-[`vignette("performance", package = "zurand")`](https://pedrobtz.github.io/zurand/articles/performance.md)).
+which for large vectors is a large share of the time (see [the
+performance
+article](https://pedrobtz.github.io/zurand/articles/performance.md)).

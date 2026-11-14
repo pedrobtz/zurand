@@ -44,8 +44,8 @@ rng_normal(
 
   - `"mcfarland"`: McFarland's modified ziggurat (2016). Its common case
     needs no table comparison, so it is faster than the default on every
-    CPU measured, by more on x86_64 than on arm64
-    ([`vignette("performance", package = "zurand")`](https://pedrobtz.github.io/zurand/articles/performance.md)).
+    CPU measured, by more on x86_64 than on arm64 (the [performance
+    article](https://pedrobtz.github.io/zurand/articles/performance.html)).
 
   Both are exact samplers of the standard normal (to double precision)
   and both are bit-reproducible across platforms. They are different

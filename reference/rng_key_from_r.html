@@ -70,7 +70,7 @@ a pure function of the key and the draw index, the same key gives the
 same values on every platform and thread count, and draw <code>i</code> does not
 depend on <code>n</code>. They differ in speed and in the stream they produce.</p><ul><li><p><code>"xoshiro256pp"</code> (default) – the fastest of the three, and faster
 than dqrng and RcppZiggurat on one thread (x86_64 and Apple Silicon;
-<code><a href="../articles/performance.html">vignette("performance", package = "zurand")</a></code> has the numbers).
+the <a href="https://pedrobtz.github.io/zurand/articles/performance.html">performance article</a> has the numbers).
 Philox derives a fresh 256-bit xoshiro256++ state for each
 512-value chunk, then a cheap recurrence produces the chunk, so a
 chunk depends only on the key and its index. Reaching an arbitrary

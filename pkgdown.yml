@@ -2,12 +2,12 @@ pandoc: 3.8.3
 pkgdown: 2.2.1
 pkgdown_sha: ~
 articles:
-  c-api: c-api.html
-  lazy: lazy.html
-  performance: performance.html
-  simulations: simulations.html
-  zurand: zurand.html
-last_built: 2026-11-14T16:41Z
+  articles/c-api: c-api.html
+  articles/lazy: lazy.html
+  articles/performance: performance.html
+  articles/simulations: simulations.html
+  articles/zurand: zurand.html
+last_built: 2026-11-14T17:49Z
 urls:
   reference: https://pedrobtz.github.io/zurand/reference
   article: https://pedrobtz.github.io/zurand/articles

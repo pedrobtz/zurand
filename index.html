@@ -74,29 +74,32 @@
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
 </h2>
-<p>zurand is not on CRAN yet. Install the development version from GitHub:</p>
+<p>Install the released version from CRAN:</p>
 <div class="sourceCode" id="cb1"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/utils/install.packages.html" class="external-link">install.packages</a></span><span class="op">(</span><span class="st">"zurand"</span><span class="op">)</span></span></code></pre></div>
+<p>Or the development version from GitHub:</p>
+<div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># install.packages("pak")</span></span>
 <span><span class="fu">pak</span><span class="fu">::</span><span class="fu"><a href="https://pak.r-lib.org/reference/pak.html" class="external-link">pak</a></span><span class="op">(</span><span class="st">"pedrobtz/zurand"</span><span class="op">)</span></span></code></pre></div>
 </div>
 <div class="section level2">
 <h2 id="usage">Usage<a class="anchor" aria-label="anchor" href="#usage"></a>
 </h2>
-<div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://pedrobtz.github.io/zurand/">zurand</a></span><span class="op">)</span></span></code></pre></div>
 <p>A key gives the same numbers every time you use it:</p>
-<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">key</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rng_key.html">rng_key</a></span><span class="op">(</span><span class="fl">2026</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rng_normal.html">rng_normal</a></span><span class="op">(</span><span class="va">key</span>, <span class="fl">3</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1]  0.006686381 -1.233412249  0.591067060</span></span>
 <span><span class="fu"><a href="reference/rng_normal.html">rng_normal</a></span><span class="op">(</span><span class="va">key</span>, <span class="fl">3</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1]  0.006686381 -1.233412249  0.591067060</span></span></code></pre></div>
 <p>Asking for more values extends the sequence rather than changing it:</p>
-<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="reference/rng_normal.html">rng_normal</a></span><span class="op">(</span><span class="va">key</span>, <span class="fl">5</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1]  0.006686381 -1.233412249  0.591067060  0.835300390  0.249764157</span></span></code></pre></div>
 <p>For a simulation with several replicates, make one key per replicate. Each column holds the stream of one replicate:</p>
-<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">keys</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rng_key.html">rng_key</a></span><span class="op">(</span><span class="fl">2026</span>, n <span class="op">=</span> <span class="fl">3</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/rng_uniform.html">rng_uniform</a></span><span class="op">(</span><span class="va">keys</span>, <span class="fl">4</span><span class="op">)</span></span>
 <span><span class="co">#&gt;            [,1]       [,2]      [,3]</span></span>
@@ -105,17 +108,17 @@
 <span><span class="co">#&gt; [3,] 0.06342998 0.48395427 0.8484967</span></span>
 <span><span class="co">#&gt; [4,] 0.74915105 0.79447021 0.9430020</span></span></code></pre></div>
 <p>Replicate 3 gets the same numbers whether or not replicates 1 and 2 ever run, on this machine or another:</p>
-<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="reference/rng_uniform.html">rng_uniform</a></span><span class="op">(</span><span class="va">keys</span><span class="op">[</span><span class="fl">3</span><span class="op">]</span>, <span class="fl">4</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] 0.4769039 0.1586149 0.8484967 0.9430020</span></span></code></pre></div>
 <p>When the parts of a computation have names rather than numbers, derive a key from the name:</p>
-<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="reference/rng_integer.html">rng_integer</a></span><span class="op">(</span><span class="fu"><a href="reference/rng_fold.html">rng_fold</a></span><span class="op">(</span><span class="va">key</span>, <span class="st">"treatment"</span><span class="op">)</span>, <span class="fl">6</span>, min <span class="op">=</span> <span class="fl">1</span>, max <span class="op">=</span> <span class="fl">6</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] 6 3 5 6 4 3</span></span>
 <span><span class="fu"><a href="reference/rng_integer.html">rng_integer</a></span><span class="op">(</span><span class="fu"><a href="reference/rng_fold.html">rng_fold</a></span><span class="op">(</span><span class="va">key</span>, <span class="st">"control"</span><span class="op">)</span>, <span class="fl">6</span>, min <span class="op">=</span> <span class="fl">1</span>, max <span class="op">=</span> <span class="fl">6</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] 6 6 6 3 5 5</span></span></code></pre></div>
 <p>A lazy vector is created instantly, whatever its length, and computes only the values you read. They are the same values <code><a href="reference/rng_normal.html">rng_normal()</a></code> gave above:</p>
-<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">x</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/rng_lazy_normal.html">rng_lazy_normal</a></span><span class="op">(</span><span class="va">key</span>, <span class="fl">1e9</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/length.html" class="external-link">length</a></span><span class="op">(</span><span class="va">x</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] 1000000000</span></span>
@@ -128,15 +131,15 @@
 </h2>
 <ul>
 <li>
-<code><a href="articles/zurand.html">vignette("zurand")</a></code>: stateless random numbers, key vectors, folding and engines.</li>
+<a href="https://pedrobtz.github.io/zurand/articles/zurand.html">Stateless random numbers</a>: key vectors, folding and engines.</li>
 <li>
-<code><a href="articles/simulations.html">vignette("simulations")</a></code>: simulation studies that stay reproducible as they grow, run in parallel, and stop and resume.</li>
+<a href="https://pedrobtz.github.io/zurand/articles/simulations.html">Reproducible simulation studies</a>: studies that stay reproducible as they grow, run in parallel, and stop and resume.</li>
 <li>
-<code><a href="articles/lazy.html">vignette("lazy")</a></code>: random vectors too big for memory.</li>
+<a href="https://pedrobtz.github.io/zurand/articles/lazy.html">Lazy random vectors</a>: random vectors too big for memory.</li>
 <li>
-<code><a href="articles/performance.html">vignette("performance")</a></code>: how fast zurand is against other generators, and how threads are used.</li>
+<a href="https://pedrobtz.github.io/zurand/articles/performance.html">Performance</a>: how fast zurand is against other generators, and how threads are used.</li>
 <li>
-<code><a href="articles/c-api.html">vignette("c-api")</a></code>: drawing the same values from C in other packages.</li>
+<a href="https://pedrobtz.github.io/zurand/articles/c-api.html">Using zurand from C</a>: the same values from C, in other packages.</li>
 <li>The <a href="https://pedrobtz.github.io/zurand/reference/">reference index</a> lists every function, and the <a href="https://pedrobtz.github.io/zurand/">website</a> has all of it.</li>
 </ul>
 </div>
