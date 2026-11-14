@@ -82,8 +82,10 @@ earlier values. <code>offset + n</code> must not exceed \(2^{53}\).</p></dd>
     <p>With the default bounds every value lies strictly inside \((0, 1)\): it
 is \((m + 1/2) 2^{-52}\) for a 52-bit integer \(m\), so neither
 endpoint can occur. Other bounds are applied as <code>min + (max - min) * u</code>,
-which, as with <code><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">stats::runif()</a></code>, will not return either extreme value
-unless <code>max == min</code> or <code>max - min</code> is small compared with <code>min</code>.</p>
+which, as with <code><a href="https://rdrr.io/r/stats/Uniform.html" class="external-link">stats::runif()</a></code>, rounds: a bound can be returned whenever
+<code>[min, max]</code> holds few representable doubles – when <code>max - min</code> is small
+compared with <code>min</code>, or when the bounds are subnormal. Every value lies
+in <code>[min, max]</code>.</p>
     </div>
 
     <div class="section level2">

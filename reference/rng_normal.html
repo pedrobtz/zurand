@@ -102,6 +102,12 @@ earlier values. <code>offset + n</code> must not exceed \(2^{53}\).</p></dd>
 <code>length(key)</code> numeric matrix for multiple keys.</p>
     </div>
     <div class="section level2">
+    <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
+    <p>Values are <code>mean + sd * z</code>, so finite arguments can give infinite values
+when the result overflows: with <code>sd = .Machine$double.xmax</code>, about a third
+of draws are <code>Inf</code> or <code>-Inf</code>, as with <code><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">stats::rnorm()</a></code>.</p>
+    </div>
+    <div class="section level2">
     <h2 id="references">References<a class="anchor" aria-label="anchor" href="#references"></a></h2>
     <p>Marsaglia, G. and Tsang, W. W. (2000). The ziggurat method for generating
 random variables. <em>Journal of Statistical Software</em>, 5(8), 1-7.

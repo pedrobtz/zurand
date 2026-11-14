@@ -67,6 +67,13 @@ rng_normal(
 A numeric vector of length `n` for one key, or an `n` by `length(key)`
 numeric matrix for multiple keys.
 
+## Details
+
+Values are `mean + sd * z`, so finite arguments can give infinite values
+when the result overflows: with `sd = .Machine$double.xmax`, about a
+third of draws are `Inf` or `-Inf`, as with
+[`stats::rnorm()`](https://rdrr.io/r/stats/Normal.html).
+
 ## References
 
 Marsaglia, G. and Tsang, W. W. (2000). The ziggurat method for

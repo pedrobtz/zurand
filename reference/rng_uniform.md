@@ -43,9 +43,10 @@ numeric matrix for multiple keys.
 With the default bounds every value lies strictly inside \\(0, 1)\\: it
 is \\(m + 1/2) 2^{-52}\\ for a 52-bit integer \\m\\, so neither endpoint
 can occur. Other bounds are applied as `min + (max - min) * u`, which,
-as with [`stats::runif()`](https://rdrr.io/r/stats/Uniform.html), will
-not return either extreme value unless `max == min` or `max - min` is
-small compared with `min`.
+as with [`stats::runif()`](https://rdrr.io/r/stats/Uniform.html),
+rounds: a bound can be returned whenever `[min, max]` holds few
+representable doubles – when `max - min` is small compared with `min`,
+or when the bounds are subnormal. Every value lies in `[min, max]`.
 
 ## Examples
 
