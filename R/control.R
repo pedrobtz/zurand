@@ -56,7 +56,9 @@ rng_threads <- function(threads = NULL) {
 #' are unaffected, as is every other function.
 #'
 #' @param enable `NULL` to query, `FALSE` to force the portable path, or
-#'   `TRUE` to go back to using whatever the CPU supports.
+#'   `TRUE` to go back to using whatever the CPU supports. A value
+#'   `rng_simd()` returned is accepted too, so `old <- rng_simd(FALSE)`
+#'   followed by `rng_simd(old)` restores the previous setting.
 #' @return A string: `"avx2"` (x86_64 with AVX2) or `"neon"` (arm64) if the
 #'   vectorised path is active, otherwise `"none"`. When setting, the
 #'   previous value, invisibly.
@@ -66,9 +68,25 @@ rng_threads <- function(threads = NULL) {
 #' key <- rng_key(1L, engine = "xoshiro256pp")
 #' old <- rng_simd(FALSE)
 #' portable <- rng_uniform(key, 4L)
-#' rng_simd(old != "none")
+#' rng_simd(old)
 #' identical(portable, rng_uniform(key, 4L))
 rng_simd <- function(enable = NULL) {
+  # The previous value restores itself: rng_simd(old) (#131).
+  if (
+    is.character(enable) &&
+      length(enable) == 1L &&
+      enable %in% c("avx2", "neon", "none")
+  ) {
+    enable <- enable != "none"
+  }
+  if (
+    !is.null(enable) &&
+      !(is.logical(enable) && length(enable) == 1L && !is.na(enable))
+  ) {
+    zurand_abort(
+      "`enable` must be NULL, TRUE, FALSE or a value rng_simd() returned"
+    )
+  }
   prev <- .Call(C_rng_simd, enable)
   if (is.null(enable)) prev else invisible(prev)
 }

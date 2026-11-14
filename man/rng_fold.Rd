@@ -18,7 +18,12 @@ such as factors and dates are an error: a factor would fold as its
 level codes, whose meaning changes with the level set. Fold
 \code{as.character(f)} or \code{unclass(d)} instead. Names and dimensions are
 ignored: a matrix folds as its values in column order. Strings are
-folded as their UTF-8 bytes, whatever their declared encoding.}
+folded as their text in UTF-8, so the same text gives the same key
+whatever its declared encoding and whatever the session's locale.
+An unmarked string in a locale whose charset is ASCII (the C locale
+of many containers and cron jobs) is read as UTF-8; if its bytes are
+not UTF-8, or a string cannot be translated to UTF-8 losslessly,
+that is an error rather than a key of some other text.}
 }
 \value{
 An \code{rng_key} vector with the same length as \code{key}.
@@ -34,7 +39,10 @@ different values can in principle fold to the same key. Among \code{m}
 distinct values the chance of any such collision is about
 \code{m^2 / 2^65}: under one in a million for a million values, but not
 negligible near \code{2^32} of them. For that many independent streams,
-request them up front with \code{rng_key(seed, n)}, which never collides.
+request them up front with \code{rng_key(seed, n)}: the keys of one call
+never collide. (Keys from different seeds can coincide, since key \code{i} is
+the \code{i}-th output of a sequence started at \code{seed}; take many keys from
+one seed rather than one key from each of many seeds.)
 }
 \examples{
 key <- rng_key(42L)

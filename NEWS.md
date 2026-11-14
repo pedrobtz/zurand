@@ -25,6 +25,24 @@ across platforms, thread counts, SIMD paths and call order.
   `rng_fold()` folds the storage type and values of plain vectors; classed
   data such as factors and dates is an error, since a factor would fold as
   codes that change with its levels (#60).
+* Every error zurand raises has the class `zurand_error`, so it can be
+  caught by class rather than by message (#62).
+* `rng_fold()` folds a string's text in UTF-8 whatever the locale: in the C
+  locale an unmarked non-ASCII string used to fold as R's `<c3><a9>`
+  escapes, a different key from the same script in a UTF-8 session (#123).
+* Classed numbers -- factors, `integer64`, dates, difftimes -- are refused on
+  every numeric argument instead of being read as their storage value, so
+  `rng_key(factor("5"))` is no longer seed 1 (#126).
+* Key vectors: arithmetic, `Math`, `Summary`, `t()` and `names<-` are errors,
+  since they made other, valid keys (#125); `==` and `!=` compare whole
+  keys; `head()`, `tail()`, `match()`, `%in%` and `as.character()` work key
+  by key; `keys[NULL]` is an empty key vector; `keys[[i, j]]` is an error
+  (#128, #129, #136). An invalid `stream` attribute is refused by `[` and
+  `c()` as by the samplers (#130).
+* A zero-length key vector with `n` above `.Machine$integer.max` is the
+  multi-key dimension error rather than a truncated matrix (#124).
+* `rng_simd()` accepts only `NULL`, `TRUE`, `FALSE` or a value it returned,
+  so `rng_simd(old)` restores (#131).
 * A key vector behaves as a vector of opaque keys: `[`, `[[`, `c()`,
   `rev()`, `rep()`, `unique()`, `duplicated()` and `as.list()` work key by
   key, so `lapply(keys, f)` and parallel maps hand each task one key. Keys

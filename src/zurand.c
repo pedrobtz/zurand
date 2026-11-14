@@ -31,6 +31,27 @@
 #  define ZURAND_OPENMP 1
 #endif
 
+#include <stdarg.h>
+
+/* Every error zurand raises has the R class `zurand_error` (#62, R9), so
+ * callers catch it by class rather than by message. The message is built
+ * here and raised by zurand_abort_c() in R/errors.R, evaluated in the
+ * namespace; zurand_error() follows only in case that evaluation returns. */
+static void NORET zurand_error(const char *fmt, ...) {
+    char msg[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof msg, fmt, ap);
+    va_end(ap);
+    SEXP name = PROTECT(Rf_mkString("zurand"));
+    SEXP ns = PROTECT(R_FindNamespace(name));
+    SEXP call = PROTECT(Rf_lang2(Rf_install("zurand_abort_c"),
+                                 Rf_mkString(msg)));
+    Rf_eval(call, ns);
+    UNPROTECT(3);
+    Rf_error("%s", msg);
+}
+
 #include "Random123/philox.h"
 #include "Random123/threefry.h"
 
@@ -253,9 +274,9 @@ static int key_stream(SEXP key) {
             v = (int)d;
     }
     if (v == NA_INTEGER || v < 1)
-        Rf_error("<rng_key> has an invalid `stream` attribute");
+        zurand_error("<rng_key> has an invalid `stream` attribute");
     if (v > ZURAND_STREAM_CURRENT)
-        Rf_error("<rng_key> uses stream version %d, but this version of "
+        zurand_error("<rng_key> uses stream version %d, but this version of "
                  "zurand implements streams up to %d; update zurand",
                  v, ZURAND_STREAM_CURRENT);
     return v;
@@ -273,7 +294,7 @@ static int engine_code(SEXP engine) {
 
 static void check_engine(SEXP engine) {
     if (engine_code(engine) < 0)
-        Rf_error("`engine` must be \"%s\", \"%s\" or \"%s\"",
+        zurand_error("`engine` must be \"%s\", \"%s\" or \"%s\"",
                  ZURAND_ENGINE_PHILOX, ZURAND_ENGINE_THREEFRY,
                  ZURAND_ENGINE_XOSHIRO);
 }
@@ -283,7 +304,7 @@ static zurand_engine_t key_engine_code(SEXP key) {
     SEXP e = Rf_getAttrib(key, engine_symbol());
     int c = engine_code(e);
     if (c < 0)
-        Rf_error("<rng_key> has an unrecognised engine");
+        zurand_error("<rng_key> has an unrecognised engine");
     return (zurand_engine_t)c;
 }
 
@@ -302,14 +323,14 @@ static void store_word_at(SEXP x, R_xlen_t nkey, R_xlen_t i, int word, uint32_t 
 static R_xlen_t key_count(SEXP key) {
     if (TYPEOF(key) != INTSXP ||
         !Rf_inherits(key, "rng_key"))
-        Rf_error("`key` must be an <rng_key>; create one with rng_key()");
+        zurand_error("`key` must be an <rng_key>; create one with rng_key()");
 
     SEXP dim = Rf_getAttrib(key, R_DimSymbol);
     if (TYPEOF(dim) != INTSXP || Rf_xlength(dim) != 2 ||
         INTEGER(dim)[0] < 0 || INTEGER(dim)[1] != ZURAND_KEY_WORDS)
-        Rf_error("`key` has an invalid internal shape");
+        zurand_error("`key` has an invalid internal shape");
     if (Rf_xlength(key) != (R_xlen_t)INTEGER(dim)[0] * ZURAND_KEY_WORDS)
-        Rf_error("`key` has an invalid internal length");
+        zurand_error("`key` has an invalid internal length");
 
     SEXP engine = Rf_getAttrib(key, engine_symbol());
     check_engine(engine);
@@ -358,9 +379,9 @@ static threefry4x64_key_t key_from_words_threefry(const int *words,
 static SEXP alloc_key_vector(R_xlen_t nkey, SEXP engine, int stream) {
     check_engine(engine);
     if (nkey > R_XLEN_T_MAX / ZURAND_KEY_WORDS)
-        Rf_error("too many keys requested");
+        zurand_error("too many keys requested");
     if (nkey > INT_MAX)
-        Rf_error("too many keys for a matrix-shaped key vector");
+        zurand_error("too many keys for a matrix-shaped key vector");
 
     SEXP ans = PROTECT(Rf_allocVector(INTSXP, nkey * ZURAND_KEY_WORDS));
     SEXP dim = PROTECT(Rf_allocVector(INTSXP, 2));
@@ -401,21 +422,30 @@ SEXP C_rng_key_format(SEXP key) {
 /* ---- scalar validation ---- */
 
 static double numeric_scalar(SEXP x, const char *what) {
+    /* A classed number means something else than its storage: a factor's
+     * level code, an integer64's bit pattern, a Date's day count (#126).
+     * rng_fold() refuses classed data for the same reason. */
+    if (Rf_isObject(x)) {
+        SEXP cls = Rf_getAttrib(x, R_ClassSymbol);
+        zurand_error("`%s` must be a plain number, not a <%s>", what,
+                     TYPEOF(cls) == STRSXP && XLENGTH(cls) > 0
+                         ? CHAR(STRING_ELT(cls, 0)) : "classed object");
+    }
     if (TYPEOF(x) != INTSXP && TYPEOF(x) != REALSXP)
-        Rf_error("`%s` must be an integer or double scalar", what);
+        zurand_error("`%s` must be an integer or double scalar", what);
     if (Rf_xlength(x) != 1)
-        Rf_error("`%s` must be a single value", what);
+        zurand_error("`%s` must be a single value", what);
 
     double out;
     if (TYPEOF(x) == INTSXP) {
         int value = INTEGER(x)[0];
         if (value == NA_INTEGER)
-            Rf_error("`%s` must not be missing", what);
+            zurand_error("`%s` must not be missing", what);
         out = (double)value;
     } else {
         out = REAL(x)[0];
         if (!R_FINITE(out))
-            Rf_error("`%s` must be finite", what);
+            zurand_error("`%s` must be finite", what);
     }
     return out;
 }
@@ -423,18 +453,18 @@ static double numeric_scalar(SEXP x, const char *what) {
 static uint64_t u64_seed(SEXP x) {
     double value = numeric_scalar(x, "seed");
     if (value != trunc(value))
-        Rf_error("`seed` must be a whole number");
+        zurand_error("`seed` must be a whole number");
     if (value < 0 || value > ZURAND_MAX_EXACT_INT)
-        Rf_error("`seed` must be between 0 and 2^53 - 1");
+        zurand_error("`seed` must be between 0 and 2^53 - 1");
     return (uint64_t)value;
 }
 
 static R_xlen_t length_scalar(SEXP x, const char *what) {
     double value = numeric_scalar(x, what);
     if (value != trunc(value) || value < 0)
-        Rf_error("`%s` must be a single non-negative whole number", what);
+        zurand_error("`%s` must be a single non-negative whole number", what);
     if (value > (double)R_XLEN_T_MAX)
-        Rf_error("`%s` is too large for an R vector", what);
+        zurand_error("`%s` is too large for an R vector", what);
     return (R_xlen_t)value;
 }
 
@@ -445,16 +475,16 @@ static R_xlen_t length_scalar(SEXP x, const char *what) {
 static uint64_t offset_scalar(SEXP x, R_xlen_t n) {
     double value = numeric_scalar(x, "offset");
     if (value != trunc(value) || value < 0)
-        Rf_error("`offset` must be a single non-negative whole number");
+        zurand_error("`offset` must be a single non-negative whole number");
     if (value > 9007199254740992.0 - (double)n)
-        Rf_error("`offset + n` must not exceed 2^53");
+        zurand_error("`offset + n` must not exceed 2^53");
     return (uint64_t)value;
 }
 
 static int bits_scalar(SEXP x) {
     double value = numeric_scalar(x, "bits");
     if (value != 32.0 && value != 64.0)
-        Rf_error("`bits` must be either 32 or 64");
+        zurand_error("`bits` must be either 32 or 64");
     return (int)value;
 }
 
@@ -465,17 +495,17 @@ static double finite_scalar(SEXP x, const char *what) {
 static int integer_bound(SEXP x, const char *what) {
     double value = numeric_scalar(x, what);
     if (value != trunc(value))
-        Rf_error("`%s` must be a whole number", what);
+        zurand_error("`%s` must be a whole number", what);
     if (value < (double)INT_MIN + 1.0 || value > (double)INT_MAX)
-        Rf_error("`%s` must be in R's non-missing integer range", what);
+        zurand_error("`%s` must be in R's non-missing integer range", what);
     return (int)value;
 }
 
 static int64_t exact_i64_from_double(double value, const char *what) {
     if (!R_FINITE(value) || value != trunc(value))
-        Rf_error("`%s` must contain only finite whole numbers", what);
+        zurand_error("`%s` must contain only finite whole numbers", what);
     if (value < -ZURAND_MAX_EXACT_INT || value > ZURAND_MAX_EXACT_INT)
-        Rf_error("`%s` values must be exactly representable integers", what);
+        zurand_error("`%s` values must be exactly representable integers", what);
     return (int64_t)value;
 }
 
@@ -1073,7 +1103,7 @@ SEXP C_rng_simd(SEXP enable) {
     if (enable != R_NilValue) {
         int e = Rf_asLogical(enable);
         if (e == NA_LOGICAL)
-            Rf_error("`enable` must be TRUE or FALSE");
+            zurand_error("`enable` must be TRUE or FALSE");
         zurand_simd_off = !e;
     }
     return Rf_mkString(prev);
@@ -1338,7 +1368,7 @@ static uint64_t hash_data(SEXP data) {
         for (R_xlen_t i = 0; i < n; i++) {
             SEXP s = STRING_ELT(data, i);
             if (s == NA_STRING)
-                Rf_error("`data` must not contain missing values");
+                zurand_error("`data` must not contain missing values");
             /* A translation is R_alloc()ed; release it per element so a
              * long non-UTF-8 vector does not hold every copy until return. */
             const void *vmax = vmaxget();
@@ -1359,7 +1389,7 @@ static uint64_t hash_data(SEXP data) {
         for (R_xlen_t i = 0; i < n; i++) {
             int value = INTEGER(data)[i];
             if (value == NA_INTEGER)
-                Rf_error("`data` must not contain missing values");
+                zurand_error("`data` must not contain missing values");
             hash_u64(&h, (uint64_t)(int64_t)value);
         }
         break;
@@ -1379,7 +1409,7 @@ static uint64_t hash_data(SEXP data) {
         for (R_xlen_t i = 0; i < n; i++) {
             int value = LOGICAL(data)[i];
             if (value == NA_LOGICAL)
-                Rf_error("`data` must not contain missing values");
+                zurand_error("`data` must not contain missing values");
             hash_byte(&h, (unsigned char)(value ? 1 : 0));
         }
         break;
@@ -1392,7 +1422,7 @@ static uint64_t hash_data(SEXP data) {
         break;
 
     default:
-        Rf_error("`data` must be a character, integer, double, logical or raw vector");
+        zurand_error("`data` must be a character, integer, double, logical or raw vector");
     }
 
     return hash_finish(h);
@@ -1433,7 +1463,7 @@ static void affine_pass(double *out, R_xlen_t total, double a, double s,
 
 static R_xlen_t checked_product(R_xlen_t a, R_xlen_t b, const char *what) {
     if (a != 0 && b > R_XLEN_T_MAX / a)
-        Rf_error("requested `%s` output is too large", what);
+        zurand_error("requested `%s` output is too large", what);
     return a * b;
 }
 
@@ -1443,8 +1473,9 @@ static R_xlen_t checked_product(R_xlen_t a, R_xlen_t b, const char *what) {
  * not a failed 16 GB allocation first (#75). */
 static R_xlen_t sample_total(R_xlen_t n, R_xlen_t nkey) {
     R_xlen_t total = checked_product(n, nkey, "sample");
-    if (nkey > 1 && (n > INT_MAX || nkey > INT_MAX))
-        Rf_error("multi-key output dimensions are too large");
+    /* Zero keys give an n x 0 matrix, which needs the check too (#124). */
+    if (nkey != 1 && (n > INT_MAX || nkey > INT_MAX))
+        zurand_error("multi-key output dimensions are too large");
     return total;
 }
 
@@ -1532,7 +1563,7 @@ SEXP C_rng_threads(SEXP threads_) {
 
     double value = numeric_scalar(threads_, "threads");
     if (value != trunc(value) || value < 0)
-        Rf_error("`threads` must be a single whole number that is at least 1, "
+        zurand_error("`threads` must be a single whole number that is at least 1, "
                  "or 0 to remove the cap");
     int prev = zurand_thread_cap;
     zurand_thread_cap = value > (double)INT_MAX ? INT_MAX : (int)value;
@@ -1583,7 +1614,7 @@ SEXP C_rng_uniform(SEXP key, SEXP n_, SEXP min_, SEXP max_, SEXP offset_) {
     double min = finite_scalar(min_, "min");
     double max = finite_scalar(max_, "max");
     if (min > max)
-        Rf_error("`min` must be less than or equal to `max`");
+        zurand_error("`min` must be less than or equal to `max`");
 
     const int *kw = INTEGER(key);
     SEXP ans = PROTECT(Rf_allocVector(REALSXP, total));
@@ -1636,7 +1667,7 @@ SEXP C_rng_normal(SEXP key, SEXP n_, SEXP mean_, SEXP sd_, SEXP method_,
     double mean = finite_scalar(mean_, "mean");
     double sd = finite_scalar(sd_, "sd");
     if (sd < 0)
-        Rf_error("`sd` must be non-negative");
+        zurand_error("`sd` must be non-negative");
     /* validated on the R side; anything else is the default method */
     int method = (TYPEOF(method_) == INTSXP && XLENGTH(method_) == 1 &&
                   INTEGER(method_)[0] == ZURAND_NORMAL_MCFARLAND)
@@ -1696,7 +1727,7 @@ SEXP C_rng_integer(SEXP key, SEXP n_, SEXP min_, SEXP max_) {
     int min = integer_bound(min_, "min");
     int max = integer_bound(max_, "max");
     if (min > max)
-        Rf_error("`min` must be less than or equal to `max`");
+        zurand_error("`min` must be less than or equal to `max`");
 
     uint32_t range = (uint32_t)((int64_t)max - (int64_t)min + 1);
     uint32_t threshold = (uint32_t)((UINT64_C(0x100000000) - range) % range);
@@ -1744,7 +1775,7 @@ static R_xlen_t engine_chunk_words(zurand_engine_t eng) {
      * test suite ran straight past and only R CMD check caught, as an
      * abort with no output. */
     if (w > ZURAND_MAX_CHUNK_WORDS)
-        Rf_error("internal: chunk width %lld exceeds buffer capacity %d",
+        zurand_error("internal: chunk width %lld exceeds buffer capacity %d",
                  (long long)w, ZURAND_MAX_CHUNK_WORDS);
     return w;
 }
@@ -2160,7 +2191,7 @@ static uint64_t word_from_halves(SEXP hi, SEXP lo, R_xlen_t i, int bits) {
     double top = bits == 64 ? 4294967296.0 : ldexp(1.0, bits - 32);
     if (!(h >= 0 && h < top && h == trunc(h) && l >= 0 && l < 4294967296.0 &&
           l == trunc(l)))
-        Rf_error("word %.0f is outside %d bits", (double)i + 1, bits);
+        zurand_error("word %.0f is outside %d bits", (double)i + 1, bits);
     return ((uint64_t)h << 32) | (uint64_t)l;
 }
 
@@ -2174,19 +2205,19 @@ SEXP C_zurand_shortcut(SEXP method_, SEXP layer_, SEXP a_hi, SEXP a_lo,
         TYPEOF(a_lo) != REALSXP || TYPEOF(b_hi) != REALSXP ||
         TYPEOF(b_lo) != REALSXP || XLENGTH(a_hi) != n || XLENGTH(a_lo) != n ||
         XLENGTH(b_hi) != n || XLENGTH(b_lo) != n)
-        Rf_error("layers must be integer and words double, all of one length");
+        zurand_error("layers must be integer and words double, all of one length");
     SEXP ans = PROTECT(Rf_allocVector(INTSXP, n));
     for (R_xlen_t i = 0; i < n; i++) {
         int layer = INTEGER(layer_)[i];
         if (method == 0) {
             uint64_t rabs = word_from_halves(a_hi, a_lo, i, 52);
             if (layer < 1 || layer > 255 || rabs < ki_double[layer])
-                Rf_error("draw %.0f is not in a ziggurat wedge", (double)i + 1);
+                zurand_error("draw %.0f is not in a ziggurat wedge", (double)i + 1);
             INTEGER(ans)[i] = zig_wedge_shortcut(layer, rabs,
                                                  word_from_halves(b_hi, b_lo, i, 64));
         } else {
             if (layer < 1 || layer > ZURAND_MCF_LAYERS)
-                Rf_error("draw %.0f is not in a McFarland overhang", (double)i + 1);
+                zurand_error("draw %.0f is not in a McFarland overhang", (double)i + 1);
             INTEGER(ans)[i] = mcf_edge_shortcut((unsigned)layer,
                                                 word_from_halves(a_hi, a_lo, i, 63),
                                                 word_from_halves(b_hi, b_lo, i, 63));

@@ -107,7 +107,7 @@ rng_normal <- function(
 #' rng_integer(key, 10L, min = 1L, max = 6L)
 rng_integer <- function(key, n = 1L, min, max) {
   if (missing(min) || missing(max)) {
-    stop("`min` and `max` are required", call. = FALSE)
+    zurand_abort("`min` and `max` are required")
   }
   .Call(C_rng_integer, key, n, min, max)
 }

@@ -249,7 +249,7 @@ static SEXP lazy_make(SEXP key, SEXP meta) {
  * them, dist from ZURAND_DIST_*. */
 SEXP C_rng_lazy(SEXP key, SEXP n_, SEXP dist_, SEXP a_, SEXP b_) {
     if (key_count(key) != 1)
-        Rf_error("`key` must be a single key");
+        zurand_error("`key` must be a single key");
     (void) key_engine_code(key);
     key_stream(key);
     R_xlen_t n = length_scalar(n_, "n");
@@ -258,14 +258,14 @@ SEXP C_rng_lazy(SEXP key, SEXP n_, SEXP dist_, SEXP a_, SEXP b_) {
     if (dist == ZURAND_DIST_UNIFORM) {
         double min = finite_scalar(a_, "min"), max = finite_scalar(b_, "max");
         if (min > max)
-            Rf_error("`min` must be less than or equal to `max`");
+            zurand_error("`min` must be less than or equal to `max`");
         t = uniform_scaling(min, max);
     } else {
         t.a = finite_scalar(a_, "mean");
         t.s = finite_scalar(b_, "sd");
         t.twice = 0;
         if (t.s < 0)
-            Rf_error("`sd` must be non-negative");
+            zurand_error("`sd` must be non-negative");
     }
     /* The fifth element only when needed, so an ordinary lazy vector
      * serialises exactly as before. */
@@ -472,25 +472,25 @@ static void lazy_check_state(SEXP state) {
                       "invalid (the file is damaged or was written by a "
                       "newer version of zurand)";
     if (TYPEOF(state) != VECSXP || XLENGTH(state) != 2)
-        Rf_error(bad, "state");
+        zurand_error(bad, "state");
     SEXP key = VECTOR_ELT(state, 0), meta = VECTOR_ELT(state, 1);
     if (key_count(key) != 1)            /* also the engine and stream */
-        Rf_error(bad, "key");
+        zurand_error(bad, "key");
     if (TYPEOF(meta) != REALSXP || (XLENGTH(meta) != 4 && XLENGTH(meta) != 5))
-        Rf_error(bad, "arguments");
+        zurand_error(bad, "arguments");
     const double *m = REAL(meta);
     for (R_xlen_t j = 0; j < XLENGTH(meta); j++)
         if (!R_FINITE(m[j]))
-            Rf_error(bad, "arguments");
+            zurand_error(bad, "arguments");
     if (m[0] < 0 || m[0] > (double)R_XLEN_T_MAX || m[0] != trunc(m[0]))
-        Rf_error(bad, "length");
+        zurand_error(bad, "length");
     if (m[1] != ZURAND_DIST_UNIFORM && m[1] != ZURAND_DIST_NORMAL &&
         m[1] != ZURAND_DIST_NORMAL_MCF)
-        Rf_error(bad, "distribution");
+        zurand_error(bad, "distribution");
     if (m[3] < 0)
-        Rf_error(bad, "scale");
+        zurand_error(bad, "scale");
     if (XLENGTH(meta) == 5 && (m[4] != 1.0 || m[1] != ZURAND_DIST_UNIFORM))
-        Rf_error(bad, "scaling");
+        zurand_error(bad, "scaling");
 }
 
 static SEXP lazy_Unserialize(SEXP cls, SEXP state) {

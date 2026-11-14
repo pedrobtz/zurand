@@ -8,7 +8,9 @@ rng_simd(enable = NULL)
 }
 \arguments{
 \item{enable}{\code{NULL} to query, \code{FALSE} to force the portable path, or
-\code{TRUE} to go back to using whatever the CPU supports.}
+\code{TRUE} to go back to using whatever the CPU supports. A value
+\code{rng_simd()} returned is accepted too, so \code{old <- rng_simd(FALSE)}
+followed by \code{rng_simd(old)} restores the previous setting.}
 }
 \value{
 A string: \code{"avx2"} (x86_64 with AVX2) or \code{"neon"} (arm64) if the
@@ -36,6 +38,6 @@ rng_simd()
 key <- rng_key(1L, engine = "xoshiro256pp")
 old <- rng_simd(FALSE)
 portable <- rng_uniform(key, 4L)
-rng_simd(old != "none")
+rng_simd(old)
 identical(portable, rng_uniform(key, 4L))
 }
