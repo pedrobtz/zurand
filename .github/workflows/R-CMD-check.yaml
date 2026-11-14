@@ -4,7 +4,10 @@ on:
   schedule:
     - cron: "9 16 * * 0"
   workflow_dispatch:
+  # `labeled`/`unlabeled` so that adding or removing a CI label (`full-ci`,
+  # `ci:minimal`, `skip-ci:<workflow>`) reruns it.
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 name: R-CMD-check
 
@@ -14,6 +17,9 @@ jobs:
   R-CMD-check:
     uses: pedrobtz/r-actions/.github/workflows/r-cmd-check.yml@4062705ecc3560e85ec8045b30d0e9951fa447a2 # v1.30.0
     with:
+      # Quick on pull requests; full on the schedule, on dispatch and under
+      # the `full-ci` label (ci.md, "Quick by default").
+      profile: auto
       # The default four, plus three. R 4.1 is the floor DESCRIPTION's
       # Depends claims. Windows R-devel is CRAN's flavour that nothing else
       # covers (the R-devel containers are Linux); it runs in the full
@@ -35,11 +41,19 @@ jobs:
       # the one processx test is skipped without it.
       nosuggests: true
 
+  # A documentation-only pull request skips shuffle (pedrobtz/zurand#102).
+  changes:
+    uses: pedrobtz/r-actions/.github/workflows/changes.yml@4062705ecc3560e85ec8045b30d0e9951fa447a2 # v1.30.0
+    with:
+      name: shuffle
+
   # Every test must pass in any order (testthat's shuffle = TRUE reorders
   # each file's top-level expressions), so helpers live in helper-*.R and
   # global state is restored with withr. NOT_CRAN so nothing is skipped
   # that could hide an order dependence.
   shuffle:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     env:
       NOT_CRAN: true
