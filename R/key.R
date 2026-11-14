@@ -493,9 +493,11 @@ as.character.rng_key <- function(x, ...) {
 
 # match(), %in%, setdiff() and friends compare mtfrm() values: one string
 # per key, naming the engine and stream so that equal words under two
-# engines do not match.
+# engines do not match. mtfrm() is newer than R 4.1, the Depends floor, so
+# the method is registered only where base R has the generic: an
+# unconditional S3method() fails to load the namespace there.
 #' @rdname rng_key
-#' @export
+#' @rawNamespace if (exists("mtfrm", baseenv())) S3method(mtfrm, rng_key)
 mtfrm.rng_key <- function(x) {
   paste(attr(x, "engine", exact = TRUE), key_stream(x), format(x))
 }

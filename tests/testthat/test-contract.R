@@ -158,6 +158,7 @@ test_that("key vectors work with head(), tail(), match() and as.character() (#12
   expect_identical(head(keys[0]), keys[0])
   expect_identical(keys[NULL], keys[0])
   expect_identical(as.character(keys), format(keys))
+  skip_if_not(exists("mtfrm", baseenv()), "mtfrm() is newer than this R")
   expect_identical(match(keys[c(3, 1)], keys), c(3L, 1L))
   expect_identical(keys[2:3] %in% keys[3:5], c(FALSE, TRUE))
   other <- rng_key(1, n = 8, engine = "philox4x64")
