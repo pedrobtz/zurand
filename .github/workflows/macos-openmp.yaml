@@ -17,7 +17,15 @@ name: macos-openmp
 permissions: read-all
 
 jobs:
+  # A documentation-only pull request skips macos-openmp (pedrobtz/zurand#102).
+  changes:
+    uses: pedrobtz/r-actions/.github/workflows/changes.yml@4062705ecc3560e85ec8045b30d0e9951fa447a2 # v1.30.0
+    with:
+      name: macos-openmp
+
   macos-openmp:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: macos-latest
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}

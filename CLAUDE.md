@@ -64,7 +64,10 @@ there is no `.agents/design.md`.
 done and the stream is frozen as `stream-1` (tag on 40bdcbb, #25); after it,
 design §2 applies without exception. Milestone B items B1–B4 (C API, docs,
 threading on CRAN, release hygiene) are done; B5, the submission, is the only
-open item, and #62's before-submission items land first. `Authors@R`, `License`
+open item. Submit with `devtools::submit_cran()`, then commit the
+`CRAN-SUBMISSION` it writes: the push runs `cran-release.yaml`, which tags
+the submitted commit `0.1.0`, publishes the GitHub release and opens the
+`0.1.0.9000` bump pull request (merge it once CRAN accepts). `Authors@R`, `License`
 (MIT) and `inst/COPYRIGHTS` credit every vendored or derived component:
 Random123 (D. E. Shaw Research), NumPy's ziggurat tables (NumPy Developers),
 fdlibm (Sun Microsystems) and McFarland's modified ziggurat. `cran-comments.md`
@@ -344,6 +347,9 @@ comment (v1.24.0):
   i386 leg is the only one that compiles the portable C99 `mulhilo64`
   fallback.
 - `coverage.yaml`, and `vendor-upstream.yaml` (weekly upstream check).
+- `cran-release.yaml`: on a push that changes `CRAN-SUBMISSION`, tags the
+  submitted commit, publishes the release and opens the `.9000` bump.
+- `pkgdown.yaml`: the site, from r-actions' `pkgdown.yml`.
 
 The package's own workflows:
 
@@ -354,7 +360,9 @@ The package's own workflows:
   side; not a gate.
 - `statistical-audit.yaml`: on dispatch only, PractRand plans; the result is
   `dev/statistical-audit.md`, not a gate.
-- `pkgdown.yaml`: the site.
+
+`shuffle` and `macos-openmp` gate on r-actions' `changes.yml`, so a
+documentation-only pull request skips them.
 
 ## Vendored native code
 
