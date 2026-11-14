@@ -85,7 +85,7 @@ depend on \code{n}. They differ in speed and in the stream they produce.
 \itemize{
 \item \code{"xoshiro256pp"} (default) -- the fastest of the three, and faster
 than dqrng and RcppZiggurat on one thread (x86_64 and Apple Silicon;
-\code{vignette("performance", package = "zurand")} has the numbers).
+the \href{https://pedrobtz.github.io/zurand/articles/performance.html}{performance article} has the numbers).
 Philox derives a fresh 256-bit xoshiro256++ state for each
 512-value chunk, then a cheap recurrence produces the chunk, so a
 chunk depends only on the key and its index. Reaching an arbitrary

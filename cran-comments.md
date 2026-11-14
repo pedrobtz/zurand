@@ -18,7 +18,7 @@ This is a first submission.
 
 * Multiple threads: the samplers use OpenMP above 32,768 values when R was
   built with it. The tests cap the package at two threads unless NOT_CRAN
-  is set (tests/testthat/setup.R), and examples and the vignette draw only
+  is set (tests/testthat/setup.R), and the examples draw only
   small vectors.
 * Floating point: the package keeps compilers from fusing multiply-adds
   with an empty inline asm barrier rather than a compiler flag, so

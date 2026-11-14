@@ -1,10 +1,5 @@
 ---
 title: "Stateless random numbers"
-output: rmarkdown::html_vignette
-vignette: >
-  %\VignetteIndexEntry{Stateless random numbers}
-  %\VignetteEngine{knitr::rmarkdown}
-  %\VignetteEncoding{UTF-8}
 ---
 
 ```{r, include = FALSE}
@@ -135,4 +130,4 @@ rng_key_from_r()
 ```
 
 Packages can use the same streams from C or C++, from their own threads,
-through the API in `zurand.h`; see `vignette("c-api", package = "zurand")`.
+through the API in `zurand.h`; see [Using zurand from C](c-api.html).

@@ -29,7 +29,7 @@ rng_normal(
 \item \code{"mcfarland"}: McFarland's modified ziggurat (2016). Its common case
 needs no table comparison, so it is faster than the default on every
 CPU measured, by more on x86_64 than on arm64
-(\code{vignette("performance", package = "zurand")}).
+(the \href{https://pedrobtz.github.io/zurand/articles/performance.html}{performance article}).
 }
 
 Both are exact samplers of the standard normal (to double precision)

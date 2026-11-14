@@ -40,7 +40,13 @@ the same numbers.
 
 ## Installation
 
-zurand is not on CRAN yet. Install the development version from GitHub:
+Install the released version from CRAN:
+
+``` r
+install.packages("zurand")
+```
+
+Or the development version from GitHub:
 
 ``` r
 # install.packages("pak")
@@ -119,14 +125,21 @@ keys, and `rng_uniform()`, `rng_normal()`, `rng_integer()` and
 
 ## Learn more
 
-- `vignette("zurand")`: stateless random numbers, key vectors, folding
-  and engines.
-- `vignette("simulations")`: simulation studies that stay reproducible
-  as they grow, run in parallel, and stop and resume.
-- `vignette("lazy")`: random vectors too big for memory.
-- `vignette("performance")`: how fast zurand is against other
-  generators, and how threads are used.
-- `vignette("c-api")`: drawing the same values from C in other packages.
+- [Stateless random
+  numbers](https://pedrobtz.github.io/zurand/articles/zurand.html): key
+  vectors, folding and engines.
+- [Reproducible simulation
+  studies](https://pedrobtz.github.io/zurand/articles/simulations.html):
+  studies that stay reproducible as they grow, run in parallel, and stop
+  and resume.
+- [Lazy random
+  vectors](https://pedrobtz.github.io/zurand/articles/lazy.html): random
+  vectors too big for memory.
+- [Performance](https://pedrobtz.github.io/zurand/articles/performance.html):
+  how fast zurand is against other generators, and how threads are used.
+- [Using zurand from
+  C](https://pedrobtz.github.io/zurand/articles/c-api.html): the same
+  values from C, in other packages.
 - The [reference index](https://pedrobtz.github.io/zurand/reference/)
   lists every function, and the
   [website](https://pedrobtz.github.io/zurand/) has all of it.

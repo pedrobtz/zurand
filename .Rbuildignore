@@ -17,3 +17,4 @@
 ^CLAUDE\.md$
 ^AGENTS\.md$
 ^README\.Rmd$
+^vignettes/articles$

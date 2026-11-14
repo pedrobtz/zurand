@@ -35,8 +35,8 @@ reference:
 articles:
   - title: Articles
     contents:
-      - zurand
-      - simulations
-      - lazy
-      - performance
-      - c-api
+      - articles/zurand
+      - articles/simulations
+      - articles/lazy
+      - articles/performance
+      - articles/c-api
