@@ -3,18 +3,8 @@
 # that no longer exist (#122). parallel::mclapply() is exactly that, so
 # zurand runs its fills on one thread in a forked child. The child's work
 # runs under mcparallel() and is collected with a timeout, so a regression
-# fails this test instead of hanging the suite.
-
-fork_collect <- function(expr, timeout = 60) {
-  job <- parallel::mcparallel(expr)
-  out <- parallel::mccollect(job, wait = FALSE, timeout = timeout)
-  if (is.null(out)) {
-    tools::pskill(job$pid, tools::SIGKILL)
-    parallel::mccollect(job, wait = TRUE)
-    return(NULL)
-  }
-  out[[1]]
-}
+# fails this test instead of hanging the suite. fork_collect() is in
+# helper-fork.R.
 
 test_that("fills in a forked child finish after the parent has run threaded", {
   skip_on_os("windows")
