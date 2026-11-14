@@ -37,7 +37,7 @@
  * callers catch it by class rather than by message. The message is built
  * here and raised by zurand_abort_c() in R/errors.R, evaluated in the
  * namespace; zurand_error() follows only in case that evaluation returns. */
-static void NORET zurand_error(const char *fmt, ...) {
+NORET static void zurand_error(const char *fmt, ...) {
     char msg[1024];
     va_list ap;
     va_start(ap, fmt);
