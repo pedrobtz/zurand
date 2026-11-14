@@ -77,7 +77,7 @@ test_that("rng_simd() validates and round-trips", {
   expect_identical(rng_simd(), "none")
   rng_simd(!identical(old, "none"))
   expect_identical(rng_simd(), old)
-  expect_error(rng_simd(NA), "TRUE or FALSE")
+  expect_error(rng_simd(NA), class = "zurand_error")
 })
 
 test_that("CI legs that must have the vector path and threads do", {

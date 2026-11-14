@@ -15,6 +15,15 @@
 \alias{xtfrm.rng_key}
 \alias{[[.rng_key}
 \alias{c.rng_key}
+\alias{Ops.rng_key}
+\alias{Math.rng_key}
+\alias{Summary.rng_key}
+\alias{t.rng_key}
+\alias{as.character.rng_key}
+\alias{mtfrm.rng_key}
+\alias{names<-.rng_key}
+\alias{head.rng_key}
+\alias{tail.rng_key}
 \title{Create a stateless RNG key}
 \usage{
 rng_key(seed, n = 1L, engine = c("xoshiro256pp", "philox4x64", "threefry4x64"))
@@ -44,11 +53,30 @@ rng_key(seed, n = 1L, engine = c("xoshiro256pp", "philox4x64", "threefry4x64"))
 \method{[[}{rng_key}(x, i, ...)
 
 \method{c}{rng_key}(..., recursive = FALSE)
+
+\method{Ops}{rng_key}(e1, e2)
+
+\method{Math}{rng_key}(x, ...)
+
+\method{Summary}{rng_key}(..., na.rm = FALSE)
+
+\method{t}{rng_key}(x)
+
+\method{as.character}{rng_key}(x, ...)
+
+\method{mtfrm}{rng_key}(x)
+
+\method{names}{rng_key}(x) <- value
+
+\method{head}{rng_key}(x, n = 6L, ...)
+
+\method{tail}{rng_key}(x, n = 6L, ...)
 }
 \arguments{
 \item{seed}{A single non-negative whole number.}
 
-\item{n}{A single non-negative whole number: how many keys to create.}
+\item{n}{A single non-negative whole number: how many keys to create.
+For \code{head()} and \code{tail()}, how many keys to keep, as for vectors.}
 
 \item{engine}{The engine. All three give the same guarantees: a value is
 a pure function of the key and the draw index, the same key gives the
@@ -91,6 +119,12 @@ individual key words, silently producing different keys.}
 \item{incomparables}{Passed to \code{\link[=duplicated]{duplicated()}}.}
 
 \item{recursive}{Ignored. Included for compatibility with \code{\link[=c]{c()}}.}
+
+\item{e1, e2}{Key vectors. Only \code{==} and \code{!=} are defined: they compare
+whole keys, recycling a single key. Arithmetic and every other
+operator are an error, since they would turn keys into other keys.}
+
+\item{na.rm}{Ignored.}
 }
 \value{
 An object of class \code{rng_key} containing \code{n} keys.
@@ -108,16 +142,20 @@ sampler twice with the same key and arguments returns the same values.
 \section{Key vectors}{
 
 A key vector behaves like a vector of opaque keys: \code{length()}, \code{[},
-\code{[[}, \code{c()}, \code{rev()}, \code{rep()}, \code{unique()}, \code{duplicated()} and
-\code{as.list()} work key by key and keep the engine and stream version, so
+\code{[[}, \code{c()}, \code{rev()}, \code{rep()}, \code{head()}, \code{tail()}, \code{unique()},
+\code{duplicated()}, \code{match()}, \code{\%in\%} and \code{as.list()} work key by key and
+keep the engine and stream version, so
 \code{lapply(keys, f)}, \code{Map()} and the parallel map functions hand each task
 one key. A key vector takes one index, as a vector does: \code{keys[1, 2]}
 and \code{keys[, 1]} are an error, not a view of the words inside. \code{c()}
 dispatches on its first argument, so combine key vectors with a key
 first: \code{c(NULL, key)} returns the bare integer words, not keys, while
 \code{c(key, NULL)} drops the \code{NULL} as \code{c()} does for any vector. Keys are
-immutable: assigning into a key vector is an error, and so is sorting
-one, since keys have no order; compare keys with \code{\link[=identical]{identical()}}.
+immutable: assigning into a key vector is an error, and so are names,
+arithmetic and sorting, since keys are not numbers and have no order.
+\code{==} and \code{!=} compare whole keys, engine and stream included.
+\code{as.character()} gives the same text as \code{format()}. Iterate with
+\code{lapply()} or \code{seq_along()}: \verb{for (k in keys)} walks the integer words.
 }
 
 \section{Stream version}{

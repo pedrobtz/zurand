@@ -10,6 +10,7 @@
 #'
 #' @param seed A single non-negative whole number.
 #' @param n A single non-negative whole number: how many keys to create.
+#'   For `head()` and `tail()`, how many keys to keep, as for vectors.
 #' @param engine The engine. All three give the same guarantees: a value is
 #'   a pure function of the key and the draw index, the same key gives the
 #'   same values on every platform and thread count, and draw `i` does not
@@ -33,16 +34,20 @@
 #'
 #' @section Key vectors:
 #' A key vector behaves like a vector of opaque keys: `length()`, `[`,
-#' `[[`, `c()`, `rev()`, `rep()`, `unique()`, `duplicated()` and
-#' `as.list()` work key by key and keep the engine and stream version, so
+#' `[[`, `c()`, `rev()`, `rep()`, `head()`, `tail()`, `unique()`,
+#' `duplicated()`, `match()`, `%in%` and `as.list()` work key by key and
+#' keep the engine and stream version, so
 #' `lapply(keys, f)`, `Map()` and the parallel map functions hand each task
 #' one key. A key vector takes one index, as a vector does: `keys[1, 2]`
 #' and `keys[, 1]` are an error, not a view of the words inside. `c()`
 #' dispatches on its first argument, so combine key vectors with a key
 #' first: `c(NULL, key)` returns the bare integer words, not keys, while
 #' `c(key, NULL)` drops the `NULL` as `c()` does for any vector. Keys are
-#' immutable: assigning into a key vector is an error, and so is sorting
-#' one, since keys have no order; compare keys with [identical()].
+#' immutable: assigning into a key vector is an error, and so are names,
+#' arithmetic and sorting, since keys are not numbers and have no order.
+#' `==` and `!=` compare whole keys, engine and stream included.
+#' `as.character()` gives the same text as `format()`. Iterate with
+#' `lapply()` or `seq_along()`: `for (k in keys)` walks the integer words.
 #'
 #' @section Stream version:
 #' A key also records the version of the stream definition it was made
@@ -76,6 +81,7 @@ rng_key <- function(
 #' package leave `.Random.seed` untouched.
 #'
 #' @inheritParams rng_key
+#' @param n A single non-negative whole number: how many keys to create.
 #' @return An object of class `rng_key` containing `n` keys.
 #' @export
 #' @examples
@@ -110,14 +116,22 @@ rng_key_from_r <- function(
 #'   level codes, whose meaning changes with the level set. Fold
 #'   `as.character(f)` or `unclass(d)` instead. Names and dimensions are
 #'   ignored: a matrix folds as its values in column order. Strings are
-#'   folded as their UTF-8 bytes, whatever their declared encoding.
+#'   folded as their text in UTF-8, so the same text gives the same key
+#'   whatever its declared encoding and whatever the session's locale.
+#'   An unmarked string in a locale whose charset is ASCII (the C locale
+#'   of many containers and cron jobs) is read as UTF-8; if its bytes are
+#'   not UTF-8, or a string cannot be translated to UTF-8 losslessly,
+#'   that is an error rather than a key of some other text.
 #' @details
 #' The data are hashed to 64 bits before they derive the key, so two
 #' different values can in principle fold to the same key. Among `m`
 #' distinct values the chance of any such collision is about
 #' `m^2 / 2^65`: under one in a million for a million values, but not
 #' negligible near `2^32` of them. For that many independent streams,
-#' request them up front with `rng_key(seed, n)`, which never collides.
+#' request them up front with `rng_key(seed, n)`: the keys of one call
+#' never collide. (Keys from different seeds can coincide, since key `i` is
+#' the `i`-th output of a sequence started at `seed`; take many keys from
+#' one seed rather than one key from each of many seeds.)
 #' @return An `rng_key` vector with the same length as `key`.
 #' @export
 #' @examples
@@ -125,15 +139,67 @@ rng_key_from_r <- function(
 #' layer_key <- rng_fold(key, "layer1")
 rng_fold <- function(key, data) {
   if (is.object(data)) {
-    stop(
+    zurand_abort(
       "`data` must be a plain vector, not a <",
       class(data)[[1L]],
-      ">; fold as.character() or unclass() of it instead",
-      call. = FALSE
+      ">; fold as.character() or unclass() of it instead"
     )
+  }
+  if (is.character(data)) {
+    data <- fold_strings_utf8(data)
   }
   .Call(C_rng_fold, key, data)
 }
+
+# What text a string holds must not depend on the session (#123). C folds
+# Rf_translateCharUTF8(), which is right for marked strings and for native
+# strings in a UTF-8 or a real single-byte locale, but in the C locale it
+# renders non-ASCII bytes as "<c3><a9>" escapes, so "café" would fold as an
+# ASCII string. So in a locale that is neither, a native string is taken
+# as UTF-8 when its bytes are valid UTF-8 and is an error otherwise; in a
+# real charset it must translate losslessly. Every string that folded
+# correctly before folds to the same key.
+fold_strings_utf8 <- function(x) {
+  l10n <- l10n_info()
+  if (isTRUE(l10n[["UTF-8"]])) {
+    return(x)
+  }
+  native <- !is.na(x) & Encoding(x) == "unknown" & !is_ascii(x)
+  if (!any(native)) {
+    return(x)
+  }
+  codeset <- toupper(l10n[["codeset"]] %||% "")
+  ascii <- codeset %in% c("ANSI_X3.4-1968", "US-ASCII", "ASCII", "646", "")
+  if (ascii) {
+    ok <- validUTF8(x[native])
+    if (!all(ok)) {
+      zurand_abort(
+        "`data` has non-ASCII strings that are not UTF-8 in this ",
+        "locale's ASCII charset; mark their encoding with Encoding<- ",
+        "or convert them with iconv()"
+      )
+    }
+    y <- x[native]
+    Encoding(y) <- "UTF-8"
+    x[native] <- y
+  } else {
+    y <- iconv(x[native], from = "", to = "UTF-8")
+    if (anyNA(y)) {
+      zurand_abort(
+        "`data` has strings that cannot be translated to UTF-8 losslessly ",
+        "from this locale's charset"
+      )
+    }
+    x[native] <- y
+  }
+  x
+}
+
+is_ascii <- function(x) {
+  !grepl("[^\\x01-\\x7f]", x, useBytes = TRUE)
+}
+
+`%||%` <- function(a, b) if (is.null(a)) b else a
 
 #' @rdname rng_key
 #' @param x An `rng_key`.
@@ -179,11 +245,13 @@ length.rng_key <- function(x) {
 #' @export
 `[.rng_key` <- function(x, i, ..., drop = FALSE) {
   if (...length() > 0L) {
-    stop("a key vector takes one index, `keys[i]`", call. = FALSE)
+    zurand_abort("a key vector takes one index, `keys[i]`")
   }
   words <- unclass(x)
   if (missing(i)) {
     i <- seq_len(nrow(words))
+  } else if (is.null(i)) {
+    i <- integer()
   }
   check_key_index(i, nrow(words))
   out <- words[i, , drop = FALSE]
@@ -200,20 +268,20 @@ length.rng_key <- function(x) {
 # because any 32-bit pattern, NA_INTEGER's included, is a legitimate word.
 check_key_index <- function(i, n) {
   if (anyNA(i)) {
-    stop("`i` must not contain missing values", call. = FALSE)
+    zurand_abort("`i` must not contain missing values")
   }
   if (is.numeric(i)) {
     if (!all(is.finite(i))) {
-      stop("`i` must contain finite positions", call. = FALSE)
+      zurand_abort("`i` must contain finite positions")
     }
     if (any(i != trunc(i))) {
-      stop("`i` must contain whole numbers", call. = FALSE)
+      zurand_abort("`i` must contain whole numbers")
     }
     if (any(abs(i) > n)) {
-      stop("`i` must select existing keys, positions 1 to ", n, call. = FALSE)
+      zurand_abort("`i` must select existing keys, positions 1 to ", n)
     }
   } else if (!is.logical(i)) {
-    stop("`i` must be an integer, double or logical vector", call. = FALSE)
+    zurand_abort("`i` must be an integer, double or logical vector")
   }
 }
 
@@ -233,9 +301,8 @@ check_key_index <- function(i, n) {
 }
 
 stop_key_assignment <- function() {
-  stop(
-    "keys are immutable; build a new key vector with c() and `[` instead",
-    call. = FALSE
+  zurand_abort(
+    "keys are immutable; build a new key vector with c() and `[` instead"
   )
 }
 
@@ -269,21 +336,41 @@ unique.rng_key <- function(x, incomparables = FALSE, ...) {
 #' @rdname rng_key
 #' @export
 xtfrm.rng_key <- function(x) {
-  stop("keys have no order; compare them with identical()", call. = FALSE)
+  zurand_abort("keys have no order; compare them with identical()")
 }
 
-# A key without the attribute predates it, and is stream 1.
+# A key without the attribute predates it, and is stream 1. Anything else
+# must be what key_stream() in src/zurand.c accepts -- one whole number of
+# at least 1 -- so that `[` and c() cannot turn an attribute the samplers
+# refuse into a valid one (#130).
 key_stream <- function(x) {
   s <- attr(x, "stream", exact = TRUE)
-  if (is.null(s)) 1L else as.integer(s)
+  if (is.null(s)) {
+    return(1L)
+  }
+  ok <- (is.integer(s) || is.double(s)) &&
+    length(s) == 1L &&
+    !is.na(s) &&
+    is.finite(s) &&
+    s >= 1 &&
+    s <= .Machine$integer.max &&
+    s == trunc(s) &&
+    is.null(attributes(s))
+  if (!ok) {
+    zurand_abort("<rng_key> has an invalid `stream` attribute")
+  }
+  as.integer(s)
 }
 
 #' @rdname rng_key
 #' @export
 `[[.rng_key` <- function(x, i, ...) {
+  if (...length() > 0L) {
+    zurand_abort("a key vector takes one index, `keys[[i]]`")
+  }
   out <- x[i]
   if (length(out) != 1L) {
-    stop("`[[` must select exactly one key", call. = FALSE)
+    zurand_abort("`[[` must select exactly one key")
   }
   out
 }
@@ -299,16 +386,16 @@ c.rng_key <- function(..., recursive = FALSE) {
 
   ok <- vapply(dots, inherits, logical(1L), "rng_key")
   if (!all(ok)) {
-    stop("all inputs to `c()` must be <rng_key> objects", call. = FALSE)
+    zurand_abort("all inputs to `c()` must be <rng_key> objects")
   }
 
   engines <- vapply(dots, attr, character(1L), "engine", exact = TRUE)
   if (length(unique(engines)) != 1L) {
-    stop("all keys must use the same engine", call. = FALSE)
+    zurand_abort("all keys must use the same engine")
   }
   streams <- vapply(dots, key_stream, integer(1L))
   if (length(unique(streams)) != 1L) {
-    stop("all keys must use the same stream version", call. = FALSE)
+    zurand_abort("all keys must use the same stream version")
   }
 
   out <- do.call(rbind, lapply(dots, unclass))
@@ -317,4 +404,119 @@ c.rng_key <- function(..., recursive = FALSE) {
   attr(out, "engine") <- engines[[1L]]
   attr(out, "stream") <- streams[[1L]]
   out
+}
+
+# ---- Operators and conversions (#125, #129, #136) ----
+#
+# A key's words are not numbers: arithmetic on them would make other, valid
+# keys -- `keys + 1L` is a different key vector, `keys[1] - keys[1]` the
+# all-zero key -- the outcome `[<-` is blocked to prevent. So the Ops, Math
+# and Summary groups are errors, except `==` and `!=`, which compare whole
+# keys (engine, stream and words).
+
+#' @rdname rng_key
+#' @param e1,e2 Key vectors. Only `==` and `!=` are defined: they compare
+#'   whole keys, recycling a single key. Arithmetic and every other
+#'   operator are an error, since they would turn keys into other keys.
+#' @export
+Ops.rng_key <- function(e1, e2) {
+  if (!.Generic %in% c("==", "!=") || missing(e2)) {
+    zurand_abort(
+      "keys are opaque; `",
+      .Generic,
+      "` is not defined for <rng_key>"
+    )
+  }
+  if (!inherits(e1, "rng_key") || !inherits(e2, "rng_key")) {
+    zurand_abort(
+      "`",
+      .Generic,
+      "` compares a key vector with another key vector"
+    )
+  }
+  n1 <- length(e1)
+  n2 <- length(e2)
+  if (n1 != n2 && n1 > 1L && n2 > 1L) {
+    zurand_abort(
+      "key vectors of lengths ",
+      n1,
+      " and ",
+      n2,
+      " cannot be compared"
+    )
+  }
+  n <- if (n1 == 0L || n2 == 0L) 0L else max(n1, n2)
+  same <- identical(
+    attr(e1, "engine", exact = TRUE),
+    attr(e2, "engine", exact = TRUE)
+  ) &&
+    key_stream(e1) == key_stream(e2)
+  w1 <- unclass(e1)[rep_len(seq_len(n1), n), , drop = FALSE]
+  w2 <- unclass(e2)[rep_len(seq_len(n2), n), , drop = FALSE]
+  eq <- same & rowSums(w1 != w2 | is.na(w1) != is.na(w2), na.rm = TRUE) == 0L
+  eq <- as.vector(eq)
+  if (.Generic == "==") eq else !eq
+}
+
+#' @rdname rng_key
+#' @export
+Math.rng_key <- function(x, ...) {
+  zurand_abort(
+    "keys are opaque; `",
+    .Generic,
+    "()` is not defined for <rng_key>"
+  )
+}
+
+#' @rdname rng_key
+#' @param na.rm Ignored.
+#' @export
+Summary.rng_key <- function(..., na.rm = FALSE) {
+  zurand_abort(
+    "keys are opaque; `",
+    .Generic,
+    "()` is not defined for <rng_key>"
+  )
+}
+
+#' @rdname rng_key
+#' @export
+t.rng_key <- function(x) {
+  zurand_abort("keys are opaque; `t()` is not defined for <rng_key>")
+}
+
+#' @rdname rng_key
+#' @export
+as.character.rng_key <- function(x, ...) {
+  format(x)
+}
+
+# match(), %in%, setdiff() and friends compare mtfrm() values: one string
+# per key, naming the engine and stream so that equal words under two
+# engines do not match.
+#' @rdname rng_key
+#' @export
+mtfrm.rng_key <- function(x) {
+  paste(attr(x, "engine", exact = TRUE), key_stream(x), format(x))
+}
+
+#' @rdname rng_key
+#' @export
+`names<-.rng_key` <- function(x, value) {
+  if (is.null(value)) {
+    return(x)
+  }
+  zurand_abort("keys cannot have names; keep them in a named list instead")
+}
+
+#' @rdname rng_key
+#' @exportS3Method utils::head
+head.rng_key <- function(x, n = 6L, ...) {
+  x[utils::head(seq_len(length(x)), n)]
+}
+
+#' @rdname rng_key
+#' @exportS3Method utils::tail
+tail.rng_key <- function(x, n = 6L, ...) {
+  x[utils::tail(seq_len(length(x)), n)]
 }
