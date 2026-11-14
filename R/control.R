@@ -7,7 +7,11 @@
 #' performance control, not a reproducibility one. In builds without OpenMP
 #' the value is always 1 and setting a cap has no effect.
 #'
-#' Draws below an internal size threshold always run single-threaded.
+#' Draws below an internal size threshold always run single-threaded, and so
+#' does every fill in a forked child process (`parallel::mclapply()`,
+#' `parallel::mcparallel()`), where `rng_threads()` reports 1: GNU OpenMP's
+#' thread pool does not survive `fork()`, and a child that used it would hang.
+#' Parallel maps over forked workers therefore use one thread per worker.
 #'
 #' @section Page size on Linux:
 #' R serves a large vector from fresh memory, so filling it is the first

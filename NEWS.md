@@ -74,6 +74,10 @@ across platforms, thread counts, SIMD paths and call order.
   where R does not set OpenMP flags, `configure` links the OpenMP runtime
   that R ships, as CRAN's macOS binaries of data.table do, and falls back
   to one thread when the OpenMP headers are missing.
+* In a forked child (`parallel::mclapply()`, `mcparallel()`) zurand's fills
+  run on one thread. GNU OpenMP's thread pool does not survive `fork()`, and
+  a child that entered a parallel region after its parent had used one
+  hung (#122).
 * On Linux kernels with transparent huge pages in `madvise` mode, output
   vectors of 4 MiB and more are filled on 2 MiB pages, which about halves
   the time of large fills there. `options(zurand.hugepages = FALSE)` turns
