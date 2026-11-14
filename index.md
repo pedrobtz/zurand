@@ -129,6 +129,11 @@ draw from them.
 
 - [`vignette("zurand")`](https://pedrobtz.github.io/zurand/articles/zurand.md):
   stateless random numbers, key vectors, folding and engines.
+- [`vignette("simulations")`](https://pedrobtz.github.io/zurand/articles/simulations.md):
+  simulation studies that stay reproducible as they grow, run in
+  parallel, and stop and resume.
+- [`vignette("lazy")`](https://pedrobtz.github.io/zurand/articles/lazy.md):
+  random vectors too big for memory.
 - [`vignette("performance")`](https://pedrobtz.github.io/zurand/articles/performance.md):
   how fast zurand is against other generators, and how threads are used.
 - [`vignette("c-api")`](https://pedrobtz.github.io/zurand/articles/c-api.md):
