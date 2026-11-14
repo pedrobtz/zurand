@@ -122,7 +122,7 @@ No output changes. The work is adoption and packaging.
 | B2 | ~~Docs~~ **DONE**: state `rng_uniform()`'s interval the way `?runif` does; README benchmark table with a platform header, one thread and all threads, randompack on its fastest engine; vignettes "why stateless" and "performance"; NEWS.md; pkgdown, deployed by `pkgdown.yaml` since the zu-family alignment (#62) | the case for the package currently lives in `dev/` |
 | B3 | ~~Threading on CRAN~~ **DONE**: confirm the tests stay within CRAN's two-core limit (cap with `rng_threads(2L)` in `tests/testthat/setup.R` if `OMP_THREAD_LIMIT` is not honoured), and say plainly in the README that CRAN's macOS binaries have no OpenMP | a common reason for a CRAN bounce; and on macOS the one-thread number is the number |
 | B4 | ~~Release hygiene~~ **DONE**: version 0.1.0; `cran-comments.md` explaining any FP-contract mechanism from A2; the NumPy header trimmed to the tables used instead of a `-Wunused-const-variable` pragma, which CRAN does not accept (#60); the upstream Random123 URL instead of the local path in CLAUDE.md; a pass with the `cran-extrachecks` skill | the old Phase 4 items |
-| B5 | Submit | the only open item (2026-10-30); #62's before-submission items land first |
+| B5 | Submit | the only open item; #62's before-submission items are done (2026-11-14). `devtools::submit_cran()`, then commit `CRAN-SUBMISSION`: `cran-release.yaml` tags, releases and opens the `.9000` bump |
 
 **Exit criterion:** zurand 0.1.0 is on CRAN.
 
