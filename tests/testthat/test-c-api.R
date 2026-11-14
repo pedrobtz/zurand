@@ -95,7 +95,9 @@ test_that("C API reports invalid arguments as return codes", {
     normal_at_engine = 2L, stream_chunk_0 = 1L, stream_chunk_too_long = 1L,
     stream_no_buf = 1L, stream_no_fn = 1L, stream_uniform_engine = 2L,
     stream_normal_engine = 2L, stream_sd_neg = 1L, stream_method = 1L,
-    stream_total_0 = 0L, fold_engine = 2L,
+    stream_total_0 = 0L, uniform_at_last = 0L, uniform_at_to_end = 0L,
+    uniform_at_past_end = 1L, normal_at_last = 0L, stream_total_0_no_buf = 0L,
+    stream_total_0_chunk_0 = 0L, fold_engine = 2L,
     null_uniform = 1L, null_uniform_constant = 1L, null_normal_method = 1L,
     null_integer = 1L, null_bits64 = 1L, null_normal_at = 1L,
     null_uniform_at = 1L, null_fold = 1L, null_uniform_n0 = 0L
@@ -202,6 +204,26 @@ test_that("a C API stream stops when its consumer says so", {
   expect_identical(s[[3]], c(1000, 1000, 1000))
   expect_identical(s[[1]][1:3000], rng_uniform(key, 3000L))
   expect_true(all(is.na(s[[1]][3001:10000])))
+  # Stopping on the last chunk is still ZURAND_STOPPED (#133).
+  s <- ns$client_stream(key, 3000L, 1000L, "uniform", 0, 1, stop_after = 3L)
+  expect_identical(s[[4]], 3L)
+  expect_identical(s[[1]], rng_uniform(key, 3000L))
+})
+
+test_that("C API positional fills reach position 2^64 - 1 (#132)", {
+  skip_on_cran()
+  ns <- client()
+  keys <- rng_key(11L, n = 2L)
+  base <- 2^64 - 2^16                    # exact; add in uint64_t from there
+  for (n in c(1L, 2L, 16L)) {
+    tail <- ns$client_fill_at(keys, n, "uniform", 0, 1, c(base, 2^16 - n))
+    long <- ns$client_fill_at(keys, n + 5L, "uniform", 0, 1,
+                              c(base, 2^16 - n - 5))
+    expect_identical(tail, long[6:(n + 5L), , drop = FALSE], info = n)
+    zt <- ns$client_fill_at(keys, n, "normal", 0, 1, c(base, 2^16 - n))
+    zl <- ns$client_fill_at(keys, n + 5L, "normal", 0, 1, c(base, 2^16 - n - 5))
+    expect_identical(zt, zl[6:(n + 5L), , drop = FALSE], info = n)
+  }
 })
 
 test_that("C API streams run one per worker thread", {
