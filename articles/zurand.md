@@ -157,4 +157,5 @@ rng_key_from_r()
 ```
 
 Packages can use the same streams from C or C++, from their own threads,
-through the API in `zurand.h`; see the README.
+through the API in `zurand.h`; see
+[`vignette("c-api", package = "zurand")`](https://pedrobtz.github.io/zurand/articles/c-api.md).

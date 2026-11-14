@@ -70,8 +70,16 @@ chunk read (at most 5120 values), so
 the memory R itself uses. Full scans cost more than
 [`rng_normal()`](https://pedrobtz.github.io/zurand/reference/rng_normal.md)
 followed by [`sum()`](https://rdrr.io/r/base/sum.html) would, because R
-reads lazy vectors 512 values at a time on one thread. The gain is
-memory, and not paying for values that are never read.
+reads lazy vectors 512 values at a time on one thread:
+[`sum()`](https://rdrr.io/r/base/sum.html) and
+[`mean()`](https://rdrr.io/r/base/mean.html) measured 1.6-2.7x slower
+than
+[`rng_normal()`](https://pedrobtz.github.io/zurand/reference/rng_normal.md)
+then [`sum()`](https://rdrr.io/r/base/sum.html). The gain is memory
+([`sum()`](https://rdrr.io/r/base/sum.html) of a lazy 1e9 vector peaked
+at the 71 MB R itself uses on an Apple M1, where the vector would need
+7.6 GB) and not paying for values that are never read: `x[1:1e6]` of a
+lazy 1e8 vector took a tenth of the time of generating all 1e8.
 
 ## Interrupts
 
