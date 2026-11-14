@@ -29,7 +29,11 @@ performance control, not a reproducibility one. In builds without OpenMP
 the value is always 1 and setting a cap has no effect.
 }
 \details{
-Draws below an internal size threshold always run single-threaded.
+Draws below an internal size threshold always run single-threaded, and so
+does every fill in a forked child process (\code{parallel::mclapply()},
+\code{parallel::mcparallel()}), where \code{rng_threads()} reports 1: GNU OpenMP's
+thread pool does not survive \code{fork()}, and a child that used it would hang.
+Parallel maps over forked workers therefore use one thread per worker.
 }
 \section{Page size on Linux}{
 
