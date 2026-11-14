@@ -11,6 +11,7 @@ Neoverse
 NumPy
 NumPy's
 OpenMP
+OpenMP's
 Philox
 PractRand
 R's
@@ -22,6 +23,7 @@ VectorizedRNG
 Vigna
 aarch
 cpp
+difftimes
 doi
 dqrng
 draw's
@@ -31,6 +33,7 @@ fdlibm's
 glibc
 jl's
 jss
+losslessly
 mcfarland
 md
 musl
@@ -43,6 +46,7 @@ randompack's
 restructurings
 rng
 substreams
+th
 threefry
 workflow's
 xoshiro

@@ -63,7 +63,9 @@ extern "C" {
 
 /* Return codes. Every entry point checks its arguments and reports a bad
  * one with a code, never an R error: a NULL output buffer with n > 0 (or a
- * NULL key output) is ZURAND_EINVAL, like any other invalid argument. */
+ * NULL key output) is ZURAND_EINVAL, like any other invalid argument. A
+ * fill takes at most R_XLEN_T_MAX (2^52 on 64-bit platforms) values per
+ * call; a larger n is ZURAND_EINVAL. */
 #define ZURAND_OK      0
 #define ZURAND_EINVAL  1   /* an argument is out of range, NaN, infinite or NULL */
 #define ZURAND_EKEY    2   /* unknown engine, or a stream this zurand lacks */
@@ -125,7 +127,8 @@ typedef struct zurand_api {
     /* rng_uniform(key, n, min, max, offset = start) into out[0 .. n-1]:
      * positions start .. start + n - 1, the values rng_uniform(key,
      * start + n)[(start + 1):(start + n)] has. Calling it for consecutive
-     * ranges walks one stream in pieces of any size. */
+     * ranges walks one stream in pieces of any size. The last position may
+     * be 2^64 - 1; a range past it is ZURAND_EINVAL. */
     int (*fill_uniform_at)(zurand_key key, uint64_t start, size_t n,
                            double min, double max, double *out);
 
@@ -137,8 +140,10 @@ typedef struct zurand_api {
      * to fn in order, `chunk` at a time, through buf[0 .. chunk - 1], which
      * the caller owns and zurand reuses, so the values can be consumed from
      * cache without the whole stream ever being in memory. fn is called on
-     * the calling thread only, sequentially. Returns ZURAND_OK once all
-     * `total` values have been consumed, or ZURAND_STOPPED if fn stopped it. */
+     * the calling thread only, sequentially. Returns ZURAND_STOPPED whenever
+     * fn returned nonzero, even on the last chunk, and ZURAND_OK otherwise,
+     * once all `total` values have been handed over. total = 0 returns
+     * ZURAND_OK without calling fn, and then buf may be NULL. */
     int (*stream_uniform)(zurand_key key, uint64_t total, double min,
                           double max, double *buf, size_t chunk,
                           zurand_consumer fn, void *ctx);
