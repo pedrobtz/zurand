@@ -53,7 +53,9 @@ is using; <code>rng_simd(FALSE)</code> forces the portable one.</p>
 
 <dl><dt id="arg-enable">enable<a class="anchor" aria-label="anchor" href="#arg-enable"></a></dt>
 <dd><p><code>NULL</code> to query, <code>FALSE</code> to force the portable path, or
-<code>TRUE</code> to go back to using whatever the CPU supports.</p></dd>
+<code>TRUE</code> to go back to using whatever the CPU supports. A value
+<code>rng_simd()</code> returned is accepted too, so <code>old &lt;- rng_simd(FALSE)</code>
+followed by <code>rng_simd(old)</code> restores the previous setting.</p></dd>
 
 </dl></div>
     <div class="section level2">
@@ -82,7 +84,7 @@ are unaffected, as is every other function.</p>
 <span class="r-in"><span><span class="va">key</span> <span class="op">&lt;-</span> <span class="fu"><a href="rng_key.html">rng_key</a></span><span class="op">(</span><span class="fl">1L</span>, engine <span class="op">=</span> <span class="st">"xoshiro256pp"</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="va">old</span> <span class="op">&lt;-</span> <span class="fu">rng_simd</span><span class="op">(</span><span class="cn">FALSE</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="va">portable</span> <span class="op">&lt;-</span> <span class="fu"><a href="rng_uniform.html">rng_uniform</a></span><span class="op">(</span><span class="va">key</span>, <span class="fl">4L</span><span class="op">)</span></span></span>
-<span class="r-in"><span><span class="fu">rng_simd</span><span class="op">(</span><span class="va">old</span> <span class="op">!=</span> <span class="st">"none"</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="fu">rng_simd</span><span class="op">(</span><span class="va">old</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/identical.html" class="external-link">identical</a></span><span class="op">(</span><span class="va">portable</span>, <span class="fu"><a href="rng_uniform.html">rng_uniform</a></span><span class="op">(</span><span class="va">key</span>, <span class="fl">4L</span><span class="op">)</span><span class="op">)</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> [1] TRUE</span>
 </code></pre></div>

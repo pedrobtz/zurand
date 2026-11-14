@@ -89,7 +89,34 @@ integer representation.</p>
 <span><span class="va">x</span><span class="op">[[</span><span class="va">i</span>, <span class="va">...</span><span class="op">]</span><span class="op">]</span></span>
 <span></span>
 <span><span class="co"># S3 method for class 'rng_key'</span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="va">...</span>, recursive <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span></code></pre></div>
+<span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="va">...</span>, recursive <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span>
+<span></span>
+<span><span class="co"># S3 method for class 'rng_key'</span></span>
+<span><span class="fu">Ops</span><span class="op">(</span><span class="va">e1</span>, <span class="va">e2</span><span class="op">)</span></span>
+<span></span>
+<span><span class="co"># S3 method for class 'rng_key'</span></span>
+<span><span class="fu">Math</span><span class="op">(</span><span class="va">x</span>, <span class="va">...</span><span class="op">)</span></span>
+<span></span>
+<span><span class="co"># S3 method for class 'rng_key'</span></span>
+<span><span class="fu">Summary</span><span class="op">(</span><span class="va">...</span>, na.rm <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span>
+<span></span>
+<span><span class="co"># S3 method for class 'rng_key'</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/t.html" class="external-link">t</a></span><span class="op">(</span><span class="va">x</span><span class="op">)</span></span>
+<span></span>
+<span><span class="co"># S3 method for class 'rng_key'</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">as.character</a></span><span class="op">(</span><span class="va">x</span>, <span class="va">...</span><span class="op">)</span></span>
+<span></span>
+<span><span class="co"># S3 method for class 'rng_key'</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/mtfrm.html" class="external-link">mtfrm</a></span><span class="op">(</span><span class="va">x</span><span class="op">)</span></span>
+<span></span>
+<span><span class="co"># S3 method for class 'rng_key'</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/names.html" class="external-link">names</a></span><span class="op">(</span><span class="va">x</span><span class="op">)</span> <span class="op">&lt;-</span> <span class="va">value</span></span>
+<span></span>
+<span><span class="co"># S3 method for class 'rng_key'</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">x</span>, n <span class="op">=</span> <span class="fl">6L</span>, <span class="va">...</span><span class="op">)</span></span>
+<span></span>
+<span><span class="co"># S3 method for class 'rng_key'</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">tail</a></span><span class="op">(</span><span class="va">x</span>, n <span class="op">=</span> <span class="fl">6L</span>, <span class="va">...</span><span class="op">)</span></span></code></pre></div>
     </div>
 
     <div class="section level2">
@@ -101,7 +128,8 @@ integer representation.</p>
 
 
 <dt id="arg-n">n<a class="anchor" aria-label="anchor" href="#arg-n"></a></dt>
-<dd><p>A single non-negative whole number: how many keys to create.</p></dd>
+<dd><p>A single non-negative whole number: how many keys to create.
+For <code><a href="https://rdrr.io/r/utils/head.html" class="external-link">head()</a></code> and <code><a href="https://rdrr.io/r/utils/head.html" class="external-link">tail()</a></code>, how many keys to keep, as for vectors.</p></dd>
 
 
 <dt id="arg-engine">engine<a class="anchor" aria-label="anchor" href="#arg-engine"></a></dt>
@@ -157,6 +185,16 @@ individual key words, silently producing different keys.</p></dd>
 <dt id="arg-recursive">recursive<a class="anchor" aria-label="anchor" href="#arg-recursive"></a></dt>
 <dd><p>Ignored. Included for compatibility with <code><a href="https://rdrr.io/r/base/c.html" class="external-link">c()</a></code>.</p></dd>
 
+
+<dt id="arg-e-e-">e1, e2<a class="anchor" aria-label="anchor" href="#arg-e-e-"></a></dt>
+<dd><p>Key vectors. Only <code>==</code> and <code>!=</code> are defined: they compare
+whole keys, recycling a single key. Arithmetic and every other
+operator are an error, since they would turn keys into other keys.</p></dd>
+
+
+<dt id="arg-na-rm">na.rm<a class="anchor" aria-label="anchor" href="#arg-na-rm"></a></dt>
+<dd><p>Ignored.</p></dd>
+
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
@@ -172,16 +210,20 @@ sampler twice with the same key and arguments returns the same values.</p>
 
 
 <p>A key vector behaves like a vector of opaque keys: <code><a href="https://rdrr.io/r/base/length.html" class="external-link">length()</a></code>, <code>[</code>,
-<code>[[</code>, <code><a href="https://rdrr.io/r/base/c.html" class="external-link">c()</a></code>, <code><a href="https://rdrr.io/r/base/rev.html" class="external-link">rev()</a></code>, <code><a href="https://rdrr.io/r/base/rep.html" class="external-link">rep()</a></code>, <code><a href="https://rdrr.io/r/base/unique.html" class="external-link">unique()</a></code>, <code><a href="https://rdrr.io/r/base/duplicated.html" class="external-link">duplicated()</a></code> and
-<code><a href="https://rdrr.io/r/base/list.html" class="external-link">as.list()</a></code> work key by key and keep the engine and stream version, so
+<code>[[</code>, <code><a href="https://rdrr.io/r/base/c.html" class="external-link">c()</a></code>, <code><a href="https://rdrr.io/r/base/rev.html" class="external-link">rev()</a></code>, <code><a href="https://rdrr.io/r/base/rep.html" class="external-link">rep()</a></code>, <code><a href="https://rdrr.io/r/utils/head.html" class="external-link">head()</a></code>, <code><a href="https://rdrr.io/r/utils/head.html" class="external-link">tail()</a></code>, <code><a href="https://rdrr.io/r/base/unique.html" class="external-link">unique()</a></code>,
+<code><a href="https://rdrr.io/r/base/duplicated.html" class="external-link">duplicated()</a></code>, <code><a href="https://rdrr.io/r/base/match.html" class="external-link">match()</a></code>, <code>%in%</code> and <code><a href="https://rdrr.io/r/base/list.html" class="external-link">as.list()</a></code> work key by key and
+keep the engine and stream version, so
 <code>lapply(keys, f)</code>, <code><a href="https://rdrr.io/r/base/funprog.html" class="external-link">Map()</a></code> and the parallel map functions hand each task
 one key. A key vector takes one index, as a vector does: <code>keys[1, 2]</code>
 and <code>keys[, 1]</code> are an error, not a view of the words inside. <code><a href="https://rdrr.io/r/base/c.html" class="external-link">c()</a></code>
 dispatches on its first argument, so combine key vectors with a key
 first: <code>c(NULL, key)</code> returns the bare integer words, not keys, while
 <code>c(key, NULL)</code> drops the <code>NULL</code> as <code><a href="https://rdrr.io/r/base/c.html" class="external-link">c()</a></code> does for any vector. Keys are
-immutable: assigning into a key vector is an error, and so is sorting
-one, since keys have no order; compare keys with <code><a href="https://rdrr.io/r/base/identical.html" class="external-link">identical()</a></code>.</p>
+immutable: assigning into a key vector is an error, and so are names,
+arithmetic and sorting, since keys are not numbers and have no order.
+<code>==</code> and <code>!=</code> compare whole keys, engine and stream included.
+<code><a href="https://rdrr.io/r/base/character.html" class="external-link">as.character()</a></code> gives the same text as <code><a href="https://rdrr.io/r/base/format.html" class="external-link">format()</a></code>. Iterate with
+<code><a href="https://rdrr.io/r/base/lapply.html" class="external-link">lapply()</a></code> or <code><a href="https://rdrr.io/r/base/seq.html" class="external-link">seq_along()</a></code>: <code>for (k in keys)</code> walks the integer words.</p>
     </div>
     <div class="section level2">
     <h2 id="stream-version">Stream version<a class="anchor" aria-label="anchor" href="#stream-version"></a></h2>

@@ -16,6 +16,15 @@
   [`xtfrm(`*`<rng_key>`*`)`](https://pedrobtz.github.io/zurand/reference/rng_key.md)
   [`` `[[`( ``*`<rng_key>`*`)`](https://pedrobtz.github.io/zurand/reference/rng_key.md)
   [`c(`*`<rng_key>`*`)`](https://pedrobtz.github.io/zurand/reference/rng_key.md)
+  [`Ops(`*`<rng_key>`*`)`](https://pedrobtz.github.io/zurand/reference/rng_key.md)
+  [`Math(`*`<rng_key>`*`)`](https://pedrobtz.github.io/zurand/reference/rng_key.md)
+  [`Summary(`*`<rng_key>`*`)`](https://pedrobtz.github.io/zurand/reference/rng_key.md)
+  [`t(`*`<rng_key>`*`)`](https://pedrobtz.github.io/zurand/reference/rng_key.md)
+  [`as.character(`*`<rng_key>`*`)`](https://pedrobtz.github.io/zurand/reference/rng_key.md)
+  [`mtfrm(`*`<rng_key>`*`)`](https://pedrobtz.github.io/zurand/reference/rng_key.md)
+  [`` `names<-`( ``*`<rng_key>`*`)`](https://pedrobtz.github.io/zurand/reference/rng_key.md)
+  [`head(`*`<rng_key>`*`)`](https://pedrobtz.github.io/zurand/reference/rng_key.md)
+  [`tail(`*`<rng_key>`*`)`](https://pedrobtz.github.io/zurand/reference/rng_key.md)
   : Create a stateless RNG key
 - [`rng_key_from_r()`](https://pedrobtz.github.io/zurand/reference/rng_key_from_r.md)
   : Create a key from R's RNG

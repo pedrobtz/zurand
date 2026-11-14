@@ -35,6 +35,41 @@ across platforms, thread counts, SIMD paths and call order.
   as factors and dates is an error, since a factor would fold as codes
   that change with its levels
   ([\#60](https://github.com/pedrobtz/zurand/issues/60)).
+- Every error zurand raises has the class `zurand_error`, so it can be
+  caught by class rather than by message
+  ([\#62](https://github.com/pedrobtz/zurand/issues/62)).
+- [`rng_fold()`](https://pedrobtz.github.io/zurand/reference/rng_fold.md)
+  folds a string’s text in UTF-8 whatever the locale: in the C locale an
+  unmarked non-ASCII string used to fold as R’s `<c3><a9>` escapes, a
+  different key from the same script in a UTF-8 session
+  ([\#123](https://github.com/pedrobtz/zurand/issues/123)).
+- Classed numbers – factors, `integer64`, dates, difftimes – are refused
+  on every numeric argument instead of being read as their storage
+  value, so `rng_key(factor("5"))` is no longer seed 1
+  ([\#126](https://github.com/pedrobtz/zurand/issues/126)).
+- Key vectors: arithmetic, `Math`, `Summary`,
+  [`t()`](https://rdrr.io/r/base/t.html) and `names<-` are errors, since
+  they made other, valid keys
+  ([\#125](https://github.com/pedrobtz/zurand/issues/125)); `==` and
+  `!=` compare whole keys;
+  [`head()`](https://rdrr.io/r/utils/head.html),
+  [`tail()`](https://rdrr.io/r/utils/head.html),
+  [`match()`](https://rdrr.io/r/base/match.html), `%in%` and
+  [`as.character()`](https://rdrr.io/r/base/character.html) work key by
+  key; `keys[NULL]` is an empty key vector; `keys[[i, j]]` is an error
+  ([\#128](https://github.com/pedrobtz/zurand/issues/128),
+  [\#129](https://github.com/pedrobtz/zurand/issues/129),
+  [\#136](https://github.com/pedrobtz/zurand/issues/136)). An invalid
+  `stream` attribute is refused by `[` and
+  [`c()`](https://rdrr.io/r/base/c.html) as by the samplers
+  ([\#130](https://github.com/pedrobtz/zurand/issues/130)).
+- A zero-length key vector with `n` above `.Machine$integer.max` is the
+  multi-key dimension error rather than a truncated matrix
+  ([\#124](https://github.com/pedrobtz/zurand/issues/124)).
+- [`rng_simd()`](https://pedrobtz.github.io/zurand/reference/rng_simd.md)
+  accepts only `NULL`, `TRUE`, `FALSE` or a value it returned, so
+  `rng_simd(old)` restores
+  ([\#131](https://github.com/pedrobtz/zurand/issues/131)).
 - A key vector behaves as a vector of opaque keys: `[`, `[[`,
   [`c()`](https://rdrr.io/r/base/c.html),
   [`rev()`](https://rdrr.io/r/base/rev.html),

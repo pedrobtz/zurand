@@ -50,6 +50,33 @@ x[[i, ...]]
 
 # S3 method for class 'rng_key'
 c(..., recursive = FALSE)
+
+# S3 method for class 'rng_key'
+Ops(e1, e2)
+
+# S3 method for class 'rng_key'
+Math(x, ...)
+
+# S3 method for class 'rng_key'
+Summary(..., na.rm = FALSE)
+
+# S3 method for class 'rng_key'
+t(x)
+
+# S3 method for class 'rng_key'
+as.character(x, ...)
+
+# S3 method for class 'rng_key'
+mtfrm(x)
+
+# S3 method for class 'rng_key'
+names(x) <- value
+
+# S3 method for class 'rng_key'
+head(x, n = 6L, ...)
+
+# S3 method for class 'rng_key'
+tail(x, n = 6L, ...)
 ```
 
 ## Arguments
@@ -60,7 +87,10 @@ c(..., recursive = FALSE)
 
 - n:
 
-  A single non-negative whole number: how many keys to create.
+  A single non-negative whole number: how many keys to create. For
+  [`head()`](https://rdrr.io/r/utils/head.html) and
+  [`tail()`](https://rdrr.io/r/utils/head.html), how many keys to keep,
+  as for vectors.
 
 - engine:
 
@@ -123,6 +153,16 @@ c(..., recursive = FALSE)
   Ignored. Included for compatibility with
   [`c()`](https://rdrr.io/r/base/c.html).
 
+- e1, e2:
+
+  Key vectors. Only `==` and `!=` are defined: they compare whole keys,
+  recycling a single key. Arithmetic and every other operator are an
+  error, since they would turn keys into other keys.
+
+- na.rm:
+
+  Ignored.
+
 ## Value
 
 An object of class `rng_key` containing `n` keys.
@@ -140,8 +180,11 @@ A key vector behaves like a vector of opaque keys:
 [`c()`](https://rdrr.io/r/base/c.html),
 [`rev()`](https://rdrr.io/r/base/rev.html),
 [`rep()`](https://rdrr.io/r/base/rep.html),
+[`head()`](https://rdrr.io/r/utils/head.html),
+[`tail()`](https://rdrr.io/r/utils/head.html),
 [`unique()`](https://rdrr.io/r/base/unique.html),
-[`duplicated()`](https://rdrr.io/r/base/duplicated.html) and
+[`duplicated()`](https://rdrr.io/r/base/duplicated.html),
+[`match()`](https://rdrr.io/r/base/match.html), `%in%` and
 [`as.list()`](https://rdrr.io/r/base/list.html) work key by key and keep
 the engine and stream version, so `lapply(keys, f)`,
 [`Map()`](https://rdrr.io/r/base/funprog.html) and the parallel map
@@ -152,9 +195,14 @@ its first argument, so combine key vectors with a key first:
 `c(NULL, key)` returns the bare integer words, not keys, while
 `c(key, NULL)` drops the `NULL` as
 [`c()`](https://rdrr.io/r/base/c.html) does for any vector. Keys are
-immutable: assigning into a key vector is an error, and so is sorting
-one, since keys have no order; compare keys with
-[`identical()`](https://rdrr.io/r/base/identical.html).
+immutable: assigning into a key vector is an error, and so are names,
+arithmetic and sorting, since keys are not numbers and have no order.
+`==` and `!=` compare whole keys, engine and stream included.
+[`as.character()`](https://rdrr.io/r/base/character.html) gives the same
+text as [`format()`](https://rdrr.io/r/base/format.html). Iterate with
+[`lapply()`](https://rdrr.io/r/base/lapply.html) or
+[`seq_along()`](https://rdrr.io/r/base/seq.html): `for (k in keys)`
+walks the integer words.
 
 ## Stream version
 

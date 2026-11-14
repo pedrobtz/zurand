@@ -14,7 +14,9 @@ rng_simd(enable = NULL)
 - enable:
 
   `NULL` to query, `FALSE` to force the portable path, or `TRUE` to go
-  back to using whatever the CPU supports.
+  back to using whatever the CPU supports. A value `rng_simd()` returned
+  is accepted too, so `old <- rng_simd(FALSE)` followed by
+  `rng_simd(old)` restores the previous setting.
 
 ## Value
 
@@ -43,7 +45,7 @@ rng_simd()
 key <- rng_key(1L, engine = "xoshiro256pp")
 old <- rng_simd(FALSE)
 portable <- rng_uniform(key, 4L)
-rng_simd(old != "none")
+rng_simd(old)
 identical(portable, rng_uniform(key, 4L))
 #> [1] TRUE
 ```
