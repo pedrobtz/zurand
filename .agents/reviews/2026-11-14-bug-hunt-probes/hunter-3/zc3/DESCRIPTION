@@ -1,0 +1,6 @@
+Package: zc3
+Version: 0.0.1
+Title: Hunt Client
+Description: Hunt client for the zurand C API.
+License: MIT
+Encoding: UTF-8
