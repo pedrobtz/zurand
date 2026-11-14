@@ -273,7 +273,9 @@ generates `src/Makevars` from `src/Makevars.in` and `./cleanup` removes it.
   `dist_chunk_key()` only when single reads walk forward; a scattered miss
   computes the value alone (`lazy_value()`). The data pointer materialises the
   whole vector once into data2 with the column fill; writable access sets
-  `written`, after which serialisation stores values instead of the recipe. Only
+  `written`, after which serialisation regenerates the values and compares
+  (`lazy_unchanged()`): unchanged, it stores the recipe; changed, the values
+  (#68). Only
   `Get_region` and `Extract_subset` check for interrupts; `Elt` and `Dataptr`
   must not (C and C++ callers of `REAL_ELT` cannot expect a longjmp, and R calls
   `Dataptr` with the GC off; #77). Do not add an `ALTREAL_Sum` method: matching
