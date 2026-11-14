@@ -36,5 +36,7 @@ articles:
   - title: Articles
     contents:
       - zurand
+      - simulations
+      - lazy
       - performance
       - c-api
