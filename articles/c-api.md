@@ -1,4 +1,4 @@
-# Using zurand from C
+# Use zurand from C
 
 Packages can draw from zurand in C, into buffers they own and from their
 own worker threads, and get exactly the values the R functions return.

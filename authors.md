@@ -8,7 +8,8 @@
   Random123 library, src/Random123/
 
 - **NumPy Developers**. Copyright holder.  
-  Ziggurat constant tables, src/numpyzig/
+  ziggurat tables, src/numpyzig/, and the ziggurat sampler in
+  src/zurand_engine.h derived from random_standard_normal()
 
 - **Sun Microsystems, Inc.**. Copyright holder.  
   fdlibm exp() and log1p(), src/zurand_fdlibm.h

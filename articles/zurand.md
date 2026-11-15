@@ -1,161 +1,204 @@
-# Stateless random numbers
+# Get started with zurand
 
 ``` r
 
 library(zurand)
 ```
 
-## One idea
-
-R’s generators are stateful.
-[`set.seed()`](https://rdrr.io/r/base/Random.html) fixes a starting
-point, and every call to
+R’s own generator keeps a hidden state.
+[`set.seed()`](https://rdrr.io/r/base/Random.html) fixes where it
+starts, and every call to
 [`runif()`](https://rdrr.io/r/stats/Uniform.html) or
-[`rnorm()`](https://rdrr.io/r/stats/Normal.html) moves a hidden cursor,
-`.Random.seed`. What you get depends on everything drawn before: add one
-[`rnorm()`](https://rdrr.io/r/stats/Normal.html) call early in a script
-and every later number changes; split a loop across workers and the
-numbers depend on how the work was divided.
+[`rnorm()`](https://rdrr.io/r/stats/Normal.html) moves it on, so each
+number depends on everything drawn before it. zurand has no such state.
+In this vignette we bootstrap the mean of a small sample, and along the
+way meet keys, the samplers, key vectors and folding. Why the values are
+the same on every machine, and how fast they are, is left to the
+articles.
 
-zurand has no cursor. A value is a pure function of a **key** and the
-draw’s **position**:
+## Make a key
 
-``` r
-
-key <- rng_key(2026L)
-rng_uniform(key, 3L)
-#> [1] 0.15037421 0.91830293 0.06342998
-rng_uniform(key, 3L)          # same key, same values
-#> [1] 0.15037421 0.91830293 0.06342998
-rng_uniform(key, 6L)[1:3]     # draw i does not depend on how many you ask for
-#> [1] 0.15037421 0.91830293 0.06342998
-```
-
-Nothing is consumed, so nothing has to be passed along, saved or
-restored.
-
-## Many streams: key vectors and folding
-
-Independent streams come from independent keys. Ask for a vector of
-them, and a sampler returns one column per key:
+A **key** is an immutable value made from a seed. Every random value is
+a pure function of a key and the value’s **position**, so the same key
+always gives the same numbers:
 
 ``` r
 
-keys <- rng_key(2026L, n = 3L)
-rng_normal(keys, 4L)
-#>              [,1]       [,2]        [,3]
-#> [1,]  0.006686381 -2.2711494  0.42616283
-#> [2,] -1.233412249 -0.2468333  0.05688975
-#> [3,]  0.591067060  0.9256739 -1.02992948
-#> [4,]  0.835300390  1.1623784  0.68884687
+key <- rng_key(2026)
+key
+#> <rng_key> rng_key[91948d23db9c5598ed35455d78bc927d]
+rng_uniform(key, 3)
+#> [1] 0.15037421 0.91830293 0.06342998
+rng_uniform(key, 3)
+#> [1] 0.15037421 0.91830293 0.06342998
 ```
 
-Or derive a key from what a piece of work *is*, with
-[`rng_fold()`](https://pedrobtz.github.io/zurand/reference/rng_fold.md).
-The same data always derives the same key, so a computation can name its
-parts instead of counting them:
+Asking for more values extends the sequence rather than changing it. The
+first three of six are the three above:
 
 ``` r
 
-chain_key <- function(chain) rng_fold(key, paste("chain", chain))
-rng_normal(chain_key(3), 2L)
-#> [1] -1.8032411  0.0360179
-rng_normal(chain_key(3), 2L)  # chain 3 gets the same numbers every run
-#> [1] -1.8032411  0.0360179
+rng_uniform(key, 6)
+#> [1] 0.15037421 0.91830293 0.06342998 0.74915105 0.60528900 0.30633444
 ```
 
-Folding is typed: `rng_fold(key, 1)` and `rng_fold(key, "1")` differ,
-while `1L` and `1` agree.
+Drawing uses nothing up: the key is the same afterwards, so there is no
+state to pass between functions, save or restore.
 
-## Reproducible no matter how the work is split
+## Draw from a key
 
-Because every task’s numbers come from its own key, the result cannot
-depend on scheduling. Here is a small bootstrap, one key per replicate.
-It gives the same answer serially, in any order, or spread over workers:
+The samplers are
+[`rng_uniform()`](https://pedrobtz.github.io/zurand/reference/rng_uniform.md),
+[`rng_normal()`](https://pedrobtz.github.io/zurand/reference/rng_normal.md),
+[`rng_integer()`](https://pedrobtz.github.io/zurand/reference/rng_integer.md)
+and
+[`rng_bits()`](https://pedrobtz.github.io/zurand/reference/rng_bits.md).
+Each takes a key and a count, then the parameters of its distribution.
+Here is the sample we will bootstrap, and one resample of it, drawn as
+positions between 1 and 8:
 
 ``` r
 
 x <- c(2.1, 3.4, 1.9, 5.6, 4.2, 3.3, 2.8, 4.9)
-boot_mean <- function(b) {
-  i <- rng_integer(rng_fold(key, b), length(x), 1L, length(x))
-  mean(x[i])
-}
-serial <- vapply(1:200, boot_mean, numeric(1))
+i <- rng_integer(key, length(x), min = 1, max = length(x))
+i
+#> [1] 3 7 2 7 2 8 5 2
+mean(x[i])
+#> [1] 3.35
+```
 
-# The same replicates computed in a random order, then put back in place.
-order <- sample(200)
-shuffled <- numeric(200)
-shuffled[order] <- vapply(order, boot_mean, numeric(1))
-identical(serial, shuffled)
+[`rng_normal()`](https://pedrobtz.github.io/zurand/reference/rng_normal.md)
+takes `mean` and `sd`, and
+[`rng_uniform()`](https://pedrobtz.github.io/zurand/reference/rng_uniform.md)
+takes `min` and `max`, in the same way.
+
+## One key per replicate
+
+A bootstrap needs many resamples, each from its own stream.
+[`rng_key()`](https://pedrobtz.github.io/zurand/reference/rng_key.md)
+makes a **key vector** when asked for `n` keys, and a sampler given a
+key vector returns a matrix with one column per key:
+
+``` r
+
+keys <- rng_key(2026, n = 200)
+length(keys)
+#> [1] 200
+idx <- rng_integer(keys, length(x), min = 1, max = length(x))
+dim(idx)
+#> [1]   8 200
+```
+
+Each column is one resample, so the bootstrap distribution of the mean
+is one line away:
+
+``` r
+
+boot <- apply(idx, 2, function(i) mean(x[i]))
+quantile(boot, c(0.025, 0.975))
+#>     2.5%    97.5% 
+#> 2.799062 4.451250
+```
+
+A key vector can be indexed like any vector. Replicate 7 alone gives the
+same resample as column 7 of the matrix, so a replicate can be rerun
+without the others:
+
+``` r
+
+identical(rng_integer(keys[7], length(x), min = 1, max = length(x)), idx[, 7])
 #> [1] TRUE
 ```
 
-With [`parallel::mclapply()`](https://rdrr.io/r/parallel/mclapply.html)
-or `future.apply::future_lapply()` in place of
-[`vapply()`](https://rdrr.io/r/base/lapply.html) the values are the same
-again: no worker needs a seed, and none can disturb another. zurand’s
-own threaded fills work the same way:
+## Name the parts with folding
+
+Counting keys works while a computation has one part. When it has
+several, derive each part’s key from what the part *is*.
+[`rng_fold()`](https://pedrobtz.github.io/zurand/reference/rng_fold.md)
+takes a key and some data, a name or a number, and returns a new key;
+the same data always gives the same key:
+
+``` r
+
+boot_key <- rng_fold(key, "bootstrap")
+replicate_key <- function(b) rng_fold(boot_key, b)
+rng_uniform(replicate_key(3), 2)
+#> [1] 0.3819716 0.5885736
+rng_uniform(replicate_key(3), 2)
+#> [1] 0.3819716 0.5885736
+```
+
+Because replicate `b` gets its numbers from its own key, the bootstrap
+gives the same answer whatever order the replicates run in. Here they
+run once in order and once shuffled, as parallel workers might run them
+([`sample()`](https://rdrr.io/r/base/sample.html) only picks the order):
+
+``` r
+
+boot_mean <- function(b) {
+  i <- rng_integer(replicate_key(b), length(x), min = 1, max = length(x))
+  mean(x[i])
+}
+in_order <- vapply(1:200, boot_mean, numeric(1))
+
+shuffled <- numeric(200)
+run_order <- sample(200)
+shuffled[run_order] <- vapply(run_order, boot_mean, numeric(1))
+identical(in_order, shuffled)
+#> [1] TRUE
+```
+
+A new part of the analysis, folded under another name, cannot change
+these values. The same holds for zurand’s own threads:
 [`rng_threads()`](https://pedrobtz.github.io/zurand/reference/rng_threads.md)
-changes the speed, never the values.
+changes how fast a large draw is made, never what it contains.
 
-## Engines
+## Vectors of any length
 
-A key records its engine:
-
-| engine | what it is |
-|----|----|
-| `"xoshiro256pp"` (default) | xoshiro256++, reseeded from Philox every 512 values; the fastest |
-| `"philox4x64"` | Philox4x64-10, counter-based: each value computed from its position |
-| `"threefry4x64"` | Threefry4x64-13, counter-based |
-
-All three give the same guarantees. Changing engine changes every value,
-so name it when a stream has to outlive a change of default:
+[`rng_lazy_normal()`](https://pedrobtz.github.io/zurand/reference/rng_lazy_normal.md)
+and
+[`rng_lazy_uniform()`](https://pedrobtz.github.io/zurand/reference/rng_lazy_normal.md)
+return a **lazy vector**: it holds only its key and arguments, and
+computes a value when it is read. A billion values are created at once,
+and they are the values the ordinary sampler gives:
 
 ``` r
 
-k <- rng_key(2026L, engine = "philox4x64")
-attr(k, "engine")
-#> [1] "philox4x64"
+z <- rng_lazy_normal(key, 1e9)
+length(z)
+#> [1] 1000000000
+z[1:3]
+#> [1]  0.006686381 -1.233412249  0.591067060
+rng_normal(key, 3)
+#> [1]  0.006686381 -1.233412249  0.591067060
 ```
 
-## Bit-identical everywhere
+## A common mistake
 
-The same key gives the same bits on Linux (glibc and musl), macOS and
-Windows, on x86_64 and ARM, at any thread count and with or without
-SIMD. That is enforced, not assumed. zurand computes the
-[`exp()`](https://rdrr.io/r/base/Log.html) and
-[`log1p()`](https://rdrr.io/r/base/Log.html) its normal sampler needs
-with its own port of fdlibm instead of the platform’s library, which
-rounds differently from system to system, and it keeps compilers from
-fusing multiply-adds, which would change results by a rounding step.
-Every CI platform checks known answers and hashes of whole streams.
-
-Each key also carries a stream version:
+The samplers take a key, not a seed. Passing the seed itself is an error
+that says what to do instead:
 
 ``` r
 
-attr(key, "stream")
-#> [1] 1
+rng_normal(2026, 3)
+#> Error in `rng_normal()`:
+#> ! `key` must be an <rng_key>; create one with rng_key()
 ```
 
-The output of every `(engine, stream)` pair is frozen. If a stream ever
-needed correcting, the fix would ship as a new version for new keys, and
-existing keys, including saved ones, would go on producing exactly what
-they always have.
+## Where next
 
-## Interop
-
-[`rng_key_from_r()`](https://pedrobtz.github.io/zurand/reference/rng_key_from_r.md)
-is the one function that reads R’s own generator. Use it to turn a
-[`set.seed()`](https://rdrr.io/r/base/Random.html) into a key:
-
-``` r
-
-set.seed(1)
-rng_key_from_r()
-#> <rng_key> rng_key[5f43830b43f86031e8804e4492a6849d]
-```
-
-Packages can use the same streams from C or C++, from their own threads,
-through the API in `zurand.h`; see [Using zurand from
-C](https://pedrobtz.github.io/zurand/articles/c-api.md).
+- [Run a reproducible simulation
+  study](https://pedrobtz.github.io/zurand/articles/simulations.html):
+  scenarios, parallel workers, common random numbers, and stopping and
+  resuming with `offset`.
+- [Work with vectors too big for
+  memory](https://pedrobtz.github.io/zurand/articles/lazy.html): lazy
+  vectors, saving them, and when they are filled in.
+- [Reproducibility
+  guarantees](https://pedrobtz.github.io/zurand/articles/reproducibility.html):
+  the engines, what stays bit-identical, and stream versions.
+- [Performance](https://pedrobtz.github.io/zurand/articles/performance.html)
+  and [Use zurand from
+  C](https://pedrobtz.github.io/zurand/articles/c-api.html).
+- The [reference index](https://pedrobtz.github.io/zurand/reference/)
+  has every function and argument.

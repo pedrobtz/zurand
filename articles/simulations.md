@@ -1,4 +1,4 @@
-# Reproducible simulation studies
+# Run a reproducible simulation study
 
 ``` r
 
@@ -190,3 +190,7 @@ saveRDS(study, f)
 identical(rng_normal(readRDS(f), 3), rng_normal(study, 3))
 #> [1] TRUE
 ```
+
+What a saved key promises, across platforms, engines and package
+versions, is in [Reproducibility
+guarantees](https://pedrobtz.github.io/zurand/articles/reproducibility.md).

@@ -23,7 +23,14 @@
     <div id="navbar" class="collapse navbar-collapse ms-3">
       <ul class="navbar-nav me-auto"><li class="nav-item"><a class="nav-link" href="../articles/zurand.html">Get started</a></li>
 <li class="active nav-item"><a class="nav-link" href="../reference/index.html">Reference</a></li>
-<li class="nav-item"><a class="nav-link" href="../articles/index.html">Articles</a></li>
+<li class="nav-item dropdown">
+  <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
+  <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/simulations.html">Run a reproducible simulation study</a></li>
+    <li><a class="dropdown-item" href="../articles/lazy.html">Work with vectors too big for memory</a></li>
+    <li><a class="dropdown-item" href="../articles/c-api.html">Use zurand from C</a></li>
+    <li><hr class="dropdown-divider"></li>
+    <li><a class="dropdown-item" href="../articles/index.html">More articles...</a></li>
+  </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
  <input class="form-control" type="search" name="search-input" id="search-input" autocomplete="off" aria-label="Search site" placeholder="Search for" data-search-index="../search.json"></form></li>
@@ -61,7 +68,7 @@
     <p><strong>Maintainer</strong>: Pedro Baltazar <a href="mailto:pedrobtz@gmail.com">pedrobtz@gmail.com</a> [copyright holder]</p>
 <p>Authors:</p><ul><li><p>Pedro Baltazar <a href="mailto:pedrobtz@gmail.com">pedrobtz@gmail.com</a> [copyright holder]</p></li>
 </ul><p>Other contributors:</p><ul><li><p>D. E. Shaw Research (Random123 library, src/Random123/) [copyright holder]</p></li>
-<li><p>NumPy Developers (Ziggurat constant tables, src/numpyzig/) [copyright holder]</p></li>
+<li><p>NumPy Developers (ziggurat tables, src/numpyzig/, and the ziggurat sampler in src/zurand_engine.h derived from random_standard_normal()) [copyright holder]</p></li>
 <li><p>Sun Microsystems, Inc. (fdlibm exp() and log1p(), src/zurand_fdlibm.h) [copyright holder]</p></li>
 <li><p>Christopher D. McFarland (modified ziggurat (fast_prng), from which tools/generate-mcfarland-tables.py and rng_normal(method = 'mcfarland') derive) [copyright holder]</p></li>
 </ul></div>

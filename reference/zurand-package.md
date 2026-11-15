@@ -38,8 +38,9 @@ Other contributors:
 - D. E. Shaw Research (Random123 library, src/Random123/) \[copyright
   holder\]
 
-- NumPy Developers (Ziggurat constant tables, src/numpyzig/) \[copyright
-  holder\]
+- NumPy Developers (ziggurat tables, src/numpyzig/, and the ziggurat
+  sampler in src/zurand_engine.h derived from random_standard_normal())
+  \[copyright holder\]
 
 - Sun Microsystems, Inc. (fdlibm exp() and log1p(), src/zurand_fdlibm.h)
   \[copyright holder\]

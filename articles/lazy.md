@@ -1,4 +1,4 @@
-# Lazy random vectors
+# Work with vectors too big for memory
 
 ``` r
 
@@ -142,4 +142,6 @@ or
 [`rng_uniform()`](https://pedrobtz.github.io/zurand/reference/rng_uniform.md)
 is simpler and faster. See
 [`?rng_lazy_normal`](https://pedrobtz.github.io/zurand/reference/rng_lazy_normal.md)
-for the details.
+for the details, and [Run a reproducible simulation
+study](https://pedrobtz.github.io/zurand/articles/simulations.md) for
+drawing a long stream in pieces with `offset` instead.

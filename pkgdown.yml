@@ -5,9 +5,10 @@ articles:
   articles/c-api: c-api.html
   articles/lazy: lazy.html
   articles/performance: performance.html
+  articles/reproducibility: reproducibility.html
   articles/simulations: simulations.html
-  articles/zurand: zurand.html
-last_built: 2026-11-15T14:13Z
+  zurand: zurand.html
+last_built: 2026-11-15T21:03Z
 urls:
   reference: https://pedrobtz.github.io/zurand/reference
   article: https://pedrobtz.github.io/zurand/articles

@@ -1,0 +1,154 @@
+# Reproducibility guarantees
+
+``` r
+
+library(zurand)
+```
+
+A zurand key always gives the same values. This article says exactly
+what “always” covers: which changes leave the values alone, which change
+them, and what the package does to keep that promise. It is for readers
+who store keys with results, or who need to know that a result computed
+today can be recomputed elsewhere later.
+
+## What never changes the values
+
+Draw `i` of a key depends only on the key, `i`, the sampler and its
+arguments. In particular it does not depend on:
+
+- **how many values are drawn**, so `rng_normal(key, 10)[1:3]` is
+  `rng_normal(key, 3)`, and `offset` can start anywhere in the stream;
+- **the order of calls**, or on anything else drawn in the session;
+- **the platform**: Linux (glibc and musl), macOS and Windows, on x86_64
+  and aarch64;
+- **the number of threads** set with
+  [`rng_threads()`](https://pedrobtz.github.io/zurand/reference/rng_threads.md),
+  or whether the SIMD path of
+  [`rng_simd()`](https://pedrobtz.github.io/zurand/reference/rng_simd.md)
+  is in use.
+
+The thread count, for one, can be checked directly:
+
+``` r
+
+key <- rng_key(2026)
+old <- rng_threads(1)
+one_thread <- rng_normal(key, 1e5)
+rng_threads(old)
+identical(one_thread, rng_normal(key, 1e5))
+#> [1] TRUE
+```
+
+32-bit x86 builds, whose x87 floating point rounds differently, are
+outside this guarantee.
+
+## How that is kept
+
+Uniform and integer draws use integer operations and single
+floating-point operations, each correctly rounded, which IEEE 754
+defines the same way on every platform. That holds only if the compiler
+does not fuse a multiply and an add into one instruction, which some do
+by default on ARM and which changes a result by a rounding step, so
+zurand keeps every compiler from doing it. Normal draws need one more
+step, because the ziggurat method’s rare slow path calls
+[`exp()`](https://rdrr.io/r/base/Log.html) and
+[`log1p()`](https://rdrr.io/r/base/Log.html), and platforms’ maths
+libraries round those differently. zurand computes both with its own
+port of fdlibm.
+
+None of this is assumed. Every CI platform checks known answers for the
+generators against independent reference implementations, pinned values
+for every sampler, and hashes of whole streams of millions of draws,
+which reach the slow path many times.
+
+## Engines
+
+A key records its **engine**, the generator behind its stream:
+
+``` r
+
+attr(key, "engine")
+#> [1] "xoshiro256pp"
+attr(rng_key(2026, engine = "philox4x64"), "engine")
+#> [1] "philox4x64"
+```
+
+The default, `"xoshiro256pp"`, is the fastest. `"philox4x64"` and
+`"threefry4x64"` are counter-based: each value is computed directly from
+its position, which makes reading scattered positions of a lazy vector
+faster.
+[`?rng_key`](https://pedrobtz.github.io/zurand/reference/rng_key.md)
+describes each one.
+
+All three give every guarantee above, but each gives different values. A
+key made with one engine keeps it, so a saved key is safe; a key made
+from a seed in code, `rng_key(2026)`, follows the package default. Name
+the engine when a stream has to outlive a change of default:
+
+``` r
+
+key <- rng_key(2026, engine = "xoshiro256pp")
+```
+
+## Stream versions
+
+A key also records the version of the stream definition it was made
+under:
+
+``` r
+
+attr(key, "stream")
+#> [1] 1
+```
+
+The values of every engine and stream version are frozen. If a defect in
+a stream were ever found, the fix would become a new stream version for
+new keys, and existing keys, saved ones included, would keep producing
+exactly what they always have. A key from a newer stream than the
+installed zurand knows is an error, never a silent reinterpretation.
+
+New features keep the old values too: a new sampler method, such as
+`rng_normal(method = "mcfarland")`, is a separate stream, and the
+default method never changes.
+
+## Folding is typed
+
+[`rng_fold()`](https://pedrobtz.github.io/zurand/reference/rng_fold.md)
+derives a key from the type of its data as well as its value, so a
+number and the string that prints the same way give different keys,
+while an integer and a double holding the same whole number agree:
+
+``` r
+
+identical(rng_fold(key, 1), rng_fold(key, 1L))
+#> [1] TRUE
+identical(rng_fold(key, 1), rng_fold(key, "1"))
+#> [1] FALSE
+```
+
+Strings fold as their UTF-8 text, so the same name gives the same key in
+any locale. Factors and dates are an error rather than folding as their
+internal codes;
+[`?rng_fold`](https://pedrobtz.github.io/zurand/reference/rng_fold.md)
+has the details.
+
+## Keys from R’s generator
+
+[`rng_key_from_r()`](https://pedrobtz.github.io/zurand/reference/rng_key_from_r.md)
+is the one function that reads R’s own generator. It turns the current
+[`set.seed()`](https://rdrr.io/r/base/Random.html) state into a key, so
+a script that already sets a seed can hand zurand a key derived from it:
+
+``` r
+
+set.seed(1)
+rng_key_from_r()
+#> <rng_key> rng_key[5f43830b43f86031e8804e4492a6849d]
+```
+
+The key is then independent of R’s generator: nothing drawn from it
+moves `.Random.seed`.
+
+Next, [Run a reproducible simulation
+study](https://pedrobtz.github.io/zurand/articles/simulations.md) puts
+these guarantees to work.
