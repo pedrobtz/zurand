@@ -1,4 +1,8 @@
 on:
+  schedule:
+    # Weekly. Dependencies are built from source in these containers, so this
+    # is not a per-push job.
+    - cron: "14 16 * * 0"
   workflow_dispatch:
 
 name: arch
