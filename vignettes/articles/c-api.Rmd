@@ -1,5 +1,8 @@
 ---
-title: "Using zurand from C"
+title: "Use zurand from C"
+description: >
+  Fill buffers from C or C++ in another package, from its own threads,
+  with the values the R functions return.
 ---
 
 ```{r, include = FALSE}

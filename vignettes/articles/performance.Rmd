@@ -1,5 +1,8 @@
 ---
 title: "Performance"
+description: >
+  How fast zurand is against base R and other generators, how it uses
+  threads, and what was tried and rejected.
 ---
 
 ```{r, include = FALSE}
