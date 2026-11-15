@@ -5,16 +5,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Shared conventions
 
-The portfolio's shared rules are synced into `.claude/shared/` from
-`pedrobtz/packages:claude/shared/`. Never edit them here. Where this file and
-a shared file disagree, this file wins for this package.
+<!-- r-skills: shared-rules -->
 
-@.claude/shared/workflow.md
-@.claude/shared/r-package.md
-@.claude/shared/ci.md
-@.claude/shared/native-code.md
-@.claude/shared/correctness.md
-@.claude/shared/assurance.md
+The portfolio's shared rules (`workflow`, `r-package`, `ci`, `native-code`,
+`correctness`, `assurance`) come from the
+[r-skills](https://github.com/pedrobtz/r-skills) plugin's `rules/`, loaded at
+session start because of the marker above. Never copy them here. Where this
+file and a shared rule disagree, this file wins for this package. Cloud
+sessions do not load the plugin and run without them.
 
 ## What this is
 
@@ -94,7 +92,7 @@ requests from it.
 
 ## Commands
 
-The everyday commands are in `.claude/shared/r-package.md`. This is a
+The everyday commands are in the shared `r-package.md` rules. This is a
 devtools-based package (`PackageUseDevtools: Yes`). On top of them:
 
 ```sh
@@ -350,7 +348,7 @@ comment (v1.24.0):
   fallback.
 - `coverage.yaml`, and `vendor-upstream.yaml` (weekly upstream check).
 - `assurance.yaml`: holds `.agents/assurance.md` to
-  `.claude/shared/assurance.md` on every pull request.
+  the shared `assurance.md` rules on every pull request.
 - `cran-release.yaml`: on a push that changes `CRAN-SUBMISSION`, tags the
   submitted commit, publishes the release and opens the `.9000` bump.
 - `pkgdown.yaml`: the site, from r-actions' `pkgdown.yml`.
