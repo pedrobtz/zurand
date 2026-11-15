@@ -586,9 +586,16 @@ test_that("every argument check reachable from R reports its own error", {
   expect_error(rng_integer(k, 1, 2^31, 2^31 + 2), "integer range")
   expect_error(rng_integer(k, 1, 1.5, 3), "must be a whole number")
   expect_error(rng_threads(NA), "integer or double scalar")
-  # Checked before allocating (#75), so this costs nothing.
-  expect_error(rng_uniform(rng_key(1L, n = 2L), 2^31), "dimensions are too large")
-  expect_error(rng_bits(rng_key(1L, n = 2L), 2^31), "dimensions are too large")
+  # Checked before allocating (#75), so this costs nothing. 2^31 is above
+  # R_XLEN_T_MAX on 32-bit builds, so i386 rejects `n` itself first.
+  expect_error(
+    rng_uniform(rng_key(1L, n = 2L), 2^31),
+    "dimensions are too large|too large for an R vector"
+  )
+  expect_error(
+    rng_bits(rng_key(1L, n = 2L), 2^31),
+    "dimensions are too large|too large for an R vector"
+  )
   # Not reachable from R, so not tested here: "<rng_key> has an
   # unrecognised engine" (key_engine_code()), because key_count() runs
   # check_engine() first on every path.
