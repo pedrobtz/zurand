@@ -28,7 +28,7 @@ Authors:
 Other contributors:
 \itemize{
   \item D. E. Shaw Research (Random123 library, src/Random123/) [copyright holder]
-  \item NumPy Developers (Ziggurat constant tables, src/numpyzig/) [copyright holder]
+  \item NumPy Developers (ziggurat tables, src/numpyzig/, and the ziggurat sampler in src/zurand_engine.h derived from random_standard_normal()) [copyright holder]
   \item Sun Microsystems, Inc. (fdlibm exp() and log1p(), src/zurand_fdlibm.h) [copyright holder]
   \item Christopher D. McFarland (modified ziggurat (fast_prng), from which tools/generate-mcfarland-tables.py and rng_normal(method = 'mcfarland') derive) [copyright holder]
 }

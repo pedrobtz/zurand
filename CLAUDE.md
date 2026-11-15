@@ -395,6 +395,14 @@ re-copied. `src/zigbounds.h` is generated — not vendored — by
 wedge test that let `zig_normal_slow()` resolve most wedge decisions without
 `exp()`; rerun the script instead of editing it.
 
+The ziggurat sampler in `src/zurand_engine.h` (`zig_normal_*()` and the
+layer-0 tail) is **derived** from NumPy's `random_standard_normal()`, BSD
+3-clause, and the xoshiro256++ recurrence follows Blackman and Vigna's
+public-domain reference; `inst/COPYRIGHTS` records both. Code adapted from
+any other implementation gets a `COPYRIGHTS` entry and its notice in the
+same commit, `dev/` harnesses included (`dev/simd/m1_compare.c` carries
+randompack's).
+
 **Deviation from `native-code.md`:** the vendored trees sit at `src/Random123/`
 and `src/numpyzig/`, not under `src/vendor/`, and there is no `tools/patches/`.
 The NumPy trim is the one local change, and it is recorded in the comment at the

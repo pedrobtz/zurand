@@ -11,8 +11,12 @@
  *              fills a 144-word buffer (state loaded and stored per refill),
  *              then converts it in a second pass
  * The randompack variants reimplement the loops of randompack 0.1.10
- * (src/x256pp_neon_scalar.inc, src/rand_dble.inc; BSD 3-clause, Kristjan
- * Jonasson) for measurement only; the conversion keeps its FMA form.
+ * (src/x256pp_neon_scalar.inc, src/rand_dble.inc) for measurement only;
+ * the conversion keeps its FMA form. Those loops are
+ * Copyright (c) 2026 Kristján Jónasson, University of Iceland, under
+ * randompack's license (MIT in its inst/THIRD-PARTY-NOTICES; its
+ * DESCRIPTION says BSD 3-clause): https://CRAN.R-project.org/package=randompack.
+ * This file is a benchmark harness and is not part of the package.
  *
  * Reports ns per value in cache (4096 values, reused) and in memory
  * (16.8M values, reused, so page faults are excluded). */

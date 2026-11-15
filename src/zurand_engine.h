@@ -149,7 +149,12 @@ static double ZE_N(zig_normal_slow)(ZE_KEY_T key, uint64_t index, uint64_t r) {
 /* One standard normal deviate for output position `index`, following
  * numpy's random_standard_normal: 8 bits of layer index, 1 sign bit and a
  * 52-bit magnitude from a single word decide ~99% of draws with one table
- * compare. `r` is the attempt-0 word from the shared Philox block. */
+ * compare. `r` is the attempt-0 word from the shared Philox block.
+ * zig_normal_slow(), zig_normal_reject(), zig_normal_at() and the
+ * layer-0 tail (also used by mcf_normal_edge()) are derived from
+ * random_standard_normal() in numpy/random/src/distributions/
+ * distributions.c, Copyright (c) 2005-2025, NumPy Developers, BSD
+ * 3-clause: see src/numpyzig/LICENSE and inst/COPYRIGHTS. */
 /* Entry to the slow path from the signed-table fast path below: settles
  * the one case the new accept test sends here that the old one did not,
  * rabs == 0 in a layer with ki > 0, which the old code accepted as +0.0.
