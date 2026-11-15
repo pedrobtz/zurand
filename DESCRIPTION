@@ -6,7 +6,7 @@ Authors@R: c(
     person("D. E. Shaw Research", role = "cph",
            comment = "Random123 library, src/Random123/"),
     person("NumPy Developers", role = "cph",
-           comment = "Ziggurat constant tables, src/numpyzig/"),
+           comment = "ziggurat tables, src/numpyzig/, and the ziggurat sampler in src/zurand_engine.h derived from random_standard_normal()"),
     person("Sun Microsystems, Inc.", role = "cph",
            comment = "fdlibm exp() and log1p(), src/zurand_fdlibm.h"),
     person("Christopher D.", "McFarland", role = "cph",
@@ -34,9 +34,11 @@ Encoding: UTF-8
 Language: en-GB
 Roxygen: list(markdown = TRUE)
 Suggests:
+    knitr,
     processx,
+    rmarkdown,
     testthat (>= 3.0.0),
     withr
-Config/Needs/website: knitr, rmarkdown
+VignetteBuilder: knitr
 Config/testthat/edition: 3
 Config/roxygen2/version: 8.1.0

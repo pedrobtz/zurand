@@ -1,12 +1,14 @@
 The zurand package as a whole is distributed under the MIT license, with
 Pedro Baltazar as copyright holder (see the LICENSE file).
 
-It bundles the following third-party components, which carry their own
-copyright and license terms. Random123 and the NumPy tables are BSD
-3-clause licensed; Random123 is redistributed unmodified, and the NumPy
-header is trimmed to the normal-double tables but otherwise unmodified.
-The fdlibm functions carry Sun's permissive notice and are modified, as
-described below.
+It bundles or derives from the following third-party components, which
+carry their own copyright and license terms. Random123 and the NumPy code
+are BSD 3-clause licensed; Random123 is redistributed unmodified, the
+NumPy header is trimmed to the normal-double tables but otherwise
+unmodified, and the ziggurat sampler is derived from NumPy's and
+modified. The fdlibm functions carry Sun's permissive notice and are
+modified. McFarland's fast_prng is MIT licensed, and xoshiro256++ is in
+the public domain. Each is described below.
 
 
 -------------------------------------------------------------------------
@@ -37,10 +39,14 @@ R. O. Dror and D. E. Shaw (2011), "Parallel random numbers: as easy as
 
 
 -------------------------------------------------------------------------
-NumPy ziggurat constants
+NumPy ziggurat constants and sampler
 -------------------------------------------------------------------------
 
 Files:      src/numpyzig/ziggurat_constants.h
+            src/zurand_engine.h, zig_normal_slow(), zig_normal_reject(),
+              zig_normal_at() and the layer-0 tail of mcf_normal_edge()
+              (derived from random_standard_normal() in
+              numpy/random/src/distributions/distributions.c)
 Copyright:  Copyright (c) 2005-2025, NumPy Developers. All rights reserved.
 License:    BSD 3-clause
 Full text:  src/numpyzig/LICENSE
@@ -52,6 +58,16 @@ sampler in rng_normal(). The header is trimmed to the normal-double tables
 float and exponential tables upstream also defines are removed, and what
 is kept is otherwise unmodified. A comment at the top of the file records
 the source, copyright and the trim.
+
+The sampler follows random_standard_normal(): the same split of one 64-bit
+word into layer index, sign and 52-bit magnitude, the same fast-path
+accept test, the same wedge test against exp(-x^2 / 2), and Marsaglia's
+tail with the same expressions. Modified: retry words come from
+per-position Philox blocks so that each draw is a pure function of its
+key and position, the sign is folded into a signed copy of the width
+table, most wedge decisions are settled by the fixed-point brackets of
+src/zigbounds.h, and exp() and log1p() are zurand's fdlibm port. These
+derived portions remain under NumPy's BSD 3-clause license.
 
 
 -------------------------------------------------------------------------
@@ -117,6 +133,23 @@ Upstream license text:
     CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
     TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+-------------------------------------------------------------------------
+xoshiro256++
+-------------------------------------------------------------------------
+
+Files:      src/zurand.c, xoshiro_sub_scalar() and the AVX2 and NEON
+            xoshiro_group_*() functions (the recurrence)
+Copyright:  None: dedicated to the public domain by its authors
+Source:     https://prng.di.unimi.it/xoshiro256plusplus.c
+
+The xoshiro256++ recurrence follows David Blackman and Sebastiano Vigna's
+reference implementation (written in 2019), which they dedicated to the
+public domain. Reference: D. Blackman and S. Vigna (2021), "Scrambled
+linear pseudorandom number generators", ACM Transactions on Mathematical
+Software 47(4), 1-32, <doi:10.1145/3460772>. Seeding each 512-value
+sub-chunk from Philox and the vector paths are zurand's own.
 
 
 -------------------------------------------------------------------------

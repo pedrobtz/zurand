@@ -1,5 +1,8 @@
 ---
-title: "Lazy random vectors"
+title: "Work with vectors too big for memory"
+description: >
+  Lazy random vectors: created at once, computed when read, saved as a
+  recipe.
 ---
 
 ```{r, include = FALSE}
@@ -118,4 +121,5 @@ Lazy vectors help when a vector is too big to hold, when only part of it
 will be read, or when it is saved and shared. For vectors that fit in
 memory and are read in full, an ordinary draw with `rng_normal()` or
 `rng_uniform()` is simpler and faster. See `?rng_lazy_normal` for the
-details.
+details, and [Run a reproducible simulation study](simulations.html) for
+drawing a long stream in pieces with `offset` instead.

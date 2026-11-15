@@ -3,3 +3,6 @@ docs
 src/Makevars
 tests/testthat/_problems/
 tests/testthat/testthat-problems.rds
+inst/doc
+vignettes/*.html
+vignettes/*.R

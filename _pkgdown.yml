@@ -33,10 +33,13 @@ reference:
       - zurand-package
 
 articles:
-  - title: Articles
+  - title: Guides
+    navbar: ~
     contents:
-      - articles/zurand
       - articles/simulations
       - articles/lazy
-      - articles/performance
       - articles/c-api
+  - title: Concepts
+    contents:
+      - articles/reproducibility
+      - articles/performance
