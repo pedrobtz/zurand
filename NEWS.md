@@ -1,3 +1,5 @@
+# zurand (development version)
+
 # zurand 0.1.0
 
 First release. Stateless random numbers: every value is a pure function of
