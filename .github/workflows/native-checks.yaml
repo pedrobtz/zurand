@@ -18,13 +18,13 @@ permissions: read-all
 
 jobs:
   sanitizers:
-    uses: pedrobtz/r-actions/.github/workflows/sanitizers.yml@4062705ecc3560e85ec8045b30d0e9951fa447a2 # v1.30.0
+    uses: pedrobtz/r-actions/.github/workflows/sanitizers.yml@af3de72ac23bc0776ded7c934d84e03d3a406a46 # v1.41.0
     with:
       asan: true
       profile: auto
 
   valgrind:
-    uses: pedrobtz/r-actions/.github/workflows/valgrind.yml@4062705ecc3560e85ec8045b30d0e9951fa447a2 # v1.30.0
+    uses: pedrobtz/r-actions/.github/workflows/valgrind.yml@af3de72ac23bc0776ded7c934d84e03d3a406a46 # v1.41.0
     with:
       profile: auto
       # libgomp's pooled worker threads keep their TLS until exit, which
@@ -32,18 +32,18 @@ jobs:
       suppressions: .github/valgrind.supp
 
   lto:
-    uses: pedrobtz/r-actions/.github/workflows/lto.yml@4062705ecc3560e85ec8045b30d0e9951fa447a2 # v1.30.0
+    uses: pedrobtz/r-actions/.github/workflows/lto.yml@af3de72ac23bc0776ded7c934d84e03d3a406a46 # v1.41.0
 
   gctorture:
-    uses: pedrobtz/r-actions/.github/workflows/gctorture.yml@4062705ecc3560e85ec8045b30d0e9951fa447a2 # v1.30.0
+    uses: pedrobtz/r-actions/.github/workflows/gctorture.yml@af3de72ac23bc0776ded7c934d84e03d3a406a46 # v1.41.0
     with:
       profile: auto
 
   rchk:
-    uses: pedrobtz/r-actions/.github/workflows/rchk.yml@4062705ecc3560e85ec8045b30d0e9951fa447a2 # v1.30.0
+    uses: pedrobtz/r-actions/.github/workflows/rchk.yml@af3de72ac23bc0776ded7c934d84e03d3a406a46 # v1.41.0
 
   analyzers:
-    uses: pedrobtz/r-actions/.github/workflows/analyzers.yml@4062705ecc3560e85ec8045b30d0e9951fa447a2 # v1.30.0
+    uses: pedrobtz/r-actions/.github/workflows/analyzers.yml@af3de72ac23bc0776ded7c934d84e03d3a406a46 # v1.41.0
     with:
       # Random123 and NumPy's ziggurat tables are vendored (verbatim; NumPy's
       # trimmed to the tables used) and are
@@ -57,6 +57,6 @@ jobs:
   # above reproduces. Full runs only: `quick`, which skips all three, on
   # pull requests; full on every other event.
   cran-special:
-    uses: pedrobtz/r-actions/.github/workflows/cran-special.yml@4062705ecc3560e85ec8045b30d0e9951fa447a2 # v1.30.0
+    uses: pedrobtz/r-actions/.github/workflows/cran-special.yml@af3de72ac23bc0776ded7c934d84e03d3a406a46 # v1.41.0
     with:
       profile: auto

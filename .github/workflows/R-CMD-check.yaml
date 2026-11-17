@@ -15,7 +15,7 @@ permissions: read-all
 
 jobs:
   R-CMD-check:
-    uses: pedrobtz/r-actions/.github/workflows/r-cmd-check.yml@4062705ecc3560e85ec8045b30d0e9951fa447a2 # v1.30.0
+    uses: pedrobtz/r-actions/.github/workflows/r-cmd-check.yml@af3de72ac23bc0776ded7c934d84e03d3a406a46 # v1.41.0
     with:
       # Quick on pull requests; full on the schedule, on dispatch and under
       # the `full-ci` label (ci.md, "Quick by default").
@@ -43,7 +43,7 @@ jobs:
 
   # A documentation-only pull request skips shuffle (pedrobtz/zurand#102).
   changes:
-    uses: pedrobtz/r-actions/.github/workflows/changes.yml@4062705ecc3560e85ec8045b30d0e9951fa447a2 # v1.30.0
+    uses: pedrobtz/r-actions/.github/workflows/changes.yml@af3de72ac23bc0776ded7c934d84e03d3a406a46 # v1.41.0
     with:
       name: shuffle
 
