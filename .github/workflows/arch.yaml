@@ -20,4 +20,4 @@ jobs:
     # The pinned defaults cover what this package needs: libuv and kernel
     # headers for fs and ps, the en_US.UTF-8 locale R CMD check sets on
     # Debian, and dependencies read from DESCRIPTION.
-    uses: pedrobtz/r-actions/.github/workflows/arch.yml@4062705ecc3560e85ec8045b30d0e9951fa447a2 # v1.30.0
+    uses: pedrobtz/r-actions/.github/workflows/arch.yml@af3de72ac23bc0776ded7c934d84e03d3a406a46 # v1.41.0
