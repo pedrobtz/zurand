@@ -18,7 +18,7 @@ permissions: read-all
 
 jobs:
   sanitizers:
-    uses: pedrobtz/r-actions/.github/workflows/sanitizers.yml@4062705ecc3560e85ec8045b30d0e9951fa447a2 # v1.30.0
+    uses: pedrobtz/r-actions/.github/workflows/sanitizers.yml@ae59a2805e622e9ba0f3e902bc5f39eba33c6670 # v1.45.1
     with:
       asan: true
       profile: auto
